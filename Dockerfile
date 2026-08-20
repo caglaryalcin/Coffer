@@ -29,6 +29,8 @@ ENV NODE_ENV=production \
 RUN mkdir -p /app/data && chown 1000:1000 /app/data
 
 COPY --from=builder --chown=1000:1000 /app/dist/standalone/ ./
+# Vinext's standalone output omits its React peer dependency.
+COPY --from=builder --chown=1000:1000 /app/node_modules/react ./node_modules/react
 
 USER 1000:1000
 
