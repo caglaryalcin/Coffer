@@ -1,0 +1,53 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Coffer — Your codes. Yours alone.</title>
+  <desc id="desc">Coffer social preview with the product mark and stylized authenticator cards.</desc>
+
+  <rect width="1200" height="630" fill="#F4F3EE"/>
+  <circle cx="1118" cy="-46" r="240" fill="#CA7373" fill-opacity="0.16"/>
+  <circle cx="14" cy="634" r="182" fill="#CA7373" fill-opacity="0.10"/>
+
+  <g transform="translate(72 68) scale(2)">
+    <rect x="2" y="2" width="28" height="28" rx="9" fill="#CA7373"/>
+    <path d="M21.8 11.1C20.45 9.75 18.62 9 16.65 9C12.6 9 9.5 12.02 9.5 16C9.5 19.98 12.6 23 16.65 23C18.62 23 20.45 22.25 21.8 20.9L19.78 18.88C18.94 19.72 17.86 20.15 16.65 20.15C14.3 20.15 12.5 18.4 12.5 16C12.5 13.6 14.3 11.85 16.65 11.85C17.86 11.85 18.94 12.28 19.78 13.12L21.8 11.1Z" fill="#181A1B"/>
+  </g>
+  <text x="154" y="116" fill="#181A1B" font-family="Segoe UI, Arial, sans-serif" font-size="54" font-weight="700" letter-spacing="-2">Coffer</text>
+
+  <text x="72" y="278" fill="#181A1B" font-family="Segoe UI, Arial, sans-serif" font-size="82" font-weight="700" letter-spacing="-4">Your codes.</text>
+  <text x="72" y="370" fill="#181A1B" font-family="Segoe UI, Arial, sans-serif" font-size="82" font-weight="700" letter-spacing="-4">Yours alone.</text>
+  <rect x="76" y="421" width="116" height="8" rx="4" fill="#CA7373"/>
+
+  <g transform="translate(666 38)">
+    <rect width="470" height="554" rx="48" fill="#181A1B"/>
+    <rect x="38" y="36" width="40" height="40" rx="13" fill="#CA7373"/>
+    <path d="M64.75 50.75C62.95 48.95 60.51 48 57.89 48C52.49 48 48.35 52.03 48.35 57.33C48.35 62.64 52.49 66.67 57.89 66.67C60.51 66.67 62.95 65.67 64.75 63.87L62.05 61.17C60.93 62.29 59.49 62.87 57.89 62.87C54.75 62.87 52.35 60.53 52.35 57.33C52.35 54.13 54.75 51.8 57.89 51.8C59.49 51.8 60.93 52.37 62.05 53.49L64.75 50.75Z" fill="#181A1B"/>
+    <rect x="94" y="45" width="116" height="10" rx="5" fill="#F4F3EE"/>
+    <rect x="94" y="63" width="82" height="7" rx="3.5" fill="#F4F3EE" fill-opacity="0.42"/>
+
+    <g transform="translate(32 116)">
+      <rect width="406" height="112" rx="24" fill="#F4F3EE"/>
+      <rect x="24" y="24" width="64" height="64" rx="20" fill="#CA7373" fill-opacity="0.22"/>
+      <circle cx="56" cy="56" r="11" stroke="#CA7373" stroke-width="6" stroke-dasharray="54 16" stroke-linecap="round"/>
+      <text x="110" y="69" fill="#181A1B" font-family="Segoe UI, Arial, sans-serif" font-size="34" font-weight="700" letter-spacing="4">482 193</text>
+      <circle cx="366" cy="56" r="20" stroke="#181A1B" stroke-opacity="0.18" stroke-width="5"/>
+      <path d="M366 36A20 20 0 0 1 384 65" stroke="#CA7373" stroke-width="5" stroke-linecap="round"/>
+    </g>
+
+    <g transform="translate(32 248)">
+      <rect width="406" height="112" rx="24" fill="#F4F3EE" fill-opacity="0.07" stroke="#F4F3EE" stroke-opacity="0.18" stroke-width="2"/>
+      <rect x="24" y="24" width="64" height="64" rx="20" fill="#CA7373"/>
+      <path d="M65.15 44.65C62.63 42.13 59.21 40.73 55.53 40.73C47.97 40.73 42.17 46.37 42.17 53.79C42.17 61.22 47.97 66.86 55.53 66.86C59.21 66.86 62.63 65.46 65.15 62.94L61.38 59.17C59.81 60.74 57.79 61.54 55.53 61.54C51.14 61.54 47.78 58.28 47.78 53.79C47.78 49.31 51.14 46.05 55.53 46.05C57.79 46.05 59.81 46.85 61.38 48.42L65.15 44.65Z" fill="#181A1B"/>
+      <text x="110" y="69" fill="#F4F3EE" font-family="Segoe UI, Arial, sans-serif" font-size="34" font-weight="700" letter-spacing="4">705 244</text>
+      <circle cx="366" cy="56" r="20" stroke="#F4F3EE" stroke-opacity="0.18" stroke-width="5"/>
+      <path d="M366 36A20 20 0 0 1 384 65" stroke="#CA7373" stroke-width="5" stroke-linecap="round"/>
+    </g>
+
+    <g transform="translate(32 380)">
+      <rect width="406" height="126" rx="24" fill="#CA7373"/>
+      <rect x="24" y="31" width="64" height="64" rx="20" fill="#181A1B" fill-opacity="0.12"/>
+      <path d="M64.2 52.8C62.08 50.68 59.21 49.5 56.12 49.5C49.77 49.5 44.9 54.24 44.9 60.47C44.9 66.71 49.77 71.44 56.12 71.44C59.21 71.44 62.08 70.27 64.2 68.15L61.03 64.98C59.71 66.3 58.02 66.97 56.12 66.97C52.43 66.97 49.61 64.23 49.61 60.47C49.61 56.71 52.43 53.97 56.12 53.97C58.02 53.97 59.71 54.65 61.03 55.97L64.2 52.8Z" fill="#181A1B"/>
+      <text x="110" y="76" fill="#181A1B" font-family="Segoe UI, Arial, sans-serif" font-size="34" font-weight="700" letter-spacing="4">318 677</text>
+      <circle cx="366" cy="63" r="20" stroke="#181A1B" stroke-opacity="0.20" stroke-width="5"/>
+      <path d="M366 43A20 20 0 0 1 384 72" stroke="#181A1B" stroke-width="5" stroke-linecap="round"/>
+    </g>
+  </g>
+</svg>

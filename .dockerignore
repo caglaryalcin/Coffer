@@ -1,0 +1,51 @@
+.git
+.gitignore
+.dockerignore
+Dockerfile*
+docker-compose*.yml
+
+node_modules
+.next
+.vinext
+dist
+.wrangler
+outputs
+work
+data
+
+.env*
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+.DS_Store
+*.pem
+
+# Repository-only branding exports and source artwork
+/assets/
+
+# Media files are excluded from the Docker build context by default.
+# Runtime assets under public/ are explicitly restored below.
+**/*.png
+**/*.jpg
+**/*.jpeg
+**/*.gif
+**/*.webp
+**/*.avif
+**/*.bmp
+**/*.tif
+**/*.tiff
+**/*.ico
+**/*.svg
+**/*.psd
+**/*.ai
+**/*.eps
+**/*.sketch
+
+!public/
+!public/**
+
+# Canonical source used by the service-brand generator during prebuild.
+!scripts/brand-assets/azure.svg

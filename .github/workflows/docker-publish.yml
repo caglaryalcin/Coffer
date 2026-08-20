@@ -1,0 +1,117 @@
+name: Publish container images
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release tag to publish (for example, v1.0.0)
+        required: true
+        default: v1.0.0
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-publish-${{ github.event.release.tag_name || inputs.version || github.ref }}
+  cancel-in-progress: false
+
+env:
+  VERSION: ${{ github.event.release.tag_name || inputs.version }}
+  GHCR_IMAGE: ghcr.io/caglaryalcin/coffer
+  DOCKERHUB_IMAGE: caglaryalcin/coffer
+
+jobs:
+  publish:
+    if: github.repository == 'caglaryalcin/Coffer'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Validate publishing configuration
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test -n "$DOCKERHUB_USERNAME"
+          test -n "$DOCKERHUB_TOKEN"
+
+      - name: Check out the release tag
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: refs/tags/${{ env.VERSION }}
+          persist-credentials: false
+
+      - name: Prepare release metadata
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          semver="${VERSION#v}"
+          major="${semver%%.*}"
+          remainder="${semver#*.}"
+          minor_component="${remainder%%.*}"
+          {
+            echo "semver=$semver"
+            echo "minor=$major.$minor_component"
+            echo "major=$major"
+            echo "revision=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push multi-platform images
+        id: publish
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: ./Dockerfile
+          target: runner
+          platforms: linux/amd64,linux/arm64
+          pull: true
+          push: true
+          tags: |
+            ${{ env.GHCR_IMAGE }}:${{ env.VERSION }}
+            ${{ env.GHCR_IMAGE }}:${{ steps.release.outputs.semver }}
+            ${{ env.GHCR_IMAGE }}:${{ steps.release.outputs.minor }}
+            ${{ env.GHCR_IMAGE }}:${{ steps.release.outputs.major }}
+            ${{ env.GHCR_IMAGE }}:latest
+            ${{ env.DOCKERHUB_IMAGE }}:${{ env.VERSION }}
+            ${{ env.DOCKERHUB_IMAGE }}:${{ steps.release.outputs.semver }}
+            ${{ env.DOCKERHUB_IMAGE }}:${{ steps.release.outputs.minor }}
+            ${{ env.DOCKERHUB_IMAGE }}:${{ steps.release.outputs.major }}
+            ${{ env.DOCKERHUB_IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.title=Coffer
+            org.opencontainers.image.description=Self-hosted, multi-user authenticator vault
+            org.opencontainers.image.licenses=GPL-3.0-only
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.release.outputs.semver }}
+            org.opencontainers.image.revision=${{ steps.release.outputs.revision }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true

@@ -1,0 +1,16 @@
+Coffer local service-brand assets
+=================================
+
+Generated from Simple Icons 16.28.0 (CC0-1.0).
+Source metadata and upstream provenance are pinned in node_modules/simple-icons/data/simple-icons.json.
+Simple Icons project: https://simpleicons.org
+
+The following curated compatibility assets use Font Awesome Free Brands 7.3.1:
+amazon, aws, linkedin, microsoft, openai, slack, twitter
+Icons license: CC BY 4.0. Font Awesome project: https://fontawesome.com
+
+The following manually curated local assets are proprietary brand assets and are not
+covered by the Simple Icons, Font Awesome, or Coffer licenses:
+azure (Microsoft Azure): Microsoft; Microsoft Trademark and Brand Guidelines; https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks
+
+Brand names and logos may be trademarks of their respective owners. Inclusion does not imply endorsement.

@@ -1,0 +1,87 @@
+services:
+  app:
+    build:
+      context: .
+      target: runner
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3000"
+      COFFER_DATA_DIR: /app/data
+      COFFER_TRUST_PROXY: "${COFFER_TRUST_PROXY:-0}"
+      COFFER_DEMO_PORT: "${DEMO_PORT:-3001}"
+      COFFER_DEMO_URL: "${COFFER_DEMO_URL:-}"
+    ports:
+      - "${APP_HOST:-127.0.0.1}:${APP_PORT:-3000}:3000"
+    networks:
+      - app_network
+    volumes:
+      - type: bind
+        source: ./data
+        target: /app/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:' + process.env.PORT + '/', { redirect: 'manual' }).then((response) => { if (response.status >= 400) process.exit(1) }).catch(() => process.exit(1))
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    stop_grace_period: 10s
+
+  demo:
+    profiles:
+      - demo
+    build:
+      context: .
+      target: runner
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3000"
+      COFFER_DEMO_MODE: "1"
+    ports:
+      - "${DEMO_HOST:-127.0.0.1}:${DEMO_PORT:-3001}:3000"
+    networks:
+      - demo_network
+    read_only: true
+    tmpfs:
+      - /app/data:size=1m,mode=0700,uid=1000,gid=1000
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          Promise.all([fetch('http://127.0.0.1:' + process.env.PORT + '/', { redirect: 'manual' }), fetch('http://127.0.0.1:' + process.env.PORT + '/demo', { redirect: 'manual' }), fetch('http://127.0.0.1:' + process.env.PORT + '/api/vault')]).then(async ([root, demo, api]) => { const body = await api.json().catch(() => null); if (root.status !== 307 || !String(root.headers.get('location')).endsWith('/demo') || demo.status !== 200 || api.status !== 404 || body?.error?.code !== 'demo_unavailable') process.exit(1) }).catch(() => process.exit(1))
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    stop_grace_period: 10s
+
+networks:
+  app_network:
+  demo_network:
+    internal: true
