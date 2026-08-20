@@ -194,8 +194,7 @@ export default function SignInScreen({
   return (
     <main
       className="transfer-center auth-screen theme-dark"
-      aria-label={isCreateAccount ? undefined : "Coffer sign in"}
-      aria-labelledby={isCreateAccount ? ids.title : undefined}
+      aria-label={isCreateAccount ? "Create Coffer account" : "Coffer sign in"}
     >
       <header className="transfer-heading auth-intro">
         <div className="auth-intro-copy">
@@ -203,12 +202,6 @@ export default function SignInScreen({
             <span className="brand-mark" aria-hidden="true">C</span>
             <span>Coffer</span>
           </div>
-          {isCreateAccount && (
-            <>
-              <h1 id={ids.title}>Create your Coffer account</h1>
-              <p className="subtitle">Create a private encrypted vault for your authenticator accounts.</p>
-            </>
-          )}
         </div>
       </header>
 
