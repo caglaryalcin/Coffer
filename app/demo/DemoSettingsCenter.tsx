@@ -68,18 +68,11 @@ export default function DemoSettingsCenter({
   };
 
   return (
-    <section className="settings-center" aria-labelledby="demo-settings-title">
+    <section className="settings-center" id="demo-settings-root" aria-labelledby="demo-settings-title" tabIndex={-1}>
       <h1 className="visually-hidden" id="demo-settings-title">Demo settings</h1>
       <div className="settings-layout">
-        <nav className="settings-index" aria-label="Demo settings sections">
-          <a href="#demo-profile-settings">Profile</a>
-          <a href="#demo-security-settings">Security</a>
-          <a href="#demo-about-settings">About</a>
-          <a href="#demo-session-settings">Demo session</a>
-        </nav>
-
         <div className="settings-stack">
-          <section className="settings-card" id="demo-profile-settings" aria-labelledby="demo-profile-title">
+          <section className="settings-card" id="demo-profile-settings" aria-labelledby="demo-profile-title" tabIndex={-1}>
             <div className="settings-card-copy">
               <span className="settings-glyph profile-glyph" aria-hidden="true" />
               <div><h2 id="demo-profile-title">Profile</h2><p>Preview the profile shown in this demo.</p></div>
@@ -122,7 +115,7 @@ export default function DemoSettingsCenter({
             </form>
           </section>
 
-          <section className="settings-card" id="demo-security-settings" aria-labelledby="demo-security-title">
+          <section className="settings-card" id="demo-security-settings" aria-labelledby="demo-security-title" tabIndex={-1}>
             <div className="settings-card-copy">
               <span className="settings-glyph security-glyph" aria-hidden="true"><span className="security-glyph-lock" /></span>
               <div>
@@ -174,7 +167,7 @@ export default function DemoSettingsCenter({
             </div>
           </section>
 
-          <section className="settings-about" id="demo-about-settings" aria-labelledby="demo-about-title">
+          <section className="settings-about" id="demo-about-settings" aria-labelledby="demo-about-title" tabIndex={-1}>
             <div className="settings-about-panel">
               <div className="settings-card-copy">
                 <span className="settings-glyph about-glyph" aria-hidden="true" />
@@ -194,7 +187,7 @@ export default function DemoSettingsCenter({
             </div>
           </section>
 
-          <section className="settings-card session-card" id="demo-session-settings" aria-labelledby="demo-session-title">
+          <section className="settings-card session-card" id="demo-session-settings" aria-labelledby="demo-session-title" tabIndex={-1}>
             <div className="settings-card-copy">
               <span className="settings-glyph session-glyph" aria-hidden="true" />
               <div>

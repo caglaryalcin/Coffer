@@ -210,19 +210,11 @@ export default function SettingsCenter({
   };
 
   return (
-    <section className="settings-center" aria-label="Settings">
+    <section className="settings-center" id="settings-root" aria-label="Settings" tabIndex={-1}>
       <div className="settings-layout">
-        <nav className="settings-index" aria-label="Settings sections">
-          <a href="#profile-settings">Profile</a>
-          <a href="#security-settings">Security</a>
-          <a href="#about-settings">About</a>
-          <a href="#session-settings">Vault session</a>
-          <a href="#delete-account-settings">Delete account</a>
-        </nav>
-
         <div className="settings-stack">
-          <section className="settings-card" id="profile-settings">
-            <div className="settings-card-copy"><span className="settings-glyph profile-glyph" /><div><h2>Profile</h2></div></div>
+          <section className="settings-card" id="profile-settings" aria-labelledby="profile-settings-title" tabIndex={-1}>
+            <div className="settings-card-copy"><span className="settings-glyph profile-glyph" /><div><h2 id="profile-settings-title">Profile</h2></div></div>
             <form className="settings-form" onSubmit={(event) => void saveProfile(event)}>
               <div className="profile-photo-control" aria-busy={avatarBusy}>
                 <span className={`profile-photo-preview${profile.avatarDataUrl ? " has-photo" : ""}`} aria-hidden="true">
@@ -265,8 +257,8 @@ export default function SettingsCenter({
             </form>
           </section>
 
-          <section className="settings-card" id="security-settings">
-            <div className="settings-card-copy"><span className="settings-glyph security-glyph" aria-hidden="true"><span className="security-glyph-lock" /></span><div><h2>Security</h2><p>Control when the vault locks and how the clipboard behaves.</p></div></div>
+          <section className="settings-card" id="security-settings" aria-labelledby="security-settings-title" tabIndex={-1}>
+            <div className="settings-card-copy"><span className="settings-glyph security-glyph" aria-hidden="true"><span className="security-glyph-lock" /></span><div><h2 id="security-settings-title">Security</h2><p>Control when the vault locks and how the clipboard behaves.</p></div></div>
             <div className="settings-control-row">
               <div><strong>Automatic lock</strong><span>Lock after continuous keyboard, pointer, or touch inactivity.</span></div>
               <select aria-label="Automatic lock delay" value={autoLockMinutes} onChange={(event) => onAutoLockMinutesChange(Number(event.target.value))}>
@@ -308,13 +300,13 @@ export default function SettingsCenter({
             </div>
           </section>
 
-          <section className="settings-card session-card" id="session-settings">
-            <div className="settings-card-copy"><span className="settings-glyph session-glyph" /><div><h2>Vault session</h2><p>Encrypted vault data is persisted on your self-hosted server and remains available after refresh.</p></div></div>
+          <section className="settings-card session-card" id="session-settings" aria-labelledby="session-settings-title" tabIndex={-1}>
+            <div className="settings-card-copy"><span className="settings-glyph session-glyph" /><div><h2 id="session-settings-title">Vault session</h2><p>Encrypted vault data is persisted on your self-hosted server and remains available after refresh.</p></div></div>
             <button className="signout-button" onClick={onSignOut}>Lock and sign out</button>
           </section>
 
-          <section className="settings-card account-delete-card" id="delete-account-settings">
-            <div className="settings-card-copy"><span className="settings-glyph account-delete-glyph" aria-hidden="true" /><div><h2>Delete account</h2><p>Permanently remove this user and its encrypted vault from Coffer server storage.</p></div></div>
+          <section className="settings-card account-delete-card" id="delete-account-settings" aria-labelledby="delete-account-settings-title" tabIndex={-1}>
+            <div className="settings-card-copy"><span className="settings-glyph account-delete-glyph" aria-hidden="true" /><div><h2 id="delete-account-settings-title">Delete account</h2><p>Permanently remove this user and its encrypted vault from Coffer server storage.</p></div></div>
             {!deleteExpanded ? (
               <button
                 ref={deleteToggleRef}

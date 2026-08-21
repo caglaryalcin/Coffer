@@ -24,6 +24,7 @@ import type {
 } from "../../lib/vault-model";
 import CardViewMenu, { type CardView } from "../CardViewMenu";
 import OverflowingIdentity from "../OverflowingIdentity";
+import ProfileMenu from "../ProfileMenu";
 import ServiceLogo, { isServiceBrandId } from "../ServiceLogo";
 import ThemeToggle from "../ThemeToggle";
 import DemoSettingsCenter from "./DemoSettingsCenter";
@@ -49,15 +50,10 @@ const FALLBACK_GROUP_CUSTOMIZATION: Pick<VaultGroupCustomization, "icon" | "colo
   color: "rose",
 };
 
-function profileInitials(name: string) {
-  return name
-    .trim()
-    .split(/\s+/u)
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase() || "CO";
-}
+const DEMO_SETTINGS_MENU_ITEMS = [
+  { id: "demo-profile-settings", label: "Profile" },
+  { id: "demo-settings-root", label: "Settings" },
+] as const;
 
 function accountConfigurationKey(account: VaultAccount) {
   let hash = 2_166_136_261;
@@ -237,6 +233,21 @@ export default function DemoVaultApp() {
     setView("all");
     setGroup("All");
     setAccountMenuId(null);
+  };
+
+  const openDemoSettingsSection = (sectionId: string) => {
+    setView("settings");
+    setGroup("All");
+    setAccountMenuId(null);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const section = document.getElementById(sectionId);
+        if (!section) return;
+        section.focus({ preventScroll: true });
+        const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        section.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+      });
+    });
   };
 
   const toggleFavorite = (accountId: string) => {
@@ -431,11 +442,6 @@ export default function DemoVaultApp() {
           })}
         </nav>
 
-        <button type="button" className="profile-row demo-profile-note" title="Open demo profile settings" onClick={() => { setView("settings"); setGroup("All"); setAccountMenuId(null); }}>
-          <span className="avatar">{profileInitials(vault.profile.name)}</span>
-          <span className="profile-copy"><strong>{vault.profile.name}</strong><small>{vault.profile.email}</small></span>
-          <span aria-hidden="true">Demo</span>
-        </button>
       </aside>
 
       <section className="workspace" id="demo-codes">
@@ -455,6 +461,13 @@ export default function DemoVaultApp() {
           <div className="top-actions">
             <span className="sync-state demo-badge" role="status"><i />Demo changes are not saved</span>
             <ThemeToggle theme={theme} onToggle={() => updateDemoSettings({ theme: theme === "dark" ? "light" : "dark" })} />
+            <ProfileMenu
+              profile={vault.profile}
+              items={DEMO_SETTINGS_MENU_ITEMS}
+              onOpen={() => setAccountMenuId(null)}
+              onSelect={openDemoSettingsSection}
+              title="Open demo profile menu"
+            />
           </div>
         </header>
 

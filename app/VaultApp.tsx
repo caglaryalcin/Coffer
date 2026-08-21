@@ -7,6 +7,7 @@ import BulkLogoPicker, { retainedAccountIconBytes, type BulkAccountLogoPatch } f
 import CardViewMenu, { CARD_VIEW_STORAGE_KEY, parseCardView, readCardViewPreference, writeCardViewPreference, type CardView } from "./CardViewMenu";
 import GroupCustomizationDialog from "./GroupCustomizationDialog";
 import OverflowingIdentity from "./OverflowingIdentity";
+import ProfileMenu from "./ProfileMenu";
 import QrScanner from "./QrScanner";
 import ServiceLogo, { COFFER_INITIALS_BRAND_ID, isServiceBrandId, selfhstServiceBrandOptions, serviceBrandById, serviceBrandFor, serviceBrandIds } from "./ServiceLogo";
 import SidebarFooter from "./SidebarFooter";
@@ -202,9 +203,10 @@ function initials(service: string) {
   return (words.length > 1 ? words.map((word) => word[0]).join("") : service.slice(0, 2)).slice(0, 3).toUpperCase();
 }
 
-function profileInitials(name: string) {
-  return name.trim().split(/\s+/u).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "CO";
-}
+const SETTINGS_MENU_ITEMS = [
+  { id: "profile-settings", label: "Profile" },
+  { id: "settings-root", label: "Settings" },
+] as const;
 
 function totpConfigKey(account: Account) {
   let hash = 2_166_136_261;
@@ -2250,6 +2252,21 @@ export default function VaultApp() {
     setBulkLogoReturnFocusTo(null);
   };
 
+  const openSettingsSection = (sectionId: string) => {
+    exitSelectionMode();
+    setAccountMenuId(null);
+    setView("settings");
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const section = document.getElementById(sectionId);
+        if (!section) return;
+        section.focus({ preventScroll: true });
+        const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        section.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+      });
+    });
+  };
+
   const toggleAccountSelection = (id: string) => {
     setSelectedAccountIds((current) => {
       const next = new Set(current);
@@ -3174,30 +3191,8 @@ export default function VaultApp() {
           })}
         </nav>
 
-        <button type="button" className="profile-row" onClick={() => { exitSelectionMode(); setView("settings"); }} aria-label="Open profile and settings" title="Open profile and settings">
-          <span className={`avatar${profile.avatarDataUrl ? " has-photo" : ""}`}>
-            {profile.avatarDataUrl
-              ? <img src={profile.avatarDataUrl} alt="" /> // eslint-disable-line @next/next/no-img-element -- encrypted data URLs cannot use the image optimizer
-              : profileInitials(profile.name)}
-          </span>
-          <span className="profile-copy"><strong>{profile.name}</strong><small>{profile.email}</small></span>
-          <span aria-hidden="true">•••</span>
-        </button>
-
         <SidebarFooter
-          onOpenAbout={() => {
-            exitSelectionMode();
-            setView("settings");
-            window.requestAnimationFrame(() => {
-              window.requestAnimationFrame(() => {
-                const about = document.getElementById("about-settings");
-                if (!about) return;
-                about.focus({ preventScroll: true });
-                const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-                about.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
-              });
-            });
-          }}
+          onOpenAbout={() => openSettingsSection("about-settings")}
         />
       </aside>
 
@@ -3223,6 +3218,12 @@ export default function VaultApp() {
               aria-label="Lock vault"
             ><span /></button>
             <ThemeToggle theme={theme} onToggle={() => updateSettings({ theme: theme === "dark" ? "light" : "dark" })} />
+            <ProfileMenu
+              profile={profile}
+              items={SETTINGS_MENU_ITEMS}
+              onOpen={() => setAccountMenuId(null)}
+              onSelect={openSettingsSection}
+            />
           </div>
         </header>
 
