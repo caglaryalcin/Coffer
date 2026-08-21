@@ -1,0 +1,16 @@
+selfh.st/icons SVG collection
+
+Source: https://github.com/selfhst/icons
+Pinned commit: 948e3aa28d3110ee23957473a85431650e10e778
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+License URL: https://creativecommons.org/licenses/by/4.0/
+Upstream license text: selfhst-LICENSE.txt
+
+Coffer includes 7146 SVG files from 2445 icon families.
+Names and logos remain the property or trademarks of their respective owners. Their inclusion does not imply affiliation with or endorsement of Coffer.
+
+Coffer modification:
+- Upstream filenames are prefixed with "selfhst-" to prevent collisions with Coffer's existing icon catalog.
+- selfhst-paypal-light.svg: removed one empty self-closing Adobe Illustrator foreignObject element during passive-SVG sanitization. No visible artwork was changed.
+
+All other SVG files are copied byte-for-byte from the pinned upstream commit.

@@ -288,7 +288,7 @@ export default function SettingsCenter({
             <div className="settings-inline-actions"><button type="button" onClick={onLockVault}>Lock vault now</button></div>
           </section>
 
-          <section className="settings-about" id="about-settings" aria-labelledby="about-title">
+          <section className="settings-about" id="about-settings" aria-labelledby="about-title" tabIndex={-1}>
             <div className="settings-about-panel">
               <div className="settings-card-copy"><span className="settings-glyph about-glyph" aria-hidden="true" /><div><h2 id="about-title">About</h2><p className="settings-about-description">Coffer is a multi-user, self-hosted authenticator vault for encrypted TOTP accounts, QR imports, local service logos, groups, and portable backups.</p></div></div>
               <p className="settings-about-stack"><strong>Stack:</strong> React 19 + Vinext + Vite 8 + TypeScript 5 + Tailwind CSS 4, Web Crypto (AES-256-GCM and HMAC-SHA-256) + Argon2id, Node.js 22, and Docker.</p>
@@ -297,6 +297,12 @@ export default function SettingsCenter({
                 <a className="settings-about-link" href="https://github.com/caglaryalcin/Coffer" target="_blank" rel="noopener noreferrer" aria-label="Coffer repository by caglaryalcin on GitHub (opens in a new tab)">
                   <span className="settings-about-github-icon" aria-hidden="true" />
                   <span>caglaryalcin</span>
+                </a>
+              </p>
+              <p className="settings-about-credits">
+                <strong>Icons:</strong>
+                <a className="settings-about-link" href="/brands/LICENSES.txt" target="_blank" rel="noopener noreferrer" aria-label="Open third-party icon credits in a new tab">
+                  Third-party icon credits
                 </a>
               </p>
             </div>

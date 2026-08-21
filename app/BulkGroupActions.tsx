@@ -8,6 +8,7 @@ export type BulkGroupActionsProps = {
   visibleCount: number;
   allVisibleSelected: boolean;
   allSelectedFavorited: boolean;
+  showGroupDragHint?: boolean;
   groups: readonly string[];
   disabled?: boolean;
   onBeginSelection: () => void;
@@ -16,6 +17,7 @@ export type BulkGroupActionsProps = {
   onExitSelection: () => void;
   onSetFavorite: (favorite: boolean) => boolean | void;
   onArchive: () => boolean | void;
+  onChangeLogo: (trigger: HTMLButtonElement) => void;
   onMoveToGroup: (groupName: string) => boolean | void;
   onCreateGroupAndMove: (groupName: string) => boolean | void;
 };
@@ -160,6 +162,7 @@ export default function BulkGroupActions({
   visibleCount,
   allVisibleSelected,
   allSelectedFavorited,
+  showGroupDragHint = false,
   groups,
   disabled = false,
   onBeginSelection,
@@ -168,6 +171,7 @@ export default function BulkGroupActions({
   onExitSelection,
   onSetFavorite,
   onArchive,
+  onChangeLogo,
   onMoveToGroup,
   onCreateGroupAndMove,
 }: BulkGroupActionsProps) {
@@ -225,9 +229,12 @@ export default function BulkGroupActions({
   return (
     <section className="bulk-group-actions" aria-label="Account selection actions">
       <div className="bulk-action-bar">
-        <div className="bulk-selection-summary" aria-live="polite" aria-atomic="true">
-          <strong>{selectedCount} selected</strong>
-          <span>{visibleCount} visible</span>
+        <div className="bulk-selection-copy">
+          <div className="bulk-selection-summary" aria-live="polite" aria-atomic="true">
+            <strong>{selectedCount} selected</strong>
+            <span>{visibleCount} visible</span>
+          </div>
+          {showGroupDragHint && selectedCount > 0 && <span className="bulk-drag-hint">Drag a selected card to a sidebar group, or use Move to group.</span>}
         </div>
 
         <div className="bulk-action-buttons">
@@ -254,6 +261,14 @@ export default function BulkGroupActions({
             disabled={moveDisabled}
           >
             {allSelectedFavorited ? "Remove from favorites" : "Add to favorites"}
+          </button>
+          <button
+            type="button"
+            className="bulk-secondary-action"
+            onClick={(event) => onChangeLogo(event.currentTarget)}
+            disabled={moveDisabled}
+          >
+            Change logo
           </button>
           <button
             type="button"

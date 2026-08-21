@@ -1,13 +1,15 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import AccountEditor, { type AccountEditorCodePreview } from "./AccountEditor";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent } from "react";
+import AccountEditor, { type AccountEditorCodePreview, type AccountIconOption } from "./AccountEditor";
 import BulkGroupActions, { AccountSelectionIndicator, ArchiveBulkActions, normalizeGroupName } from "./BulkGroupActions";
+import BulkLogoPicker, { retainedAccountIconBytes, type BulkAccountLogoPatch } from "./BulkLogoPicker";
 import CardViewMenu, { CARD_VIEW_STORAGE_KEY, parseCardView, readCardViewPreference, writeCardViewPreference, type CardView } from "./CardViewMenu";
 import GroupCustomizationDialog from "./GroupCustomizationDialog";
 import OverflowingIdentity from "./OverflowingIdentity";
 import QrScanner from "./QrScanner";
-import ServiceLogo, { isServiceBrandId, serviceBrandById, serviceBrandIds } from "./ServiceLogo";
+import ServiceLogo, { COFFER_INITIALS_BRAND_ID, isServiceBrandId, selfhstServiceBrandOptions, serviceBrandById, serviceBrandIds } from "./ServiceLogo";
+import SidebarFooter from "./SidebarFooter";
 import SettingsCenter, { type UserProfile, type UserProfilePatch } from "./SettingsCenter";
 import SignInScreen from "./SignInScreen";
 import ThemeToggle from "./ThemeToggle";
@@ -15,7 +17,7 @@ import TransferCenter, { type ImportDecision } from "./TransferCenter";
 import { formatCode, generateTotp, isTotpExpiring, isValidBase32, normalizeSecret, parseOtpAuthUri, totpWindow, type TotpAlgorithm } from "../lib/totp";
 import { claimLegacyVault, deleteVaultAccount, getVaultBootstrap, identifyVault, loginVault, logoutVault, saveVault, setupVault, VAULT_API_TIMEOUT_MS, VaultApiError } from "../lib/vault-api";
 import { createAuthProof, createEncryptedVault, decryptVaultPayload, encryptVaultPayload, unlockVaultHeader, VaultCryptoError, type EncryptedVaultHeader, type VaultPayloadCipher, type VaultRuntime } from "../lib/vault-crypto";
-import { createEmptyVault, parsePersistedVault, withVaultUpdate, type PersistedVault, type VaultAccount, type VaultGroupColor, type VaultGroupCustomization, type VaultGroupIcon, type VaultTheme } from "../lib/vault-model";
+import { createEmptyVault, MAX_GROUP_CUSTOMIZATIONS, parsePersistedVault, withVaultUpdate, type PersistedVault, type VaultAccount, type VaultGroupColor, type VaultGroupCustomization, type VaultGroupIcon, type VaultTheme } from "../lib/vault-model";
 import { classifyVaultOutbox, clearVaultOutbox, createVaultOutboxRecord, readVaultOutbox, writeVaultOutbox, type VaultOutboxRecord } from "../lib/vault-outbox";
 import { clearVaultResumeSession, readVaultResumeSession, saveVaultResumeSession, touchVaultResumeSession } from "../lib/vault-resume";
 import { remainingAutoLockMs } from "../lib/auto-lock";
@@ -72,12 +74,42 @@ type ReadyVaultSessionPublication = {
 };
 const EMPTY_ACCOUNTS: Account[] = [];
 const ADD_ACCOUNT_PALETTE: Account["color"][] = ["violet", "green", "blue", "orange"];
-const ACCOUNT_ICON_OPTIONS = serviceBrandIds
-  .flatMap((id) => {
-    const brand = serviceBrandById(id);
-    return brand ? [{ id, label: brand.title }] : [];
-  })
-  .sort((left, right) => left.label.localeCompare(right.label, "en"));
+const CATALOG_ACCOUNT_ICON_OPTIONS = serviceBrandIds.flatMap((id) => {
+  const brand = serviceBrandById(id);
+  if (!brand) return [];
+  return [{
+    id,
+    label: brand.title,
+    description: brand.variantLabel,
+    familyId: brand.familyId,
+    searchTerms: brand.searchTerms,
+    variantOrder: brand.variantOrder,
+  }];
+}).sort((left, right) => (
+  left.label.localeCompare(right.label, "en") || left.variantOrder - right.variantOrder
+));
+const ACCOUNT_ICON_LABEL_COUNTS = new Map<string, number>();
+for (const option of CATALOG_ACCOUNT_ICON_OPTIONS) {
+  const key = option.label.normalize("NFKC").trim().toLocaleLowerCase("en");
+  ACCOUNT_ICON_LABEL_COUNTS.set(key, (ACCOUNT_ICON_LABEL_COUNTS.get(key) ?? 0) + 1);
+}
+const ACCOUNT_ICON_OPTIONS = [
+  {
+    id: COFFER_INITIALS_BRAND_ID,
+    label: "Initials",
+    description: "Colored letter tile",
+    familyId: COFFER_INITIALS_BRAND_ID,
+    searchTerms: ["initials", "letters", "colored tile"],
+    variantOrder: 0,
+  },
+  ...CATALOG_ACCOUNT_ICON_OPTIONS.map((option) => {
+    const key = option.label.normalize("NFKC").trim().toLocaleLowerCase("en");
+    return ACCOUNT_ICON_LABEL_COUNTS.get(key) === 1
+      ? option
+      : { ...option, description: `${option.description} · ${option.id}` };
+  }),
+];
+const SELECTED_ACCOUNT_DRAG_TYPE = "application/x-coffer-selected-accounts";
 const LOCK_SAVE_GRACE_MS = VAULT_API_TIMEOUT_MS + 750;
 const RESUME_ACTIVITY_WRITE_INTERVAL_MS = 1_000;
 const ACCOUNT_EVENT_CHANNEL_NAME = "coffer-account-events-v1";
@@ -105,6 +137,7 @@ async function settleWithin<T>(
 }
 
 const EMPTY_GROUP_CUSTOMIZATIONS: VaultGroupCustomization[] = [];
+const NEW_GROUP_CUSTOMIZATION: VaultGroupCustomization = { name: "", icon: "folder", color: "rose" };
 const DEFAULT_GROUP_ICONS: readonly VaultGroupIcon[] = ["dot", "folder", "briefcase", "person", "shield", "star", "home", "code"];
 const DEFAULT_GROUP_COLORS: readonly VaultGroupColor[] = ["rose", "amber", "lime", "emerald", "sky", "blue", "violet", "slate"];
 const COMMON_GROUP_STYLES: Readonly<Record<string, Pick<VaultGroupCustomization, "icon" | "color">>> = {
@@ -193,7 +226,12 @@ export default function VaultApp() {
   const [accountEditorReturnFocusTo, setAccountEditorReturnFocusTo] = useState<HTMLButtonElement | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedAccountIds, setSelectedAccountIds] = useState<Set<string>>(() => new Set());
+  const [draggingSelectedAccounts, setDraggingSelectedAccounts] = useState(false);
+  const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
+  const [bulkLogoOpen, setBulkLogoOpen] = useState(false);
+  const [bulkLogoReturnFocusTo, setBulkLogoReturnFocusTo] = useState<HTMLButtonElement | null>(null);
   const [customizingGroup, setCustomizingGroup] = useState<string | null>(null);
+  const [creatingGroup, setCreatingGroup] = useState(false);
   const [groupCustomizationReturnFocusTo, setGroupCustomizationReturnFocusTo] = useState<HTMLElement | null>(null);
   const [setupLink, setSetupLink] = useState("");
   const [service, setService] = useState("");
@@ -206,6 +244,7 @@ export default function VaultApp() {
   const [formError, setFormError] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
   const addDialogRef = useRef<HTMLElement>(null);
+  const manualServiceInputRef = useRef<HTMLInputElement>(null);
   const addTriggerRef = useRef<HTMLElement | null>(null);
   const addOriginViewRef = useRef<View>("all");
   const runtimeRef = useRef<VaultRuntime | null>(null);
@@ -248,9 +287,38 @@ export default function VaultApp() {
   const lockWhenHidden = vault?.settings.lockWhenHidden ?? false;
   const clearClipboard = vault?.settings.clearClipboard ?? true;
   const theme: VaultTheme = vault?.settings.theme ?? "dark";
+  const accountIconOptions = useMemo<readonly AccountIconOption[]>(() => {
+    if (!editingAccountId && !bulkLogoOpen) return ACCOUNT_ICON_OPTIONS;
+    return [
+      ...ACCOUNT_ICON_OPTIONS,
+      ...selfhstServiceBrandOptions().map((option) => ({
+        id: option.id,
+        label: option.title,
+        description: option.variantLabel,
+        familyId: option.familyId,
+        searchTerms: option.searchTerms,
+        variantOrder: option.variantOrder,
+      })),
+    ];
+  }, [bulkLogoOpen, editingAccountId]);
 
-  const groups = useMemo(() => Array.from(new Set(accounts.filter((account) => !account.archived).map((account) => account.group))), [accounts]);
-  const entryGroups = useMemo(() => Array.from(new Set(["Personal", "Work", "Finance", ...groups])), [groups]);
+  const groups = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const account of accounts) {
+      if (!account.archived) names.set(groupKey(account.group), account.group);
+    }
+    for (const customization of groupCustomizations) {
+      names.set(groupKey(customization.name), customization.name);
+    }
+    return Array.from(names.values());
+  }, [accounts, groupCustomizations]);
+  const entryGroups = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const name of ["Personal", "Work", "Finance", ...groups]) {
+      names.set(groupKey(name), name);
+    }
+    return Array.from(names.values());
+  }, [groups]);
   const groupCustomizationMap = useMemo(
     () => new Map(groupCustomizations.map((customization) => [groupKey(customization.name), customization])),
     [groupCustomizations],
@@ -258,7 +326,9 @@ export default function VaultApp() {
   const customizationForGroup = useCallback((name: string) => (
     groupCustomizationMap.get(groupKey(name)) ?? defaultGroupCustomization(name)
   ), [groupCustomizationMap]);
-  const activeGroupCustomization = customizingGroup ? customizationForGroup(customizingGroup) : null;
+  const activeGroupCustomization = creatingGroup
+    ? NEW_GROUP_CUSTOMIZATION
+    : customizingGroup ? customizationForGroup(customizingGroup) : null;
   const editingCodePreview = editingAccount && signedIn
     ? accountCodePreview(editingAccount, tick, codePairs[editingAccount.id])
     : undefined;
@@ -1255,7 +1325,12 @@ export default function VaultApp() {
     setAccountEditorReturnFocusTo(null);
     setSelectionMode(false);
     setSelectedAccountIds(new Set());
+    setDraggingSelectedAccounts(false);
+    setDragOverGroup(null);
+    setBulkLogoOpen(false);
+    setBulkLogoReturnFocusTo(null);
     setCustomizingGroup(null);
+    setCreatingGroup(false);
     setGroupCustomizationReturnFocusTo(null);
     setSetupLink("");
     setService("");
@@ -1430,6 +1505,10 @@ export default function VaultApp() {
     setCodePairs({});
     setSelectionMode(false);
     setSelectedAccountIds(new Set());
+    setDraggingSelectedAccounts(false);
+    setDragOverGroup(null);
+    setBulkLogoOpen(false);
+    setBulkLogoReturnFocusTo(null);
     for (const timeout of clipboardClearTimersRef.current) window.clearTimeout(timeout);
     clipboardClearTimersRef.current.clear();
     if (vaultRef.current?.settings.clearClipboard) {
@@ -1453,6 +1532,7 @@ export default function VaultApp() {
     setEditingAccountId(null);
     setAccountEditorReturnFocusTo(null);
     setCustomizingGroup(null);
+    setCreatingGroup(false);
     setGroupCustomizationReturnFocusTo(null);
 
     const ownsLockTransition = () =>
@@ -1633,9 +1713,16 @@ export default function VaultApp() {
       savedVersionRef.current = 0;
       vaultRef.current = conflict.serverVault;
       setVault(conflict.serverVault);
-      setGroup((currentGroup) => currentGroup !== "All" && !conflict.serverVault.accounts.some(
-        (account) => !account.archived && account.group === currentGroup,
-      ) ? "All" : currentGroup);
+      setGroup((currentGroup) => {
+        if (currentGroup === "All") return currentGroup;
+        const currentGroupKey = groupKey(currentGroup);
+        const remainsAvailable = conflict.serverVault.accounts.some(
+          (account) => !account.archived && groupKey(account.group) === currentGroupKey,
+        ) || conflict.serverVault.groupCustomizations.some(
+          (customization) => groupKey(customization.name) === currentGroupKey,
+        );
+        return remainsAvailable ? currentGroup : "All";
+      });
       setSaveConflict(null);
       setSaveStatus("saved");
       setSaveError(null);
@@ -2079,13 +2166,24 @@ export default function VaultApp() {
     };
   }, [addOpen]);
 
-  const counts = useMemo(() => Object.fromEntries(groups.map((name) => [name, accounts.filter((account) => account.group === name && !account.archived).length])), [accounts, groups]);
+  useEffect(() => {
+    if (!addOpen || addMode !== "manual") return;
+    const animationFrame = window.requestAnimationFrame(() => {
+      manualServiceInputRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [addMode, addOpen]);
+
+  const counts = useMemo(() => Object.fromEntries(groups.map((name) => {
+    const nameKey = groupKey(name);
+    return [name, accounts.filter((account) => !account.archived && groupKey(account.group) === nameKey).length];
+  })), [accounts, groups]);
 
   const visibleAccounts = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return accounts.filter((account) => {
       const matchesView = view === "favorites" ? account.favorite && !account.archived : view === "archive" ? account.archived : !account.archived;
-      const matchesGroup = group === "All" || account.group === group;
+      const matchesGroup = group === "All" || groupKey(account.group) === groupKey(group);
       const matchesQuery = !normalizedQuery || `${account.service} ${account.identity} ${account.group}`.toLowerCase().includes(normalizedQuery);
       return matchesView && matchesGroup && matchesQuery;
     });
@@ -2106,10 +2204,16 @@ export default function VaultApp() {
   const allSelectedFavorited = selectedVisibleAccountIds.size > 0 && accounts.every(
     (account) => !selectedVisibleAccountIds.has(account.id) || account.favorite,
   );
+  const selectedLogoPreviewAccount = accounts.find((account) => selectedVisibleAccountIds.has(account.id)) ?? null;
+  const retainedCustomLogoBytes = retainedAccountIconBytes(accounts, selectedVisibleAccountIds);
 
   const exitSelectionMode = () => {
     setSelectionMode(false);
     setSelectedAccountIds(new Set());
+    setDraggingSelectedAccounts(false);
+    setDragOverGroup(null);
+    setBulkLogoOpen(false);
+    setBulkLogoReturnFocusTo(null);
   };
 
   const toggleAccountSelection = (id: string) => {
@@ -2136,16 +2240,38 @@ export default function VaultApp() {
       return;
     }
     setGroupCustomizationReturnFocusTo(trigger);
+    setCreatingGroup(false);
     setCustomizingGroup(name);
+  };
+
+  const beginGroupCreation = (trigger: HTMLElement) => {
+    const blockReason = mutationBlockReason();
+    if (blockReason === "conflict" || blockReason === "conflict-pending") {
+      setToast("Resolve the encrypted save conflict before creating groups.");
+      return;
+    }
+    if (blockReason) {
+      setToast("Unlock your vault before creating groups.");
+      return;
+    }
+    if (groupCustomizations.length >= MAX_GROUP_CUSTOMIZATIONS) {
+      setToast("The vault has reached the maximum number of saved groups.");
+      return;
+    }
+    setAccountMenuId(null);
+    setGroupCustomizationReturnFocusTo(trigger);
+    setCustomizingGroup(null);
+    setCreatingGroup(true);
   };
 
   const closeGroupCustomization = () => {
     setCustomizingGroup(null);
+    setCreatingGroup(false);
     setGroupCustomizationReturnFocusTo(null);
   };
 
   const saveGroupCustomization = (nextCustomization: VaultGroupCustomization) => {
-    if (!customizingGroup) return false;
+    if (!creatingGroup && !customizingGroup) return false;
     const blockReason = mutationBlockReason();
     if (blockReason === "conflict" || blockReason === "conflict-pending") {
       setToast("Resolve the encrypted save conflict before customizing groups.");
@@ -2162,26 +2288,69 @@ export default function VaultApp() {
       setToast("Use a group name between 1 and 48 characters. “All” is reserved.");
       return false;
     }
-    const duplicate = groups.some(
-      (name) => name !== customizingGroup && groupKey(name) === normalizedKey,
-    );
+    const previousName = customizingGroup;
+    const previousKey = previousName ? groupKey(previousName) : null;
+    const duplicate = groups.some((name) => (
+      groupKey(name) === normalizedKey && (creatingGroup || groupKey(name) !== previousKey)
+    ));
     if (duplicate) {
       setToast("That group already exists.");
       return false;
     }
 
-    const previousName = customizingGroup;
-    const saved = commitVault((current) => {
-      if (!current.accounts.some((account) => account.group === previousName)) {
-        throw new Error("This group is no longer available.");
+    const currentVault = vaultRef.current;
+    if (!currentVault) return false;
+    const currentNameExists = (nameKey: string) => (
+      currentVault.accounts.some((account) => groupKey(account.group) === nameKey) ||
+      currentVault.groupCustomizations.some((customization) => groupKey(customization.name) === nameKey)
+    );
+
+    if (creatingGroup) {
+      if (currentVault.groupCustomizations.length >= MAX_GROUP_CUSTOMIZATIONS) {
+        setToast("The vault has reached the maximum number of saved groups.");
+        return false;
       }
-      const previousKey = groupKey(previousName);
+      if (currentNameExists(normalizedKey)) {
+        setToast("That group already exists.");
+        return false;
+      }
+      const saved = commitVault((current) => withVaultUpdate(current, {
+        groupCustomizations: [...current.groupCustomizations, {
+          name: normalized,
+          icon: nextCustomization.icon,
+          color: nextCustomization.color,
+        }],
+      }));
+      if (!saved) return false;
+
+      closeGroupCustomization();
+      setView("all");
+      setGroup(normalized);
+      window.requestAnimationFrame(() => {
+        const nextButton = Array.from(document.querySelectorAll<HTMLButtonElement>(".group-nav-main"))
+          .find((button) => button.dataset.groupName === normalized);
+        nextButton?.focus({ preventScroll: true });
+      });
+      setToast(`${normalized} group created.`);
+      return true;
+    }
+
+    if (!previousName || !previousKey || !currentNameExists(previousKey)) {
+      setToast("This group is no longer available.");
+      return false;
+    }
+    if (normalizedKey !== previousKey && currentNameExists(normalizedKey)) {
+      setToast("That group already exists.");
+      return false;
+    }
+
+    const saved = commitVault((current) => {
       const nextGroupCustomizations = current.groupCustomizations.filter((customization) => (
         groupKey(customization.name) !== previousKey && groupKey(customization.name) !== normalizedKey
       ));
       return withVaultUpdate(current, {
         accounts: current.accounts.map((account) => (
-          account.group === previousName ? { ...account, group: normalized } : account
+          groupKey(account.group) === previousKey ? { ...account, group: normalized } : account
         )),
         groupCustomizations: [...nextGroupCustomizations, {
           name: normalized,
@@ -2192,7 +2361,7 @@ export default function VaultApp() {
     });
     if (!saved) return false;
 
-    if (group === previousName) setGroup(normalized);
+    if (groupKey(group) === previousKey) setGroup(normalized);
     closeGroupCustomization();
     if (normalized !== previousName) {
       window.requestAnimationFrame(() => {
@@ -2221,14 +2390,12 @@ export default function VaultApp() {
     }
 
     const normalized = normalizeGroupName(requestedGroup);
-    const normalizedKey = normalized.toLocaleLowerCase("en");
+    const normalizedKey = groupKey(normalized);
     if (!normalized || normalized.length > 48 || normalizedKey === "all") {
       setToast("Use a group name between 1 and 48 characters. “All” is reserved.");
       return false;
     }
-    const existing = groups.find(
-      (name) => normalizeGroupName(name).toLocaleLowerCase("en") === normalizedKey,
-    );
+    const existing = groups.find((name) => groupKey(name) === normalizedKey);
     if (createGroup && existing) {
       setToast("That group already exists. Choose it from the existing groups list.");
       return false;
@@ -2239,18 +2406,145 @@ export default function VaultApp() {
     }
 
     const targetGroup = existing ?? normalized;
+    const targetGroupKey = groupKey(targetGroup);
+    const currentVault = vaultRef.current;
+    if (!currentVault) return false;
+    if (createGroup) {
+      const currentTargetExists = currentVault.accounts.some((account) => groupKey(account.group) === targetGroupKey) ||
+        currentVault.groupCustomizations.some((customization) => groupKey(customization.name) === targetGroupKey);
+      if (currentTargetExists) {
+        setToast("That group already exists. Choose it from the existing groups list.");
+        return false;
+      }
+      if (currentVault.groupCustomizations.length >= MAX_GROUP_CUSTOMIZATIONS) {
+        setToast("The vault has reached the maximum number of saved groups.");
+        return false;
+      }
+    }
     const selected = new Set(selectedVisibleAccountIds);
-    const movedCount = selected.size;
-    setAccounts((current) => current.map((account) =>
-      selected.has(account.id) && !account.archived
-        ? { ...account, group: targetGroup }
-        : account,
-    ));
+    const changed = new Set(accounts
+      .filter((account) => selected.has(account.id) && !account.archived && groupKey(account.group) !== targetGroupKey)
+      .map((account) => account.id));
+    const movedCount = changed.size;
+    if (movedCount === 0) {
+      setToast(`Selected accounts are already in ${targetGroup}.`);
+      return false;
+    }
+    const saved = createGroup
+      ? commitVault((current) => withVaultUpdate(current, {
+          accounts: current.accounts.map((account) => (
+            changed.has(account.id) && !account.archived
+              ? { ...account, group: targetGroup }
+              : account
+          )),
+          groupCustomizations: [
+            ...current.groupCustomizations,
+            defaultGroupCustomization(targetGroup),
+          ],
+        }))
+      : setAccounts((current) => current.map((account) =>
+        changed.has(account.id) && !account.archived
+          ? { ...account, group: targetGroup }
+          : account,
+      ));
+    if (!saved) return false;
     setView("all");
     setGroup(targetGroup);
     exitSelectionMode();
     setToast(`${movedCount} ${movedCount === 1 ? "account" : "accounts"} moved to ${targetGroup}.`);
     return true;
+  };
+
+  const applySelectedAccountLogo = (patch: BulkAccountLogoPatch) => {
+    const blockReason = mutationBlockReason();
+    if (blockReason) {
+      setToast(blockReason === "conflict" || blockReason === "conflict-pending"
+        ? "Resolve the encrypted save conflict before changing logos."
+        : "Unlock your vault before changing logos.");
+      return false;
+    }
+    if (selectedVisibleAccountIds.size === 0) {
+      setToast("Select at least one account to change its logo.");
+      return false;
+    }
+    if (patch.iconBrand && !isServiceBrandId(patch.iconBrand)) {
+      setToast("Choose a logo from Coffer's local catalog.");
+      return false;
+    }
+    if (patch.iconBrand && patch.iconDataUrl) {
+      setToast("Choose either a catalog logo or an uploaded logo.");
+      return false;
+    }
+
+    const selected = new Set(selectedVisibleAccountIds);
+    const changed = accounts.filter((account) => (
+      selected.has(account.id) &&
+      !account.archived &&
+      (account.iconBrand !== patch.iconBrand || account.iconDataUrl !== patch.iconDataUrl)
+    ));
+    if (changed.length === 0) {
+      setToast("The selected accounts already use that logo choice.");
+      return true;
+    }
+
+    const saved = setAccounts((current) => current.map((account) => (
+      selected.has(account.id) && !account.archived
+        ? { ...account, iconBrand: patch.iconBrand, iconDataUrl: patch.iconDataUrl }
+        : account
+    )));
+    if (!saved) return false;
+
+    const label = patch.iconDataUrl
+      ? "custom logo"
+      : patch.iconBrand === COFFER_INITIALS_BRAND_ID
+        ? "initials tile"
+        : patch.iconBrand
+          ? `${accountIconOptions.find((option) => option.id === patch.iconBrand)?.label ?? serviceBrandById(patch.iconBrand)?.title ?? "catalog"} logo`
+          : "automatic logo matching";
+    setToast(`${label[0].toUpperCase()}${label.slice(1)} applied to ${changed.length} ${changed.length === 1 ? "account" : "accounts"}.`);
+    return true;
+  };
+
+  const beginSelectedAccountDrag = (event: ReactDragEvent<HTMLButtonElement>) => {
+    if (view !== "all" || !selectionMode || selectedVisibleAccountIds.size === 0) {
+      event.preventDefault();
+      return;
+    }
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData(SELECTED_ACCOUNT_DRAG_TYPE, "1");
+    setDraggingSelectedAccounts(true);
+    setDragOverGroup(null);
+  };
+
+  const acceptsSelectedAccountDrag = (event: ReactDragEvent<HTMLElement>) => (
+    draggingSelectedAccounts && Array.from(event.dataTransfer.types).includes(SELECTED_ACCOUNT_DRAG_TYPE)
+  );
+
+  const canMoveSelectedAccountsToGroup = (groupName: string) => {
+    const targetGroupKey = groupKey(groupName);
+    return accounts.some((account) => (
+      selectedVisibleAccountIds.has(account.id) && !account.archived && groupKey(account.group) !== targetGroupKey
+    ));
+  };
+
+  const dragSelectedAccountsOverGroup = (event: ReactDragEvent<HTMLDivElement>, groupName: string) => {
+    if (!acceptsSelectedAccountDrag(event) || !canMoveSelectedAccountsToGroup(groupName)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    if (dragOverGroup !== groupName) setDragOverGroup(groupName);
+  };
+
+  const leaveSelectedAccountDropTarget = (event: ReactDragEvent<HTMLDivElement>, groupName: string) => {
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    if (dragOverGroup === groupName) setDragOverGroup(null);
+  };
+
+  const dropSelectedAccountsOnGroup = (event: ReactDragEvent<HTMLDivElement>, groupName: string) => {
+    if (!acceptsSelectedAccountDrag(event) || !canMoveSelectedAccountsToGroup(groupName)) return;
+    event.preventDefault();
+    setDraggingSelectedAccounts(false);
+    setDragOverGroup(null);
+    moveSelectedAccounts(groupName, false);
   };
 
   const setSelectedAccountsFavorite = (favorite: boolean) => {
@@ -2640,6 +2934,7 @@ export default function VaultApp() {
     addTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     addOriginViewRef.current = view;
     resetForm();
+    if (view === "all" && group !== "All") setNewGroup(group);
     setAddOpen(true);
   };
 
@@ -2710,6 +3005,7 @@ export default function VaultApp() {
       visibleCount={selectableVisibleIds.length}
       allVisibleSelected={allVisibleSelected}
       allSelectedFavorited={allSelectedFavorited}
+      showGroupDragHint={view === "all"}
       groups={groups}
       onBeginSelection={() => {
         setAccountMenuId(null);
@@ -2720,6 +3016,10 @@ export default function VaultApp() {
       onExitSelection={exitSelectionMode}
       onSetFavorite={setSelectedAccountsFavorite}
       onArchive={archiveSelectedAccounts}
+      onChangeLogo={(trigger) => {
+        setBulkLogoReturnFocusTo(trigger);
+        setBulkLogoOpen(true);
+      }}
       onMoveToGroup={(groupName) => moveSelectedAccounts(groupName, false)}
       onCreateGroupAndMove={(groupName) => moveSelectedAccounts(groupName, true)}
     />
@@ -2768,15 +3068,35 @@ export default function VaultApp() {
           <button title="Settings" className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => { exitSelectionMode(); setView("settings"); }}><span className="nav-icon settings-icon" aria-hidden="true" />Settings</button>
         </nav>
 
-        <div className="sidebar-label">Groups</div>
-        <nav className="group-nav" aria-label="Account groups">
+        <div className="sidebar-groups-heading">
+          <span className="sidebar-label" id="sidebar-groups-label">Groups</span>
+          <button
+            type="button"
+            className="group-add-button"
+            onClick={(event) => beginGroupCreation(event.currentTarget)}
+            disabled={selectionMode}
+            aria-label="Create group"
+            aria-haspopup="dialog"
+            aria-expanded={creatingGroup}
+            title={selectionMode ? "Finish selecting accounts before creating a group" : "Create group"}
+          >
+            <span aria-hidden="true">+</span>
+          </button>
+        </div>
+        <nav className="group-nav" aria-labelledby="sidebar-groups-label">
           {groups.map((name) => {
             const customization = customizationForGroup(name);
-            const active = view === "all" && group === name;
+            const active = view === "all" && groupKey(group) === groupKey(name);
+            const dropReady = draggingSelectedAccounts && selectionMode && view === "all" && canMoveSelectedAccountsToGroup(name);
+            const dropTarget = dropReady && dragOverGroup === name;
             return (
               <div
                 key={name}
-                className={`group-nav-row ${active ? "active" : ""}`}
+                className={`group-nav-row ${active ? "active" : ""} ${dropReady ? "drop-ready" : ""} ${dropTarget ? "drop-target" : ""}`}
+                onDragEnter={(event) => dragSelectedAccountsOverGroup(event, name)}
+                onDragOver={(event) => dragSelectedAccountsOverGroup(event, name)}
+                onDragLeave={(event) => leaveSelectedAccountDropTarget(event, name)}
+                onDrop={(event) => dropSelectedAccountsOnGroup(event, name)}
               >
                 <button
                   type="button"
@@ -2820,7 +3140,7 @@ export default function VaultApp() {
           })}
         </nav>
 
-        <button className="profile-row" onClick={() => { exitSelectionMode(); setView("settings"); }} aria-label="Open profile and settings" title="Open profile and settings">
+        <button type="button" className="profile-row" onClick={() => { exitSelectionMode(); setView("settings"); }} aria-label="Open profile and settings" title="Open profile and settings">
           <span className={`avatar${profile.avatarDataUrl ? " has-photo" : ""}`}>
             {profile.avatarDataUrl
               ? <img src={profile.avatarDataUrl} alt="" /> // eslint-disable-line @next/next/no-img-element -- encrypted data URLs cannot use the image optimizer
@@ -2829,6 +3149,22 @@ export default function VaultApp() {
           <span className="profile-copy"><strong>{profile.name}</strong><small>{profile.email}</small></span>
           <span aria-hidden="true">•••</span>
         </button>
+
+        <SidebarFooter
+          onOpenAbout={() => {
+            exitSelectionMode();
+            setView("settings");
+            window.requestAnimationFrame(() => {
+              window.requestAnimationFrame(() => {
+                const about = document.getElementById("about-settings");
+                if (!about) return;
+                about.focus({ preventScroll: true });
+                const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+                about.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+              });
+            });
+          }}
+        />
       </aside>
 
       <section className="workspace" id="codes">
@@ -2953,14 +3289,22 @@ export default function VaultApp() {
                 const revealNextCode = !locked && isTotpExpiring(remaining);
                 const selected = selectedVisibleAccountIds.has(account.id);
                 const accessibleCurrentCode = currentCode?.replace(/\s/gu, "").split("").join(" ");
-                return <article className={`account-card ${account.archived ? "archived-card" : ""} ${selectionMode ? "selection-mode" : ""} ${selected ? "selected" : ""}`} key={account.id}>
+                const draggableSelection = view === "all" && selectionMode && selected;
+                return <article className={`account-card ${account.archived ? "archived-card" : ""} ${selectionMode ? "selection-mode" : ""} ${selected ? "selected" : ""} ${draggingSelectedAccounts && selected ? "drag-source" : ""}`} key={account.id}>
                   {selectionMode && (
                     <button
                       type="button"
                       className="account-selection-surface"
                       onClick={() => toggleAccountSelection(account.id)}
+                      draggable={draggableSelection}
+                      onDragStart={beginSelectedAccountDrag}
+                      onDragEnd={() => {
+                        setDraggingSelectedAccounts(false);
+                        setDragOverGroup(null);
+                      }}
                       aria-label={`${selected ? "Deselect" : "Select"} ${account.service} ${account.identity}`}
                       aria-pressed={selected}
+                      title={draggableSelection ? "Drag selected accounts to a sidebar group" : undefined}
                     />
                   )}
                   <div className="account-topline">
@@ -3074,7 +3418,7 @@ export default function VaultApp() {
                         fallback={service.trim() ? initials(service) : "?"}
                         color={ADD_ACCOUNT_PALETTE[accounts.length % ADD_ACCOUNT_PALETTE.length]}
                       />
-                      <input className="service-entry-input" value={service} onChange={(event) => setService(event.target.value)} placeholder="e.g. GitHub" />
+                      <input ref={manualServiceInputRef} className="service-entry-input" value={service} onChange={(event) => setService(event.target.value)} placeholder="e.g. GitHub" />
                     </div>
                   </label>
                   <label><span>Group</span><select value={newGroup} onChange={(event) => setNewGroup(event.target.value as Group)}>{entryGroups.map((name) => <option key={name}>{name}</option>)}</select></label>
@@ -3095,8 +3439,9 @@ export default function VaultApp() {
       )}
 
       <GroupCustomizationDialog
-        open={Boolean(customizingGroup)}
+        open={creatingGroup || Boolean(customizingGroup)}
         group={activeGroupCustomization}
+        mode={creatingGroup ? "create" : "edit"}
         existingNames={groups}
         onCancel={closeGroupCustomization}
         onSave={saveGroupCustomization}
@@ -3105,7 +3450,7 @@ export default function VaultApp() {
 
       <AccountEditor
         account={editingAccount}
-        brandOptions={ACCOUNT_ICON_OPTIONS}
+        brandOptions={accountIconOptions}
         codePreview={editingCodePreview}
         onClose={() => {
           setEditingAccountId(null);
@@ -3122,6 +3467,20 @@ export default function VaultApp() {
             iconDataUrl={iconDataUrl}
           />
         )}
+      />
+
+      <BulkLogoPicker
+        open={bulkLogoOpen}
+        selectedCount={selectedVisibleAccountIds.size}
+        brandOptions={accountIconOptions}
+        retainedCustomLogoBytes={retainedCustomLogoBytes}
+        previewAccount={selectedLogoPreviewAccount}
+        returnFocusTo={bulkLogoReturnFocusTo}
+        onApply={applySelectedAccountLogo}
+        onClose={() => {
+          setBulkLogoOpen(false);
+          setBulkLogoReturnFocusTo(null);
+        }}
       />
 
       <div className={`toast ${toast ? "visible" : ""}`} role="status" aria-live="polite"><span className="toast-check">✓</span>{toast}</div>

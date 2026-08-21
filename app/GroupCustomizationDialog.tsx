@@ -19,6 +19,7 @@ export type GroupCustomizationValue = {
 export type GroupCustomizationDialogProps = {
   open: boolean;
   group: GroupCustomizationValue | null;
+  mode?: "create" | "edit";
   existingNames: readonly string[];
   busy?: boolean;
   returnFocusTo?: HTMLElement | null;
@@ -59,7 +60,7 @@ export const GROUP_COLOR_OPTIONS = [
 const CONTROL_CHARACTER = /\p{Cc}/u;
 
 function comparableName(value: string) {
-  return value.normalize("NFKC").trim().toLocaleLowerCase("en");
+  return value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase("en");
 }
 
 export function validateGroupCustomizationName(
@@ -97,6 +98,7 @@ function focusableElements(dialog: HTMLElement | null) {
 
 function GroupCustomizationDialogContent({
   group,
+  mode = "edit",
   existingNames,
   busy = false,
   returnFocusTo,
@@ -235,9 +237,11 @@ function GroupCustomizationDialogContent({
       >
         <header className="group-customization-header">
           <div>
-            <p className="eyebrow"><span /> GROUP DETAILS</p>
-            <h2 id={titleId}>Customize group</h2>
-            <p id={descriptionId}>Rename this group and choose how it appears in the sidebar.</p>
+            <p className="eyebrow"><span /> {mode === "create" ? "NEW GROUP" : "GROUP DETAILS"}</p>
+            <h2 id={titleId}>{mode === "create" ? "Create group" : "Customize group"}</h2>
+            <p id={descriptionId}>{mode === "create"
+              ? "Name this empty group and choose how it appears in the sidebar."
+              : "Rename this group and choose how it appears in the sidebar."}</p>
           </div>
           <button
             type="button"
@@ -271,6 +275,7 @@ function GroupCustomizationDialogContent({
                 required
                 maxLength={48}
                 autoComplete="off"
+                placeholder={mode === "create" ? "e.g. Clients" : undefined}
                 disabled={isBusy}
                 aria-invalid={Boolean(error) || undefined}
                 aria-describedby={error ? errorId : undefined}
@@ -325,7 +330,7 @@ function GroupCustomizationDialogContent({
 
           <footer className="group-customization-actions">
             <button type="button" onClick={close} disabled={isBusy}>Cancel</button>
-            <button type="submit" disabled={isBusy}>{isBusy ? "Saving…" : "Save changes"}</button>
+            <button type="submit" disabled={isBusy}>{isBusy ? "Saving…" : mode === "create" ? "Create group" : "Save changes"}</button>
           </footer>
         </form>
       </section>
@@ -336,13 +341,15 @@ function GroupCustomizationDialogContent({
 export default function GroupCustomizationDialog({
   open,
   group,
+  mode = "edit",
   ...props
 }: GroupCustomizationDialogProps) {
   if (!open || !group) return null;
   return (
     <GroupCustomizationDialogContent
-      key={`${group.name}\u0000${group.icon}\u0000${group.color}`}
+      key={`${mode}\u0000${group.name}\u0000${group.icon}\u0000${group.color}`}
       group={group}
+      mode={mode}
       {...props}
     />
   );

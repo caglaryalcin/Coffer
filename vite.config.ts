@@ -1,5 +1,6 @@
 import vinext from "vinext";
 import { defineConfig } from "vite";
+import packageMetadata from "./package.json" with { type: "json" };
 
 const localBindingConfig = {
   main: "./worker/index.ts",
@@ -30,6 +31,9 @@ export default defineConfig(async () => {
     cacheDir: process.env.COFFER_DEMO_MODE === "1"
       ? "node_modules/.vite-demo"
       : "node_modules/.vite",
+    define: {
+      __COFFER_VERSION__: JSON.stringify(packageMetadata.version),
+    },
     plugins,
   };
 });

@@ -117,10 +117,10 @@ const GROUP_ICONS = [
   "social",
 ] as const satisfies readonly VaultGroupIcon[];
 const GROUP_COLORS = ["rose", "amber", "lime", "emerald", "sky", "blue", "violet", "slate"] as const satisfies readonly VaultGroupColor[];
-const MAX_GROUP_CUSTOMIZATIONS = 256;
+export const MAX_GROUP_CUSTOMIZATIONS = 256;
 
 const CANONICAL_BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
-const LOCAL_ICON_BRAND = /^[a-z0-9][a-z0-9-]{0,63}$/u;
+const LOCAL_ICON_BRAND = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

@@ -3,7 +3,9 @@ import type { VaultColor } from "../lib/vault-model";
 import {
   GENERATED_CURATED_SERVICE_BRAND_IDS,
   GENERATED_SERVICE_BRAND_SOURCE,
+  generatedSelfhstServiceBrandFamilies,
   generatedServiceBrands,
+  type GeneratedSelfhstServiceBrandFamily,
 } from "./service-brands.generated";
 
 declare const serviceBrandIdMarker: unique symbol;
@@ -27,7 +29,11 @@ export type ServiceBrandOption = {
   id: ServiceBrandId;
   title: string;
   color: `#${string}`;
-  source: "simple-icons" | "font-awesome" | "curated";
+  source: "simple-icons" | "font-awesome" | "curated" | "selfhst";
+  familyId: string;
+  variantLabel: string;
+  searchTerms: readonly string[];
+  variantOrder: number;
 };
 
 export type ResolvedServiceBrand = ServiceBrandOption & {
@@ -35,7 +41,9 @@ export type ResolvedServiceBrand = ServiceBrandOption & {
 };
 
 type CatalogBrand = ResolvedServiceBrand & {
-  searchKeys: readonly string[];
+  automatic: boolean;
+  matchKeys: readonly string[];
+  pickerKeys: readonly string[];
 };
 
 type CuratedMatchRule = {
@@ -57,6 +65,16 @@ const FONT_AWESOME_BRAND_IDS = new Set([
   "twitter",
 ]);
 const CURATED_BRAND_IDS = new Set<string>(GENERATED_CURATED_SERVICE_BRAND_IDS);
+const SELFHST_ID_PREFIX = "selfhst-";
+const SELFHST_REFERENCE = /^[a-z0-9][a-z0-9-]{0,49}$/u;
+const SELFHST_STEM = /^[a-z0-9][a-z0-9-]{0,55}$/u;
+const selfhstVariants = [
+  { bit: 1, label: "Standard", order: 0, suffix: "" },
+  { bit: 2, label: "Dark", order: 1, suffix: "-dark" },
+  { bit: 4, label: "Light", order: 2, suffix: "-light" },
+] as const;
+let selfhstFamiliesByReference: ReadonlyMap<string, GeneratedSelfhstServiceBrandFamily> | null = null;
+let cachedSelfhstBrandOptions: readonly ServiceBrandOption[] | null = null;
 
 const curatedMatchRules: readonly CuratedMatchRule[] = [
   { id: "github", aliases: ["github"], color: "#181717", decorated: true, domains: ["github.com"] },
@@ -165,14 +183,110 @@ function asServiceBrandId(value: string): ServiceBrandId {
   return value as ServiceBrandId;
 }
 
+function selfhstFamilyMap(): ReadonlyMap<string, GeneratedSelfhstServiceBrandFamily> {
+  if (!selfhstFamiliesByReference) {
+    selfhstFamiliesByReference = new Map(
+      generatedSelfhstServiceBrandFamilies.map((family) => [family[0], family]),
+    );
+  }
+  return selfhstFamiliesByReference;
+}
+
+function selfhstBrand(
+  family: GeneratedSelfhstServiceBrandFamily,
+  variant: (typeof selfhstVariants)[number],
+): ResolvedServiceBrand {
+  const [reference, title, tags] = family;
+  const id = asServiceBrandId(`${SELFHST_ID_PREFIX}${reference}${variant.suffix}`);
+  return {
+    id,
+    title,
+    color: variant.suffix === "-light" ? "#202326" : "#f4f3ee",
+    source: "selfhst",
+    familyId: `${SELFHST_ID_PREFIX}${reference}`,
+    variantLabel: variant.label,
+    searchTerms: [...new Set([title, reference, ...tags])],
+    variantOrder: variant.order,
+    asset: `${id}.svg`,
+  };
+}
+
+function selfhstBrandById(value: unknown): ResolvedServiceBrand | null {
+  if (typeof value !== "string" || !value.startsWith(SELFHST_ID_PREFIX)) return null;
+  const stem = value.slice(SELFHST_ID_PREFIX.length);
+  if (!SELFHST_STEM.test(stem)) return null;
+
+  const families = selfhstFamilyMap();
+  const standardFamily = SELFHST_REFERENCE.test(stem) ? families.get(stem) : undefined;
+  if (standardFamily && (standardFamily[3] & 1) !== 0) {
+    return selfhstBrand(standardFamily, selfhstVariants[0]);
+  }
+  for (const variant of selfhstVariants.slice(1)) {
+    if (!stem.endsWith(variant.suffix)) continue;
+    const reference = stem.slice(0, -variant.suffix.length);
+    if (!SELFHST_REFERENCE.test(reference)) continue;
+    const family = families.get(reference);
+    if (family && (family[3] & variant.bit) !== 0) return selfhstBrand(family, variant);
+  }
+  return null;
+}
+
+function isSelfhstBrandId(value: unknown): value is ServiceBrandId {
+  return selfhstBrandById(value) !== null;
+}
+
+/** All integrated third-party variants, expanded only when a logo picker opens. */
+export function selfhstServiceBrandOptions(): readonly ServiceBrandOption[] {
+  if (cachedSelfhstBrandOptions) return cachedSelfhstBrandOptions;
+  const options: ServiceBrandOption[] = [];
+  for (const family of generatedSelfhstServiceBrandFamilies) {
+    for (const variant of selfhstVariants) {
+      if ((family[3] & variant.bit) === 0) continue;
+      const brand = selfhstBrand(family, variant);
+      options.push(Object.freeze({
+        id: brand.id,
+        title: brand.title,
+        color: brand.color,
+        source: brand.source,
+        familyId: brand.familyId,
+        variantLabel: brand.variantLabel,
+        searchTerms: brand.searchTerms,
+        variantOrder: brand.variantOrder,
+      }));
+    }
+  }
+  cachedSelfhstBrandOptions = Object.freeze(options);
+  return cachedSelfhstBrandOptions;
+}
+
+/** A local rendering choice that keeps the account's colored initials tile. */
+export const COFFER_INITIALS_BRAND_ID = asServiceBrandId("coffer-initials");
+
 const brandCatalog = new Map<string, CatalogBrand>();
-for (const [id, title, color, searchKeys] of generatedServiceBrands) {
+for (const [id, title, color, searchKeys, picker] of generatedServiceBrands) {
+  const [familyId, variantLabel, automatic, pickerKeys, variantOrder] = picker ?? [
+    id,
+    "Brand mark",
+    true,
+    [],
+    0,
+  ];
   brandCatalog.set(id, {
     id: asServiceBrandId(id),
     title,
     color,
     asset: `${id}.svg`,
-    searchKeys,
+    automatic,
+    familyId,
+    matchKeys: searchKeys,
+    pickerKeys,
+    searchTerms: [...new Set([
+      ...searchKeys,
+      ...pickerKeys,
+      normalizeServiceBrandValue(variantLabel),
+    ])],
+    variantLabel,
+    variantOrder,
     source: CURATED_BRAND_IDS.has(id)
       ? "curated"
       : FONT_AWESOME_BRAND_IDS.has(id)
@@ -188,8 +302,12 @@ for (const rule of curatedMatchRules) {
     ...current,
     title: rule.title ?? current.title,
     color: rule.color ?? current.color,
-    searchKeys: [...new Set([
-      ...current.searchKeys,
+    matchKeys: [...new Set([
+      ...current.matchKeys,
+      ...(rule.aliases ?? []).map(normalizeServiceBrandValue),
+    ])],
+    searchTerms: [...new Set([
+      ...current.searchTerms,
       ...(rule.aliases ?? []).map(normalizeServiceBrandValue),
     ])],
   });
@@ -200,13 +318,14 @@ export const serviceBrandIds: readonly ServiceBrandId[] = Object.freeze(
 );
 
 export function isServiceBrandId(value: unknown): value is ServiceBrandId {
-  return typeof value === "string" && brandCatalog.has(value);
+  return value === COFFER_INITIALS_BRAND_ID ||
+    (typeof value === "string" && (brandCatalog.has(value) || isSelfhstBrandId(value)));
 }
 
 export function serviceBrandById(value: string): ResolvedServiceBrand | null {
   const brand = brandCatalog.get(value);
-  if (!brand) return null;
-  return resolvedBrand(brand);
+  if (brand) return resolvedBrand(brand);
+  return selfhstBrandById(value);
 }
 
 function resolvedBrand(brand: CatalogBrand): ResolvedServiceBrand {
@@ -214,7 +333,11 @@ function resolvedBrand(brand: CatalogBrand): ResolvedServiceBrand {
     id: brand.id,
     title: brand.title,
     color: brand.color,
+    familyId: brand.familyId,
+    searchTerms: brand.searchTerms,
     source: brand.source,
+    variantLabel: brand.variantLabel,
+    variantOrder: brand.variantOrder,
     asset: brand.asset,
   };
 }
@@ -224,7 +347,11 @@ function brandOption(brand: CatalogBrand): ServiceBrandOption {
     id: brand.id,
     title: brand.title,
     color: brand.color,
+    familyId: brand.familyId,
+    searchTerms: brand.searchTerms,
     source: brand.source,
+    variantLabel: brand.variantLabel,
+    variantOrder: brand.variantOrder,
   };
 }
 
@@ -247,7 +374,8 @@ function addMatch(
 }
 
 for (const brand of brandCatalog.values()) {
-  for (const searchKey of brand.searchKeys) {
+  if (!brand.automatic) continue;
+  for (const searchKey of brand.matchKeys) {
     const normalized = normalizeServiceBrandValue(searchKey);
     addMatch(exactNameMatches, normalized, brand.id);
     const folded = foldedServiceBrandValue(normalized);
@@ -256,7 +384,7 @@ for (const brand of brandCatalog.values()) {
 }
 
 for (const rule of curatedMatchRules) {
-  if (!brandCatalog.has(rule.id)) continue;
+  if (!brandCatalog.get(rule.id)?.automatic) continue;
   for (const alias of rule.aliases ?? []) {
     const normalized = normalizeServiceBrandValue(alias);
     addMatch(exactNameMatches, normalized, rule.id, true);
@@ -265,7 +393,7 @@ for (const rule of curatedMatchRules) {
 }
 
 const decoratedNameMatches = curatedMatchRules
-  .filter((rule) => rule.decorated && brandCatalog.has(rule.id))
+  .filter((rule) => rule.decorated && brandCatalog.get(rule.id)?.automatic)
   .flatMap((rule) => (rule.aliases ?? []).map((alias) => ({
     id: rule.id,
     name: normalizeServiceBrandValue(alias),
@@ -274,7 +402,7 @@ const decoratedNameMatches = curatedMatchRules
   .sort((left, right) => right.name.length - left.name.length);
 
 const domainMatches = curatedMatchRules
-  .filter((rule) => brandCatalog.has(rule.id))
+  .filter((rule) => brandCatalog.get(rule.id)?.automatic)
   .flatMap((rule) => (rule.domains ?? []).map((domain) => ({
     domain: domain.toLowerCase(),
     id: rule.id,
@@ -344,7 +472,8 @@ export function serviceBrandFor(
   service: string,
   brandId?: ServiceBrandId | null,
 ): ServiceBrandId | null {
-  if (brandId && brandCatalog.has(brandId)) return brandId;
+  if (brandId === COFFER_INITIALS_BRAND_ID) return null;
+  if (brandId && (brandCatalog.has(brandId) || isSelfhstBrandId(brandId))) return brandId;
 
   const normalized = normalizeServiceBrandValue(service);
   if (!normalized) return null;
@@ -393,10 +522,10 @@ export function serviceBrandOptions(query = "", limit = 40): readonly ServiceBra
   return [...brandCatalog.values()]
     .map((brand) => {
       const title = normalizeServiceBrandValue(brand.title);
-      const keys = [title, ...brand.searchKeys];
+      const keys = [title, normalizeServiceBrandValue(brand.id), ...brand.matchKeys, ...brand.pickerKeys];
       const exact = keys.some((key) => key === normalized || foldedServiceBrandValue(key) === folded);
-      const prefix = keys.some((key) => key.startsWith(normalized));
-      const includes = keys.some((key) => key.includes(normalized));
+      const prefix = normalized.length > 1 && keys.some((key) => key.startsWith(normalized));
+      const includes = normalized.length > 1 && keys.some((key) => key.includes(normalized));
       return { brand, score: exact ? 0 : prefix ? 1 : includes ? 2 : 3 };
     })
     .filter(({ score }) => score < 3)

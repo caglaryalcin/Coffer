@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release tag to publish (for example, v1.0.4)
+        description: Release tag to publish (for example, v1.0.5)
         required: true
-        default: v1.0.4
+        default: v1.0.5
         type: string
 
 permissions:

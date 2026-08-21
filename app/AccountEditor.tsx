@@ -2,6 +2,7 @@
 
 import { FormEvent, ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from "react";
 import { ACCOUNT_LOGO_ACCEPT, prepareAccountLogo } from "./account-logo";
+import { COFFER_INITIALS_BRAND_ID } from "./ServiceLogo";
 import {
   accountSecretTestReadiness,
   accountEditorReturnFocusTarget,
@@ -15,6 +16,10 @@ import type { VaultAccount } from "../lib/vault-model";
 export type AccountIconOption = {
   id: string;
   label: string;
+  description?: string;
+  familyId?: string;
+  searchTerms?: readonly string[];
+  variantOrder?: number;
 };
 
 export type AccountEditorCodePreview = {
@@ -45,7 +50,7 @@ function iconSearchKey(value: string) {
     .normalize("NFKD")
     .replace(/\p{M}/gu, "")
     .toLocaleLowerCase("en")
-    .replace(/[^a-z0-9]+/gu, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
 }
 
@@ -60,26 +65,59 @@ export function findAccountIconOptions(
   const queryTokens = normalizedQuery.split(/\s+/u).filter((token) => token && !ignoredTokens.has(token));
   const effectiveTokens = queryTokens.length > 0 ? queryTokens : normalizedQuery ? [normalizedQuery] : [];
 
-  const scored = normalizedQuery ? options.flatMap((option) => {
+  const directMatches = normalizedQuery ? options.flatMap((option) => {
     const label = iconSearchKey(option.label);
     const id = iconSearchKey(option.id);
-    const searchable = `${label} ${id}`;
-    const score = label === normalizedQuery || id === normalizedQuery
+    const aliases = [option.description ?? "", ...(option.searchTerms ?? [])].map(iconSearchKey).filter(Boolean);
+    const primaryKeys = [label, id];
+    const searchable = [...primaryKeys, ...aliases].join(" ");
+    const exactScore = primaryKeys.some((key) => key === normalizedQuery)
       ? 0
-      : label.startsWith(normalizedQuery) || id.startsWith(normalizedQuery)
-        ? 1
-        : searchable.includes(normalizedQuery)
-          ? 2
-          : effectiveTokens.every((token) => searchable.includes(token))
+      : aliases.some((key) => key === normalizedQuery)
+        ? 2
+        : Number.POSITIVE_INFINITY;
+    const score = Number.isFinite(exactScore)
+      ? exactScore
+      : normalizedQuery.length === 1
+        ? Number.POSITIVE_INFINITY
+        : primaryKeys.some((key) => key.startsWith(normalizedQuery))
+          ? 1
+          : primaryKeys.some((key) => key.includes(normalizedQuery))
             ? 3
-            : effectiveTokens.some((token) => searchable.includes(token))
+            : aliases.some((key) => key.startsWith(normalizedQuery) || key.includes(normalizedQuery))
               ? 4
-              : Number.POSITIVE_INFINITY;
+              : effectiveTokens.every((token) => searchable.includes(token))
+                ? 5
+                : effectiveTokens.some((token) => searchable.includes(token))
+                  ? 6
+                  : Number.POSITIVE_INFINITY;
     return Number.isFinite(score) ? [{ option, score }] : [];
-  }).sort((left, right) => left.score - right.score || left.option.label.localeCompare(right.option.label, "en")) : [];
+  }) : [];
 
+  const directScoreById = new Map(directMatches.map(({ option, score }) => [option.id, score]));
+  const familyScores = new Map<string, number>();
+  for (const { option, score } of directMatches) {
+    const familyId = option.familyId ?? option.id;
+    familyScores.set(familyId, Math.min(familyScores.get(familyId) ?? Number.POSITIVE_INFINITY, score));
+  }
+  const scored = options.flatMap((option) => {
+    const directScore = directScoreById.get(option.id);
+    const familyScore = familyScores.get(option.familyId ?? option.id);
+    const score = Math.min(
+      directScore ?? Number.POSITIVE_INFINITY,
+      familyScore === undefined ? Number.POSITIVE_INFINITY : familyScore + 0.25,
+    );
+    return Number.isFinite(score) ? [{ option, score }] : [];
+  }).sort((left, right) => (
+    left.score - right.score ||
+    (left.option.variantOrder ?? 0) - (right.option.variantOrder ?? 0) ||
+    left.option.label.localeCompare(right.option.label, "en")
+  ));
+
+  const initials = options.find((option) => option.id === COFFER_INITIALS_BRAND_ID);
   const selected = selectedId ? options.find((option) => option.id === selectedId) : undefined;
-  const results = selected ? [selected] : [];
+  const results = initials ? [initials] : [];
+  if (selected && !results.some((result) => result.id === selected.id)) results.push(selected);
   for (const { option } of scored) {
     if (!results.some((result) => result.id === option.id)) results.push(option);
     if (results.length >= Math.max(1, limit)) break;
@@ -276,6 +314,7 @@ function AccountEditorForm({ account, brandOptions, codePreview, onClose, onSave
   const visibleIconOptions = useMemo(() => {
     return findAccountIconOptions(brandOptions, logoSearch, iconBrand || null);
   }, [brandOptions, iconBrand, logoSearch]);
+  const visibleCatalogIconCount = visibleIconOptions.filter((option) => option.id !== COFFER_INITIALS_BRAND_ID).length;
   const codeExpiring = Boolean(codePreview && isTotpExpiring(codePreview.remaining));
   const secretTestReadiness = useMemo(() => accountSecretTestReadiness(initial.secret, {
     secret,
@@ -375,11 +414,11 @@ function AccountEditorForm({ account, brandOptions, codePreview, onClose, onSave
               <small>{iconDataUrl
                 ? "Uploaded logo selected for this account."
                 : selectedIcon
-                ? `${selectedIcon.label} selected from Coffer's local catalog.`
-                : visibleIconOptions.length === 0
+                ? `${selectedIcon.label}${selectedIcon.description ? ` — ${selectedIcon.description}` : ""} selected from Coffer's local catalog.`
+                : visibleCatalogIconCount === 0
                   ? "No catalog logos match. Automatic matching remains selected."
                   : iconQuery
-                    ? `${visibleIconOptions.length} matching local logos. Choose one below.`
+                    ? `${visibleCatalogIconCount} matching local ${visibleCatalogIconCount === 1 ? "logo" : "logos"}. Choose one below.`
                     : "Suggested logos are based on the service name. Choose one or keep automatic matching."}</small>
             </div>
           </div>
@@ -433,7 +472,7 @@ function AccountEditorForm({ account, brandOptions, codePreview, onClose, onSave
                   {renderIcon?.({ color: account.color, letter: account.letter, service, iconBrand: option.id, iconDataUrl: null }) ?? (
                     <span className={`service-logo ${account.color}`} aria-hidden="true">{account.letter}</span>
                   )}
-                  <span><strong>{option.label}</strong><small>{option.id}</small></span>
+                  <span><strong>{option.label}</strong><small>{option.description ?? (option.id === COFFER_INITIALS_BRAND_ID ? "Colored letter tile" : option.id)}</small></span>
                 </label>
               ))}
             </div>

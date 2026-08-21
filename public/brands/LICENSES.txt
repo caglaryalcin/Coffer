@@ -13,4 +13,14 @@ The following manually curated local assets are proprietary brand assets and are
 covered by the Simple Icons, Font Awesome, or Coffer licenses:
 azure (Microsoft Azure): Microsoft; Microsoft Trademark and Brand Guidelines; https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks
 
+Additional selectable service-icon variants are vendored from selfh.st/icons 4.0.3:
+Project: https://github.com/selfhst/icons
+Snapshot: 948e3aa28d3110ee23957473a85431650e10e778
+License: CC BY 4.0 — https://creativecommons.org/licenses/by/4.0/
+Full license and attribution: /brands/selfhst-LICENSE.txt and /brands/selfhst-ATTRIBUTION.txt
+
+The upstream filenames were prefixed with selfhst- for collision-safe integration.
+The empty Adobe Illustrator compatibility foreignObject in selfhst-paypal-light.svg
+was removed during the security-preserving import. No other visual modifications were made.
+
 Brand names and logos may be trademarks of their respective owners. Inclusion does not imply endorsement.

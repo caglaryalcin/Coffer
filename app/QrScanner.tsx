@@ -1,6 +1,6 @@
 "use client";
 
-import { type ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
+import { type ChangeEvent, useCallback, useEffect, useId, useRef, useState } from "react";
 import jsQR from "jsqr";
 
 type DetectedBarcode = {
@@ -32,6 +32,14 @@ type LoadedImage = {
   close: () => void;
 };
 
+type ImageFormat = "png" | "jpeg" | "webp";
+
+type ImageDimensions = {
+  format: ImageFormat;
+  width: number;
+  height: number;
+};
+
 export type QrScannerProps = {
   onDetected: (uri: string) => void;
   onFallback: () => void;
@@ -41,7 +49,105 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_QR_VALUE_LENGTH = 8_192;
 const MAX_CAMERA_DECODE_EDGE = 1_280;
 const MAX_IMAGE_DECODE_EDGE = 2_048;
+const MAX_SOURCE_IMAGE_EDGE = 8_192;
+const MAX_SOURCE_IMAGE_PIXELS = 32_000_000;
+const MAX_IMAGE_HEADER_BYTES = 1024 * 1024;
 const SCAN_INTERVAL_MS = 250;
+const SUPPORTED_QR_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+const IMAGE_FORMAT_BY_MIME = new Map<string, ImageFormat>([
+  ["image/png", "png"],
+  ["image/jpeg", "jpeg"],
+  ["image/webp", "webp"],
+]);
+
+function matchesAscii(bytes: Uint8Array, offset: number, value: string) {
+  if (offset + value.length > bytes.length) return false;
+  return [...value].every((character, index) => bytes[offset + index] === character.charCodeAt(0));
+}
+
+function pngDimensions(bytes: Uint8Array, view: DataView): ImageDimensions | null {
+  const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (bytes.length < 24 || !signature.every((value, index) => bytes[index] === value)) return null;
+  if (view.getUint32(8) !== 13 || !matchesAscii(bytes, 12, "IHDR")) return null;
+  return { format: "png", width: view.getUint32(16), height: view.getUint32(20) };
+}
+
+function jpegDimensions(bytes: Uint8Array, view: DataView): ImageDimensions | null {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  let offset = 2;
+
+  while (offset + 1 < bytes.length) {
+    if (bytes[offset] !== 0xff) return null;
+    while (offset < bytes.length && bytes[offset] === 0xff) offset += 1;
+    if (offset >= bytes.length) return null;
+
+    const marker = bytes[offset];
+    offset += 1;
+    if (marker === 0xd9 || marker === 0xda) return null;
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd8)) continue;
+    if (offset + 2 > bytes.length) return null;
+
+    const segmentLength = view.getUint16(offset);
+    if (segmentLength < 2 || offset + segmentLength > bytes.length) return null;
+    const isStartOfFrame = marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker);
+    if (isStartOfFrame) {
+      if (segmentLength < 8) return null;
+      return {
+        format: "jpeg",
+        width: view.getUint16(offset + 5),
+        height: view.getUint16(offset + 3),
+      };
+    }
+    offset += segmentLength;
+  }
+  return null;
+}
+
+function webpDimensions(bytes: Uint8Array, view: DataView): ImageDimensions | null {
+  if (bytes.length < 20 || !matchesAscii(bytes, 0, "RIFF") || !matchesAscii(bytes, 8, "WEBP")) return null;
+  const chunkSize = view.getUint32(16, true);
+
+  if (matchesAscii(bytes, 12, "VP8X") && chunkSize >= 10 && bytes.length >= 30) {
+    return {
+      format: "webp",
+      width: 1 + bytes[24] + (bytes[25] << 8) + (bytes[26] << 16),
+      height: 1 + bytes[27] + (bytes[28] << 8) + (bytes[29] << 16),
+    };
+  }
+  if (matchesAscii(bytes, 12, "VP8 ") && chunkSize >= 10 && bytes.length >= 30 && bytes[23] === 0x9d && bytes[24] === 0x01 && bytes[25] === 0x2a) {
+    return {
+      format: "webp",
+      width: view.getUint16(26, true) & 0x3fff,
+      height: view.getUint16(28, true) & 0x3fff,
+    };
+  }
+  if (matchesAscii(bytes, 12, "VP8L") && chunkSize >= 5 && bytes.length >= 25 && bytes[20] === 0x2f) {
+    return {
+      format: "webp",
+      width: 1 + bytes[21] + ((bytes[22] & 0x3f) << 8),
+      height: 1 + ((bytes[22] & 0xc0) >> 6) + (bytes[23] << 2) + ((bytes[24] & 0x0f) << 10),
+    };
+  }
+  return null;
+}
+
+async function inspectImageDimensions(file: File): Promise<ImageDimensions> {
+  const declaredFormat = IMAGE_FORMAT_BY_MIME.get(file.type.toLowerCase());
+  if (!declaredFormat) throw new Error("Unsupported image type");
+
+  const header = new Uint8Array(await file.slice(0, MAX_IMAGE_HEADER_BYTES).arrayBuffer());
+  const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
+  const dimensions = pngDimensions(header, view) ?? jpegDimensions(header, view) ?? webpDimensions(header, view);
+  if (!dimensions || dimensions.format !== declaredFormat) {
+    throw new Error("Unsupported or unreadable image header");
+  }
+  if (dimensions.width <= 0 || dimensions.height <= 0) throw new Error("Invalid image dimensions");
+  return dimensions;
+}
+
+function imageDimensionsExceedLimit({ width, height }: ImageDimensions): boolean {
+  return width > MAX_SOURCE_IMAGE_EDGE || height > MAX_SOURCE_IMAGE_EDGE || width * height > MAX_SOURCE_IMAGE_PIXELS;
+}
 
 function barcodeDetectorConstructor(): NativeBarcodeDetectorConstructor | undefined {
   return (globalThis as typeof globalThis & {
@@ -87,15 +193,15 @@ function scaledDimensions(width: number, height: number, maxEdge: number) {
   };
 }
 
-function decodeWithJsQr(
+function drawScaledImage(
   source: CanvasImageSource,
   sourceWidth: number,
   sourceHeight: number,
   canvas: HTMLCanvasElement,
   maxEdge: number,
-): DecodeResult {
+) {
   if (!Number.isFinite(sourceWidth) || !Number.isFinite(sourceHeight) || sourceWidth <= 0 || sourceHeight <= 0) {
-    return { uri: null, qrFound: false };
+    throw new Error("The image dimensions are invalid");
   }
 
   const dimensions = scaledDimensions(sourceWidth, sourceHeight, maxEdge);
@@ -103,10 +209,20 @@ function decodeWithJsQr(
   canvas.height = dimensions.height;
   const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) throw new Error("Canvas decoding is unavailable");
-
   context.drawImage(source, 0, 0, dimensions.width, dimensions.height);
-  const pixels = context.getImageData(0, 0, dimensions.width, dimensions.height);
-  const code = jsQR(pixels.data, dimensions.width, dimensions.height, {
+  return { ...dimensions, context };
+}
+
+function decodeWithJsQr(
+  source: CanvasImageSource,
+  sourceWidth: number,
+  sourceHeight: number,
+  canvas: HTMLCanvasElement,
+  maxEdge: number,
+): DecodeResult {
+  const prepared = drawScaledImage(source, sourceWidth, sourceHeight, canvas, maxEdge);
+  const pixels = prepared.context.getImageData(0, 0, prepared.width, prepared.height);
+  const code = jsQR(pixels.data, prepared.width, prepared.height, {
     inversionAttempts: "attemptBoth",
   });
 
@@ -182,10 +298,11 @@ export function cameraErrorMessage(
       return "The camera could not be opened. It may already be in use by another application.";
     }
   }
-  return "The camera could not be started. Scan an image or enter the setup link instead.";
+  return "The camera could not be started. Import a QR image or enter the setup link instead.";
 }
 
 export default function QrScanner({ onDetected, onFallback }: QrScannerProps) {
+  const imageHelpId = useId();
   const [support, setSupport] = useState<ScannerSupport>("checking");
   const [cameraPhase, setCameraPhase] = useState<CameraPhase>("idle");
   const [imageBusy, setImageBusy] = useState(false);
@@ -263,7 +380,7 @@ export default function QrScanner({ onDetected, onFallback }: QrScannerProps) {
       return;
     }
     if (!navigator.mediaDevices?.getUserMedia) {
-      setError("Camera access is not available in this browser. Scan an image instead.");
+      setError("Camera access is not available in this browser. Import a QR image instead.");
       return;
     }
 
@@ -299,7 +416,7 @@ export default function QrScanner({ onDetected, onFallback }: QrScannerProps) {
       const handleStreamEnded = () => {
         if (!mountedRef.current || generation !== scanGenerationRef.current) return;
         stopCamera();
-        setError("Camera access ended. Select Start camera to reconnect or scan an image instead.");
+        setError("Camera access ended. Select Start camera to reconnect or import a QR image instead.");
       };
       const videoTracks = stream.getVideoTracks();
       videoTracks.forEach((track) => track.addEventListener("ended", handleStreamEnded, { once: true }));
@@ -357,7 +474,7 @@ export default function QrScanner({ onDetected, onFallback }: QrScannerProps) {
           } catch {
             if (!mountedRef.current || generation !== scanGenerationRef.current) return;
             stopCamera();
-            setError("The live QR scan stopped unexpectedly. Try the camera again or scan an image.");
+            setError("The live QR scan stopped unexpectedly. Try the camera again or import a QR image.");
             return;
           }
         }
@@ -399,29 +516,43 @@ export default function QrScanner({ onDetected, onFallback }: QrScannerProps) {
       setError("Choose an image smaller than 10 MiB.");
       return;
     }
+    if (!SUPPORTED_QR_IMAGE_TYPES.has(file.type.toLowerCase())) {
+      setError("Choose a PNG, JPEG, or WebP image containing a QR code.");
+      return;
+    }
 
     const generation = imageGenerationRef.current + 1;
     imageGenerationRef.current = generation;
     setImageBusy(true);
     let image: LoadedImage | null = null;
     try {
+      const inspectedDimensions = await inspectImageDimensions(file);
+      if (!mountedRef.current || generation !== imageGenerationRef.current) return;
+      if (imageDimensionsExceedLimit(inspectedDimensions)) {
+        setError("Choose a QR image no larger than 8,192 pixels per side and 32 megapixels.");
+        return;
+      }
+
       image = await loadImage(file);
       if (!mountedRef.current || generation !== imageGenerationRef.current) return;
+      if (imageDimensionsExceedLimit({ format: inspectedDimensions.format, width: image.width, height: image.height })) {
+        setError("Choose a QR image no larger than 8,192 pixels per side and 32 megapixels.");
+        return;
+      }
       let result: DecodeResult;
       const detector = detectorRef.current;
+      const canvas = decoderCanvasRef.current ?? document.createElement("canvas");
+      decoderCanvasRef.current = canvas;
       if (detector) {
         try {
-          result = nativeDecodeResult(await detector.detect(image.source));
+          drawScaledImage(image.source, image.width, image.height, canvas, MAX_IMAGE_DECODE_EDGE);
+          result = nativeDecodeResult(await detector.detect(canvas));
         } catch {
           detectorRef.current = null;
           setSupport("fallback");
-          const canvas = decoderCanvasRef.current ?? document.createElement("canvas");
-          decoderCanvasRef.current = canvas;
           result = decodeWithJsQr(image.source, image.width, image.height, canvas, MAX_IMAGE_DECODE_EDGE);
         }
       } else {
-        const canvas = decoderCanvasRef.current ?? document.createElement("canvas");
-        decoderCanvasRef.current = canvas;
         result = decodeWithJsQr(image.source, image.width, image.height, canvas, MAX_IMAGE_DECODE_EDGE);
       }
       if (!mountedRef.current || generation !== imageGenerationRef.current) return;
@@ -435,7 +566,7 @@ export default function QrScanner({ onDetected, onFallback }: QrScannerProps) {
       onDetected(result.uri);
     } catch {
       if (mountedRef.current && generation === imageGenerationRef.current) {
-        setError("The selected image could not be scanned. Try a PNG or JPEG with a clear QR code.");
+        setError("The selected image could not be scanned. Try a PNG, JPEG, or WebP image with a clear QR code.");
       }
     } finally {
       image?.close();
@@ -457,8 +588,8 @@ export default function QrScanner({ onDetected, onFallback }: QrScannerProps) {
     <section className="qr-scanner" aria-labelledby="qr-scanner-title">
       <div className="qr-scanner-heading">
         <div>
-          <h3 id="qr-scanner-title">Scan an authenticator QR code</h3>
-          <p>Use your camera or choose an image. Scanning happens only on this device.</p>
+          <h3 id="qr-scanner-title">Scan or import an authenticator QR code</h3>
+          <p>Use your camera or import a QR image. Scanning happens only on this device.</p>
         </div>
       </div>
 
@@ -491,16 +622,19 @@ export default function QrScanner({ onDetected, onFallback }: QrScannerProps) {
           </button>
         )}
 
-        <label className={`qr-image-picker ${controlsDisabled ? "disabled" : ""}`}>
-          <span>{imageBusy ? "Scanning image…" : "Scan an image"}</span>
+        <label className={`qr-image-picker ${controlsDisabled ? "disabled" : ""}`} aria-busy={imageBusy}>
+          <span>{imageBusy ? "Importing QR code…" : "Import QR code"}</span>
           <input
             className="visually-hidden"
             type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif,image/*"
+            accept="image/png,image/jpeg,image/webp"
+            aria-describedby={imageHelpId}
             disabled={controlsDisabled}
             onChange={(event) => void decodeImage(event)}
           />
         </label>
+
+        <small className="qr-image-picker-hint" id={imageHelpId}>PNG, JPEG, or WebP · maximum 10 MiB · processed locally</small>
 
         <button type="button" className="qr-scanner-fallback" onClick={useFallback}>
           Enter a setup link instead
