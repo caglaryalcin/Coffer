@@ -412,7 +412,7 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
       </div>
 
       {error && <div className="transfer-error" role="alert"><span>!</span>{error}</div>}
-      <div className="sr-status" aria-live="polite">{busy ? (tab === "import" ? "Reading and checking accounts…" : exporting === "2fas" ? "Creating your 2FAS backup…" : "Creating your Coffer backup…") : ""}</div>
+      <div className="sr-status" aria-live="polite">{busy ? (tab === "import" ? "Reading and checking accounts…" : exporting === "2fas" ? "Creating your 2fas export…" : "Creating your Coffer export…") : ""}</div>
 
       {tab === "import" ? (
         <div className="transfer-panel">
@@ -505,12 +505,12 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
             <div className="backup-passphrase-important export-passphrase-important" role="note"><span className="backup-passphrase-important-title"><span className="backup-passphrase-important-icon" aria-hidden="true">!</span>Important</span><small>Without a passphrase, anyone with this file can read your authentication secrets. Coffer cannot recover a forgotten passphrase.</small></div>
             {unprotectedBackupConfirm ? (
               <div className="final-confirm" role="alertdialog" aria-labelledby="unprotected-backup-confirm-title" aria-describedby="unprotected-backup-confirm-description">
-                <div><strong id="unprotected-backup-confirm-title">Create backup without a passphrase?</strong><span id="unprotected-backup-confirm-description">The downloaded file will contain readable authentication secrets.</span></div>
+                <div><strong id="unprotected-backup-confirm-title">Create export without a passphrase?</strong><span id="unprotected-backup-confirm-description">The downloaded file will contain readable authentication secrets.</span></div>
                 <button ref={unprotectedBackupBackRef} type="button" onClick={() => { restoreCofferExportFocusRef.current = true; setUnprotectedBackupConfirm(false); }} disabled={busy}>Go back</button>
-                <button type="button" onClick={() => void createCofferExport(true)} disabled={busy}>{exporting === "coffer" ? "Creating backup…" : "Download unprotected backup"}</button>
+                <button type="button" onClick={() => void createCofferExport(true)} disabled={busy}>{exporting === "coffer" ? "Creating export…" : "Download unprotected export"}</button>
               </div>
             ) : (
-              <div className="export-card-footer"><p>If you use a passphrase, store it separately from the backup file.</p><button ref={cofferExportButtonRef} className="transfer-primary" onClick={() => void createCofferExport()} disabled={busy}>{exporting === "coffer" ? "Creating backup…" : exportPassword || exportPasswordConfirm ? "Create protected backup" : "Create unprotected backup"} <span>↓</span></button></div>
+              <div className="export-card-footer"><p>If you use a passphrase, store it separately from the backup file.</p><button ref={cofferExportButtonRef} className="transfer-primary" onClick={() => void createCofferExport()} disabled={busy}>{exporting === "coffer" ? "Creating export…" : exportPassword || exportPasswordConfirm ? "Create protected backup" : "Create unprotected export"} <span>↓</span></button></div>
             )}
           </section>
 
@@ -520,7 +520,7 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
               <label><span>2FAS backup passphrase</span><input type="password" value={twoFasExportPassword} onChange={(event) => setTwoFasExportPassword(event.target.value)} placeholder="At least 12 characters" autoComplete="new-password" disabled={busy} /></label>
               <label><span>Confirm passphrase</span><input type="password" value={twoFasExportPasswordConfirm} onChange={(event) => setTwoFasExportPasswordConfirm(event.target.value)} placeholder="Repeat your passphrase" autoComplete="new-password" disabled={busy} /></label>
             </div>
-            <div className="export-card-footer"><p>Use 12+ printable ASCII characters for iOS and Android compatibility. 2FAS cannot recover this passphrase.</p><button className="transfer-primary" onClick={() => void createTwoFasExport()} disabled={busy}>{exporting === "2fas" ? "Creating 2FAS backup…" : "Create 2FAS backup"} <span>↓</span></button></div>
+            <div className="export-card-footer"><p>Use 12+ printable ASCII characters for iOS and Android compatibility. 2FAS cannot recover this passphrase.</p><button className="transfer-primary" onClick={() => void createTwoFasExport()} disabled={busy}>{exporting === "2fas" ? "Creating 2fas export…" : "Create 2fas export"} <span>↓</span></button></div>
           </section>
 
           <section className={`export-card danger ${plainOpen ? "open" : ""}`}>

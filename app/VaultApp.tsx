@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AccountEditor, { type AccountEditorCodePreview } from "./AccountEditor";
-import BulkGroupActions, { AccountSelectionIndicator, normalizeGroupName } from "./BulkGroupActions";
+import BulkGroupActions, { AccountSelectionIndicator, ArchiveBulkActions, normalizeGroupName } from "./BulkGroupActions";
 import CardViewMenu, { CARD_VIEW_STORAGE_KEY, parseCardView, readCardViewPreference, writeCardViewPreference, type CardView } from "./CardViewMenu";
 import GroupCustomizationDialog from "./GroupCustomizationDialog";
 import OverflowingIdentity from "./OverflowingIdentity";
@@ -2092,7 +2092,7 @@ export default function VaultApp() {
   }, [accounts, group, query, view]);
 
   const selectableVisibleIds = useMemo(
-    () => visibleAccounts.filter((account) => !account.archived).map((account) => account.id),
+    () => visibleAccounts.map((account) => account.id),
     [visibleAccounts],
   );
   const selectableVisibleIdSet = useMemo(() => new Set(selectableVisibleIds), [selectableVisibleIds]);
@@ -2310,6 +2310,66 @@ export default function VaultApp() {
     return true;
   };
 
+  const restoreSelectedArchivedAccounts = () => {
+    const blockReason = mutationBlockReason();
+    if (blockReason) {
+      setToast(blockReason === "conflict" || blockReason === "conflict-pending"
+        ? "Resolve the encrypted save conflict before restoring accounts."
+        : "Unlock your vault before restoring accounts.");
+      return false;
+    }
+    if (selectedVisibleAccountIds.size === 0) {
+      setToast("Select at least one account to restore.");
+      return false;
+    }
+
+    const selected = new Set(selectedVisibleAccountIds);
+    let restoredCount = 0;
+    const saved = setAccounts((current) => current.map((account) => {
+      if (!selected.has(account.id) || !account.archived) return account;
+      restoredCount += 1;
+      return { ...account, archived: false };
+    }));
+    if (!saved) return false;
+
+    exitSelectionMode();
+    setToast(`${restoredCount} ${restoredCount === 1 ? "account" : "accounts"} restored to All codes.`);
+    return true;
+  };
+
+  const deleteSelectedArchivedAccounts = () => {
+    const blockReason = mutationBlockReason();
+    if (blockReason) {
+      setToast(blockReason === "conflict" || blockReason === "conflict-pending"
+        ? "Resolve the encrypted save conflict before deleting accounts."
+        : "Unlock your vault before deleting accounts.");
+      return false;
+    }
+
+    const selected = new Set(selectedVisibleAccountIds);
+    const archivedSelectedCount = accounts.filter(
+      (account) => selected.has(account.id) && account.archived,
+    ).length;
+    if (archivedSelectedCount === 0) {
+      setToast("Select at least one archived account to delete.");
+      return false;
+    }
+
+    const confirmed = window.confirm(
+      `Permanently delete ${archivedSelectedCount} selected ${archivedSelectedCount === 1 ? "account" : "accounts"}?\n\nThis removes the selected accounts and their authenticator secrets from the encrypted vault. This action cannot be undone.`,
+    );
+    if (!confirmed) return false;
+
+    const saved = setAccounts((current) => current.filter(
+      (account) => !selected.has(account.id) || !account.archived,
+    ));
+    if (!saved) return false;
+
+    exitSelectionMode();
+    setToast(`${archivedSelectedCount} ${archivedSelectedCount === 1 ? "account was" : "accounts were"} permanently deleted from the encrypted vault.`);
+    return true;
+  };
+
   const copyCode = async (account: Account) => {
     if (locked) {
       setToast("Unlock your vault to copy a code.");
@@ -2397,6 +2457,31 @@ export default function VaultApp() {
     setToast(target.archived ? `${target.service} restored to All codes.` : `${target.service} moved to Archive.`);
   };
 
+  const restoreAllArchivedAccounts = () => {
+    const blockReason = mutationBlockReason();
+    if (blockReason === "conflict" || blockReason === "conflict-pending") {
+      setAccountMenuId(null);
+      setToast("Resolve the encrypted save conflict before restoring accounts.");
+      return;
+    }
+    if (blockReason || locked) {
+      setAccountMenuId(null);
+      setToast("Unlock your vault before restoring accounts.");
+      return;
+    }
+
+    let restoredCount = 0;
+    const saved = setAccounts((current) => current.map((account) => {
+      if (!account.archived) return account;
+      restoredCount += 1;
+      return { ...account, archived: false };
+    }));
+    if (!saved) return;
+
+    setAccountMenuId(null);
+    setToast(`${restoredCount} ${restoredCount === 1 ? "account" : "accounts"} restored to All codes.`);
+  };
+
   const deleteArchivedAccount = (id: string) => {
     const blockReason = mutationBlockReason();
     if (blockReason === "conflict" || blockReason === "conflict-pending") {
@@ -2421,15 +2506,8 @@ export default function VaultApp() {
       return;
     }
 
-    const confirmed = window.confirm(
-      `Permanently delete ${target.service} (${target.identity})?\n\nThis removes the account and its authenticator secret from the encrypted vault. This action cannot be undone.`,
-    );
-    if (!confirmed) {
-      setToast(`${target.service} remains in Archive.`);
-      return;
-    }
-
-    setAccounts((current) => current.filter((account) => account.id !== id || !account.archived));
+    const saved = setAccounts((current) => current.filter((account) => account.id !== id || !account.archived));
+    if (!saved) return;
     setToast(`${target.service} was permanently deleted from the encrypted vault.`);
   };
 
@@ -2647,6 +2725,24 @@ export default function VaultApp() {
     />
   );
 
+  const archiveBulkActions = (
+    <ArchiveBulkActions
+      active={selectionMode}
+      selectedCount={selectedVisibleAccountIds.size}
+      visibleCount={selectableVisibleIds.length}
+      allVisibleSelected={allVisibleSelected}
+      onBeginSelection={() => {
+        setAccountMenuId(null);
+        setSelectionMode(true);
+      }}
+      onSelectAllVisible={() => setSelectedAccountIds(new Set(selectableVisibleIds))}
+      onClearSelection={() => setSelectedAccountIds(new Set())}
+      onExitSelection={exitSelectionMode}
+      onRestore={restoreSelectedArchivedAccounts}
+      onDelete={deleteSelectedArchivedAccounts}
+    />
+  );
+
   return (
     <main className={`app-shell theme-${theme} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar" id="primary-sidebar">
@@ -2822,12 +2918,26 @@ export default function VaultApp() {
             </div>
           )}
 
+          {view === "archive" && !selectionMode && accounts.some((account) => account.archived) && (
+            <div className="title-row title-row-actions-only">
+              <div className="title-row-account-actions">
+                <button type="button" className="add-button restore-all-button" onClick={restoreAllArchivedAccounts}>
+                  <span aria-hidden="true">&#8634;</span>
+                  Restore all codes
+                </button>
+              </div>
+            </div>
+          )}
+
           {view === "archive" ? (
-            <section className="archive-explainer" aria-label="About Archive">
-              <span className="archive-explainer-icon" aria-hidden="true"><span className="nav-icon trash-icon" /></span>
-              <div><strong>Hidden, not deleted</strong><p>Archived accounts stay encrypted and keep generating codes until you restore them.</p></div>
-              <span>{accounts.filter((account) => account.archived).length} archived</span>
-            </section>
+            <>
+              <section className="archive-explainer" aria-label="About Archive">
+                <span className="archive-explainer-icon" aria-hidden="true"><span className="nav-icon trash-icon" /></span>
+                <div><strong>Hidden, not deleted</strong><p>Archived accounts stay encrypted and keep generating codes until you restore them.</p></div>
+                <span>{accounts.filter((account) => account.archived).length} archived</span>
+              </section>
+              {selectableVisibleIds.length > 0 && archiveBulkActions}
+            </>
           ) : query.trim() ? <p className="result-count" role="status">{visibleAccounts.length} {visibleAccounts.length === 1 ? "account" : "accounts"}</p> : null}
 
           {view !== "archive" && selectionMode && bulkGroupActions}
@@ -2844,7 +2954,7 @@ export default function VaultApp() {
                 const selected = selectedVisibleAccountIds.has(account.id);
                 const accessibleCurrentCode = currentCode?.replace(/\s/gu, "").split("").join(" ");
                 return <article className={`account-card ${account.archived ? "archived-card" : ""} ${selectionMode ? "selection-mode" : ""} ${selected ? "selected" : ""}`} key={account.id}>
-                  {selectionMode && !account.archived && (
+                  {selectionMode && (
                     <button
                       type="button"
                       className="account-selection-surface"
@@ -2862,7 +2972,7 @@ export default function VaultApp() {
                       iconDataUrl={account.iconDataUrl}
                     />
                     <div className="service-meta"><h2>{account.service}</h2><OverflowingIdentity text={account.identity} /></div>
-                    {selectionMode && !account.archived ? (
+                    {selectionMode ? (
                       <AccountSelectionIndicator selected={selected} />
                     ) : (
                       <div className="account-card-actions">
@@ -2878,7 +2988,7 @@ export default function VaultApp() {
                             <div className="account-menu" role="menu">
                               <button role="menuitem" onClick={(event) => openAccountEditor(account.id, event.currentTarget)}>Edit account</button>
                               {!account.archived && <button role="menuitem" onClick={() => toggleFavorite(account.id)}>{account.favorite ? "Remove from Favorites" : "Add to Favorites"}</button>}
-                              <button role="menuitem" onClick={() => toggleArchive(account.id)}>{account.archived ? "Restore to All codes" : "Move to Archive"}</button>
+                              {!account.archived && <button role="menuitem" onClick={() => toggleArchive(account.id)}>Move to Archive</button>}
                               {account.archived && <button className="danger" role="menuitem" onClick={() => deleteArchivedAccount(account.id)}>Delete permanently</button>}
                             </div>
                           )}
@@ -2888,7 +2998,7 @@ export default function VaultApp() {
                   </div>
                   <div className="code-row">
                     <div className="code-stack">
-                      {selectionMode && !account.archived ? (
+                      {selectionMode ? (
                         <span className={`code selection-code ${revealNextCode ? "expiring-code" : ""}`} aria-hidden="true"><span className="code-value">{locked ? "••• •••" : currentCode ?? "--- ---"}</span></span>
                       ) : (
                         <button
@@ -2897,7 +3007,7 @@ export default function VaultApp() {
                           aria-label={accessibleCurrentCode ? `Copy ${account.service} ${account.identity} code ${accessibleCurrentCode}` : `Copy ${account.service} ${account.identity} code when ready`}
                         ><span className="code-value" aria-hidden="true">{locked ? "••• •••" : currentCode ?? "--- ---"}</span></button>
                       )}
-                      <div className={`next-code ${revealNextCode ? "visible" : ""}`} aria-hidden={(selectionMode && !account.archived) || !revealNextCode ? true : undefined}>
+                      <div className={`next-code ${revealNextCode ? "visible" : ""}`} aria-hidden={selectionMode || !revealNextCode ? true : undefined}>
                         <span className="visually-hidden">{locked ? "Next code hidden" : nextCode ? `Next code ${nextCode.replace(/\s/gu, "").split("").join(" ")}` : "Next code loading"}</span>
                         <span className="next-code-label" aria-hidden="true">Next</span>
                         <span className="next-code-value" aria-hidden="true">{locked ? "••• •••" : nextCode ?? "--- ---"}</span>

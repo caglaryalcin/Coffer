@@ -24,6 +24,20 @@ export type AccountSelectionIndicatorProps = {
   selected: boolean;
 };
 
+export type ArchiveBulkActionsProps = {
+  active: boolean;
+  selectedCount: number;
+  visibleCount: number;
+  allVisibleSelected: boolean;
+  disabled?: boolean;
+  onBeginSelection: () => void;
+  onSelectAllVisible: () => void;
+  onClearSelection: () => void;
+  onExitSelection: () => void;
+  onRestore: () => boolean | void;
+  onDelete: () => boolean | void;
+};
+
 export function normalizeGroupName(value: string) {
   return value.trim().replace(/\s+/g, " ");
 }
@@ -50,6 +64,93 @@ export function AccountSelectionIndicator({
     >
       <span className="account-selection-mark" aria-hidden="true" />
     </span>
+  );
+}
+
+export function ArchiveBulkActions({
+  active,
+  selectedCount,
+  visibleCount,
+  allVisibleSelected,
+  disabled = false,
+  onBeginSelection,
+  onSelectAllVisible,
+  onClearSelection,
+  onExitSelection,
+  onRestore,
+  onDelete,
+}: ArchiveBulkActionsProps) {
+  const selectionDisabled = disabled || visibleCount === 0;
+  const actionDisabled = disabled || selectedCount === 0;
+
+  if (!active) {
+    return (
+      <div className="bulk-group-launch archive-bulk-launch">
+        <button
+          type="button"
+          className="bulk-select-trigger"
+          onClick={onBeginSelection}
+          disabled={selectionDisabled}
+        >
+          <span className="bulk-select-icon" aria-hidden="true" />
+          Select accounts
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <section className="bulk-group-actions archive-bulk-actions" aria-label="Archived account selection actions">
+      <div className="bulk-action-bar">
+        <div className="bulk-selection-summary" aria-live="polite" aria-atomic="true">
+          <strong>{selectedCount} selected</strong>
+          <span>{visibleCount} visible</span>
+        </div>
+
+        <div className="bulk-action-buttons">
+          <button
+            type="button"
+            className="bulk-secondary-action"
+            onClick={onSelectAllVisible}
+            disabled={selectionDisabled || allVisibleSelected}
+          >
+            {allVisibleSelected ? "All visible selected" : "Select all visible"}
+          </button>
+          <button
+            type="button"
+            className="bulk-secondary-action"
+            onClick={onClearSelection}
+            disabled={actionDisabled}
+          >
+            Clear selection
+          </button>
+          <button
+            type="button"
+            className="bulk-secondary-action archive-restore-action"
+            onClick={onRestore}
+            disabled={actionDisabled}
+          >
+            Restore selected
+          </button>
+          <button
+            type="button"
+            className="bulk-danger-action"
+            onClick={onDelete}
+            disabled={actionDisabled}
+          >
+            Delete selected
+          </button>
+          <button
+            type="button"
+            className="bulk-done-action"
+            onClick={onExitSelection}
+            disabled={disabled}
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }
 
