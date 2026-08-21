@@ -47,5 +47,5 @@ yarn-error.log*
 !public/
 !public/**
 
-# Canonical source used by the service-brand generator during prebuild.
-!scripts/brand-assets/azure.svg
+# Canonical sources used by the service-brand generator during prebuild.
+!scripts/brand-assets/*.svg

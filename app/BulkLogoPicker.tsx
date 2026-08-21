@@ -35,6 +35,8 @@ export type BulkLogoPickerProps = {
   open: boolean;
   selectedCount: number;
   brandOptions: readonly AccountIconOption[];
+  /** Shared platform used to seed suggestions when the search is empty. */
+  suggestedService?: string | null;
   /**
    * Custom-logo bytes used by accounts outside the current selection. Replaced
    * selected logos must be excluded so the picker can enforce the vault limit.
@@ -75,6 +77,7 @@ export function retainedAccountIconBytes(
 function BulkLogoPickerDialog({
   selectedCount,
   brandOptions,
+  suggestedService,
   retainedCustomLogoBytes,
   previewAccount,
   disabled = false,
@@ -100,6 +103,7 @@ function BulkLogoPickerDialog({
   const openerRef = useRef<HTMLElement | null>(null);
   const restoreFocusFrameRef = useRef<number | null>(null);
   const unavailable = disabled || busy || logoBusy;
+  const suggestedLogoQuery = suggestedService?.trim() ?? "";
 
   const close = useCallback(() => {
     if (unavailable) return;
@@ -167,10 +171,11 @@ function BulkLogoPickerDialog({
 
   const availableOptions = useMemo(() => {
     const trimmedQuery = query.trim();
-    if (trimmedQuery) {
+    const effectiveQuery = trimmedQuery || suggestedLogoQuery;
+    if (effectiveQuery) {
       return findAccountIconOptions(
         brandOptions,
-        trimmedQuery,
+        effectiveQuery,
         choice === "catalog" ? iconBrand : null,
       );
     }
@@ -185,7 +190,11 @@ function BulkLogoPickerDialog({
     const results = initials ? [initials, ...popular] : popular;
     if (selected && !results.some((option) => option.id === selected.id)) results.splice(initials ? 1 : 0, 0, selected);
     return results.slice(0, 12);
-  }, [brandOptions, choice, iconBrand, query]);
+  }, [brandOptions, choice, iconBrand, query, suggestedLogoQuery]);
+
+  const visibleCatalogIconCount = availableOptions.filter(
+    (option) => option.id !== COFFER_INITIALS_BRAND_ID,
+  ).length;
 
   const automatic = () => {
     logoRequestRef.current += 1;
@@ -321,14 +330,22 @@ function BulkLogoPickerDialog({
                 type="search"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search local logos"
+                placeholder={suggestedLogoQuery
+                  ? `Search logos for ${suggestedLogoQuery}`
+                  : "Search local logos"}
                 autoComplete="off"
               />
               <small>{choice === "custom"
                 ? "Uploaded logo ready for the selected accounts."
                 : selectedOption
                   ? `${selectedOption.label}${selectedOption.description ? ` — ${selectedOption.description}` : ""} selected from Coffer's local catalog.`
-                  : "Automatic matching keeps each account linked to its own service name."}</small>
+                  : query.trim()
+                    ? visibleCatalogIconCount === 0
+                      ? "No catalog logos match. Automatic matching remains selected."
+                      : `${visibleCatalogIconCount} matching local ${visibleCatalogIconCount === 1 ? "logo" : "logos"}. Choose one below.`
+                    : suggestedLogoQuery
+                      ? "Suggested logos are based on the selected accounts' shared platform. Choose one or keep automatic matching."
+                      : "Automatic matching keeps each account linked to its own service name."}</small>
             </div>
           </div>
 

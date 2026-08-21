@@ -77,10 +77,13 @@ let selfhstFamiliesByReference: ReadonlyMap<string, GeneratedSelfhstServiceBrand
 let cachedSelfhstBrandOptions: readonly ServiceBrandOption[] | null = null;
 
 const curatedMatchRules: readonly CuratedMatchRule[] = [
+  { id: "atomic", title: "Atomic Mail", aliases: ["atomic mail", "atomicmail"], decorated: true, domains: ["atomicmail.io"] },
   { id: "github", aliases: ["github"], color: "#181717", decorated: true, domains: ["github.com"] },
   { id: "google", aliases: ["google", "gmail", "google workspace"], color: "#4285f4", decorated: true, domains: ["google.com", "gmail.com", "googlemail.com"] },
   { id: "microsoft", aliases: ["microsoft", "microsoft 365", "office 365", "outlook"], color: "#5e5e5e", decorated: true, domains: ["microsoft.com", "microsoftonline.com", "live.com", "outlook.com", "office.com"] },
   { id: "azure", title: "Microsoft Azure", aliases: ["azure", "microsoft azure"], color: "#ffffff", decorated: true, domains: ["azure.com"] },
+  { id: "heroku", aliases: ["heroku"], color: "#f4f3ee", decorated: true, domains: ["heroku.com"] },
+  { id: "snapp", aliases: ["snapp", "snapp app", "snapp platform"], color: "#131b2e", decorated: true },
   { id: "aws", title: "Amazon Web Services", aliases: ["aws", "amazon web services"], color: "#232f3e", decorated: true, domains: ["aws.amazon.com", "amazonaws.com"] },
   { id: "amazon", title: "Amazon", aliases: ["amazon"], color: "#9a5b00", decorated: true, domains: ["amazon.com"] },
   { id: "apple", aliases: ["apple", "icloud"], color: "#000000", decorated: true, domains: ["apple.com", "icloud.com"] },

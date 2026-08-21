@@ -11,7 +11,11 @@ Icons license: CC BY 4.0. Font Awesome project: https://fontawesome.com
 
 The following manually curated local assets are proprietary brand assets and are not
 covered by the Simple Icons, Font Awesome, or Coffer licenses:
+atomic (Atomic Mail): Atomic Mail; Atomic Mail Press Kit; https://atomicmail.io/press-kit
 azure (Microsoft Azure): Microsoft; Microsoft Trademark and Brand Guidelines; https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks
+heroku (Heroku): Heroku / Salesforce; Heroku Brand Guidelines; https://devcenter.heroku.com/articles/heroku-brand-guidelines
+heroku-light (Heroku): Heroku / Salesforce; Heroku Brand Guidelines; https://devcenter.heroku.com/articles/heroku-brand-guidelines
+snapp (Snapp): Snapp; User-provided proprietary brand asset; source terms were not supplied
 
 Additional selectable service-icon variants are vendored from selfh.st/icons 4.0.3:
 Project: https://github.com/selfhst/icons

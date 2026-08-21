@@ -8,7 +8,7 @@ import CardViewMenu, { CARD_VIEW_STORAGE_KEY, parseCardView, readCardViewPrefere
 import GroupCustomizationDialog from "./GroupCustomizationDialog";
 import OverflowingIdentity from "./OverflowingIdentity";
 import QrScanner from "./QrScanner";
-import ServiceLogo, { COFFER_INITIALS_BRAND_ID, isServiceBrandId, selfhstServiceBrandOptions, serviceBrandById, serviceBrandIds } from "./ServiceLogo";
+import ServiceLogo, { COFFER_INITIALS_BRAND_ID, isServiceBrandId, selfhstServiceBrandOptions, serviceBrandById, serviceBrandFor, serviceBrandIds } from "./ServiceLogo";
 import SidebarFooter from "./SidebarFooter";
 import SettingsCenter, { type UserProfile, type UserProfilePatch } from "./SettingsCenter";
 import SignInScreen from "./SignInScreen";
@@ -114,6 +114,36 @@ const LOCK_SAVE_GRACE_MS = VAULT_API_TIMEOUT_MS + 750;
 const RESUME_ACTIVITY_WRITE_INTERVAL_MS = 1_000;
 const ACCOUNT_EVENT_CHANNEL_NAME = "coffer-account-events-v1";
 const ACCOUNT_DELETION_CLEANUP_MS = VAULT_API_TIMEOUT_MS + 6_000;
+
+function normalizedServiceName(value: string): string {
+  return value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase("en");
+}
+
+function commonLogoSuggestion(
+  accounts: readonly Pick<Account, "id" | "service">[],
+  selectedIds: ReadonlySet<string>,
+): string | null {
+  const selected = accounts.filter((account) => selectedIds.has(account.id));
+  if (selected.length === 0) return null;
+
+  const firstService = selected[0].service.trim();
+  const normalizedFirstService = normalizedServiceName(firstService);
+  if (normalizedFirstService && selected.every(
+    (account) => normalizedServiceName(account.service) === normalizedFirstService,
+  )) return firstService;
+
+  const resolved = selected.map((account) => {
+    const brandId = serviceBrandFor(account.service);
+    return brandId ? serviceBrandById(brandId) : null;
+  });
+  const firstBrand = resolved[0];
+  if (firstBrand && resolved.every(
+    (brand) => brand?.familyId === firstBrand.familyId,
+  )) {
+    return firstBrand.title;
+  }
+  return null;
+}
 
 async function settleWithin<T>(
   promise: Promise<T>,
@@ -2205,6 +2235,10 @@ export default function VaultApp() {
     (account) => !selectedVisibleAccountIds.has(account.id) || account.favorite,
   );
   const selectedLogoPreviewAccount = accounts.find((account) => selectedVisibleAccountIds.has(account.id)) ?? null;
+  const selectedLogoSuggestedService = useMemo(
+    () => commonLogoSuggestion(accounts, selectedVisibleAccountIds),
+    [accounts, selectedVisibleAccountIds],
+  );
   const retainedCustomLogoBytes = retainedAccountIconBytes(accounts, selectedVisibleAccountIds);
 
   const exitSelectionMode = () => {
@@ -3473,6 +3507,7 @@ export default function VaultApp() {
         open={bulkLogoOpen}
         selectedCount={selectedVisibleAccountIds.size}
         brandOptions={accountIconOptions}
+        suggestedService={selectedLogoSuggestedService}
         retainedCustomLogoBytes={retainedCustomLogoBytes}
         previewAccount={selectedLogoPreviewAccount}
         returnFocusTo={bulkLogoReturnFocusTo}

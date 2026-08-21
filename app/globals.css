@@ -367,7 +367,7 @@ h1 { margin: 0; font-size: clamp(34px, 4vw, 53px); line-height: .98; letter-spac
 .account-selection-indicator { width: 44px; height: 44px; position: absolute; right: -7px; top: -7px; display: grid; place-items: center; border-radius: 12px; color: #68705f; }
 .account-selection-mark { width: 24px; height: 24px; position: relative; display: block; border: 1.5px solid #9ca293; border-radius: 8px; background: white; transition: border-color .16s ease, background .16s ease, transform .16s ease; }
 .account-selection-indicator.selected .account-selection-mark { border-color: #708448; background: #708448; }
-.account-selection-indicator.selected .account-selection-mark::after { content: ""; width: 9px; height: 5px; position: absolute; left: 6px; top: 6px; border-left: 2px solid white; border-bottom: 2px solid white; transform: rotate(-45deg); }
+.account-selection-indicator.selected .account-selection-mark::after { content: ""; width: 9px; height: 5px; position: absolute; inset: 0; margin: auto; border-left: 2px solid white; border-bottom: 2px solid white; transform: rotate(-45deg); transform-origin: center; }
 
 .result-count { margin: 18px 0 17px; color: #90938a; font-size: 10px; text-align: right; }
 .is-locked .code { color: #a2a59c; letter-spacing: .14em; }
@@ -588,8 +588,9 @@ h1 { margin: 0; font-size: clamp(34px, 4vw, 53px); line-height: .98; letter-spac
 .transfer-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; }
 .local-only-note { min-width: 210px; padding: 14px 16px 14px 48px; position: relative; border: 1px solid #dfe4d4; border-radius: 15px; background: #edf2df; color: #4e5544; font-size: 10px; font-weight: 680; line-height: 1.45; }
 .local-only-note small { color: #7e8673; font-size: 9px; font-weight: 480; }
-.local-note-icon { width: 25px; height: 25px; position: absolute; left: 14px; top: 15px; border: 1.5px solid #5f674f; border-radius: 8px; }
-.local-note-icon::before { content: ""; position: absolute; width: 7px; height: 7px; left: 7px; top: 7px; border-radius: 50%; background: var(--lime-dark); }
+.local-note-icon { width: 25px; height: 25px; position: absolute; left: 14px; top: 15px; border: 1.5px solid currentColor; border-radius: 8px; color: #5f674f; }
+.local-note-icon::before { content: ""; width: 8px; height: 7px; position: absolute; left: 50%; top: 4px; border: 1.5px solid currentColor; border-bottom: 0; border-radius: 6px 6px 0 0; transform: translateX(-50%); }
+.local-note-icon::after { content: ""; width: 12px; height: 9px; position: absolute; left: 50%; top: 9px; border: 1.5px solid currentColor; border-radius: 3px; transform: translateX(-50%); }
 .transfer-tabs { display: inline-flex; gap: 4px; margin: 0 0 17px; padding: 4px; border-radius: 13px; background: #e8e7e1; }
 .transfer-tabs button { min-width: 112px; min-height: 44px; padding: 0 18px; border: 0; border-radius: 10px; background: transparent; color: #686c64; font-size: var(--type-ui); font-weight: 700; cursor: pointer; }
 .transfer-tabs button.active { background: var(--ink); color: white; box-shadow: 0 4px 10px rgba(28,30,25,.12); }
@@ -1027,7 +1028,7 @@ h1 { margin: 0; font-size: clamp(34px, 4vw, 53px); line-height: .98; letter-spac
 
 .theme-light .local-only-note { border-color: rgba(202,115,115,.42); background: var(--accent-soft); color: #634747; }
 .theme-light .local-only-note small { color: #856565; }
-.theme-light .local-note-icon { border-color: var(--theme-accent-text); }
+.theme-light .local-note-icon { color: var(--theme-accent-text); }
 .theme-light .source-card:hover { border-color: var(--theme-accent); }
 .theme-light .source-card.active { border-color: var(--theme-accent); background: var(--accent-soft); box-shadow: 0 0 0 2px rgba(202,115,115,.12); }
 .theme-light .source-card em { background: var(--theme-accent); color: var(--ink); }
@@ -1393,7 +1394,7 @@ body.theme-dark { background: #181a1b; color-scheme: dark; }
 .theme-dark .export-card { box-shadow: 0 18px 50px rgba(0,0,0,.12); }
 .theme-dark .local-only-note { border-color: var(--theme-accent); background: var(--accent-soft); color: #d8d3d0; }
 .theme-dark .local-only-note small { color: var(--muted); }
-.theme-dark .local-note-icon { border-color: var(--theme-accent); }
+.theme-dark .local-note-icon { color: var(--theme-accent); }
 .theme-dark .source-card,
 .theme-dark .transfer-form,
 .theme-dark .review-item,

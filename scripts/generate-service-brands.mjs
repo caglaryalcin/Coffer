@@ -123,6 +123,16 @@ async function totalAssetBytes(files) {
 
 const curatedBrandAssets = [
   {
+    aliases: ["atomic", "atomic mail", "atomicmail"],
+    color: "#f4f3ee",
+    file: "atomic.svg",
+    id: "atomic",
+    provider: "Atomic Mail",
+    terms: "Atomic Mail Press Kit",
+    termsUrl: "https://atomicmail.io/press-kit",
+    title: "Atomic Mail",
+  },
+  {
     aliases: ["azure", "microsoft azure"],
     color: "#ffffff",
     file: "azure.svg",
@@ -132,6 +142,36 @@ const curatedBrandAssets = [
     termsUrl: "https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks",
     title: "Microsoft Azure",
   },
+  {
+    aliases: ["heroku"],
+    color: "#f4f3ee",
+    file: "heroku.svg",
+    id: "heroku",
+    provider: "Heroku / Salesforce",
+    terms: "Heroku Brand Guidelines",
+    termsUrl: "https://devcenter.heroku.com/articles/heroku-brand-guidelines",
+    title: "Heroku",
+  },
+  {
+    aliases: ["heroku light"],
+    color: "#f4f3ee",
+    file: "heroku-light.svg",
+    id: "heroku-light",
+    provider: "Heroku / Salesforce",
+    terms: "Heroku Brand Guidelines",
+    termsUrl: "https://devcenter.heroku.com/articles/heroku-brand-guidelines",
+    title: "Heroku",
+  },
+  {
+    aliases: ["snapp", "snapp app", "snapp platform"],
+    color: "#131b2e",
+    file: "snapp.svg",
+    id: "snapp",
+    provider: "Snapp",
+    terms: "User-provided proprietary brand asset; source terms were not supplied",
+    termsUrl: null,
+    title: "Snapp",
+  },
 ];
 const curatedBrandAssetsById = new Map(curatedBrandAssets.map((brand) => [brand.id, brand]));
 
@@ -139,6 +179,11 @@ const curatedBrandAssetsById = new Map(curatedBrandAssets.map((brand) => [brand.
 // light/dark/classic assets can join an existing family without adding UI
 // conditionals. `automatic: false` keeps explicit variants out of name matching.
 const brandPickerMetadata = new Map([
+  ["atomic", {
+    automatic: true,
+    variantLabel: "Atomic Mail mark",
+    pickerKeys: ["atomic", "atomic mail", "atomicmail"],
+  }],
   ["azure", {
     automatic: true,
     variantLabel: "Azure color mark",
@@ -149,6 +194,24 @@ const brandPickerMetadata = new Map([
     variantLabel: "Four-square Microsoft mark",
     pickerKeys: ["azure", "microsoft azure"],
     variantOrder: 1,
+  }],
+  ["heroku", {
+    automatic: true,
+    familyId: "heroku",
+    variantLabel: "Filled mark",
+    pickerKeys: ["heroku"],
+  }],
+  ["heroku-light", {
+    automatic: false,
+    familyId: "heroku",
+    variantLabel: "Light mark",
+    pickerKeys: ["heroku", "heroku light"],
+    variantOrder: 1,
+  }],
+  ["snapp", {
+    automatic: true,
+    variantLabel: "Color mark",
+    pickerKeys: ["snapp", "snapp app", "snapp platform"],
   }],
   ["x", {
     automatic: true,
@@ -298,10 +361,15 @@ function validateCuratedSvg(brand, source) {
   if (!/^\s*<svg(?:\s|>)/u.test(source)) {
     throw new Error(`Curated brand asset is not an SVG document: ${brand.file}`);
   }
+  const hasExternalCssUrl = [...source.matchAll(/\burl\(\s*["']?([^)"']+)/giu)]
+    .some(([, target]) => !target.trim().startsWith("#"));
   if (
-    /<(?:foreignObject|script)\b/iu.test(source) ||
+    /<(?:foreignObject|script|iframe|object|embed|image|audio|video|canvas|link|animate|set)\b/iu.test(source) ||
+    /<!DOCTYPE|<!ENTITY|<\?xml-stylesheet/iu.test(source) ||
     /\bon[a-z]+\s*=/iu.test(source) ||
-    /\b(?:href|xlink:href)\s*=\s*["'](?!#)/iu.test(source)
+    /\b(?:href|xlink:href)\s*=\s*["'](?!#)/iu.test(source) ||
+    /@import\b|javascript\s*:/iu.test(source) ||
+    hasExternalCssUrl
   ) {
     throw new Error(`Curated brand asset contains active or external content: ${brand.file}`);
   }
@@ -471,7 +539,7 @@ Icons license: CC BY 4.0. Font Awesome project: https://fontawesome.com
 
 The following manually curated local assets are proprietary brand assets and are not
 covered by the Simple Icons, Font Awesome, or Coffer licenses:
-${curatedBrandAssets.map((brand) => `${brand.id} (${brand.title}): ${brand.provider}; ${brand.terms}; ${brand.termsUrl}`).join("\n")}
+${curatedBrandAssets.map((brand) => `${brand.id} (${brand.title}): ${brand.provider}; ${brand.terms}${brand.termsUrl ? `; ${brand.termsUrl}` : ""}`).join("\n")}
 
 Additional selectable service-icon variants are vendored from selfh.st/icons ${selfhstSource.version}:
 Project: ${selfhstSource.repository}
