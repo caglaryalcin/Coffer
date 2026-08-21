@@ -99,6 +99,13 @@ export type SaveVaultInput = {
   payload: EncryptedVaultPayload;
 };
 
+export type DeleteAccountInput = {
+  sessionToken: string;
+  vaultId: string;
+  authProof: Uint8Array;
+  rateKey: string;
+};
+
 export type IdentifyResult =
   | { configured: false }
   | {
@@ -289,34 +296,36 @@ export class VaultStore {
     }
     await this.recoverLegacyClaim();
 
-    let principal: VaultSessionPrincipal = { kind: "user", accountKey };
-    let stored = await this.readStoredVault(this.userVaultPath(accountKey));
-    if (!stored) {
-      stored = await this.readStoredVault(this.vaultPath);
-      principal = { kind: "legacy" };
-    }
-    const failureKey = principal.kind === "legacy" && stored
-      ? `login:${rateKey}:legacy`
-      : `login:${rateKey}:${accountKey}`;
-    this.assertLoginAllowed(failureKey);
-    if (!stored || !proofMatches(stored, authProof)) {
-      const failure = this.recordFailedLogin(failureKey);
-      if (failure.blockedUntil > this.now()) {
-        throw this.rateLimitError(failure.blockedUntil, this.now());
+    return this.withMutationLock(async () => {
+      let principal: VaultSessionPrincipal = { kind: "user", accountKey };
+      let stored = await this.readStoredVault(this.userVaultPath(accountKey));
+      if (!stored) {
+        stored = await this.readStoredVault(this.vaultPath);
+        principal = { kind: "legacy" };
       }
-      throw new VaultStoreError(
-        "invalid_credentials",
-        "The account identifier or password is incorrect.",
-      );
-    }
-    this.failedLogins.delete(failureKey);
-    const session = this.issueSession(principal);
-    return {
-      revision: stored.revision,
-      payload: structuredClone(stored.payload),
-      legacy: principal.kind === "legacy",
-      ...session,
-    };
+      const failureKey = principal.kind === "legacy" && stored
+        ? `login:${rateKey}:legacy`
+        : `login:${rateKey}:${accountKey}`;
+      this.assertLoginAllowed(failureKey);
+      if (!stored || !proofMatches(stored, authProof)) {
+        const failure = this.recordFailedLogin(failureKey);
+        if (failure.blockedUntil > this.now()) {
+          throw this.rateLimitError(failure.blockedUntil, this.now());
+        }
+        throw new VaultStoreError(
+          "invalid_credentials",
+          "The account identifier or password is incorrect.",
+        );
+      }
+      this.failedLogins.delete(failureKey);
+      const session = this.issueSession(principal);
+      return {
+        revision: stored.revision,
+        payload: structuredClone(stored.payload),
+        legacy: principal.kind === "legacy",
+        ...session,
+      };
+    });
   }
 
   async loginWithSession(
@@ -328,33 +337,39 @@ export class VaultStore {
       throw new VaultStoreError("invalid_input", "The vault proof is invalid.");
     }
     await this.recoverLegacyClaim();
-    const existingSession = this.validSession(sessionToken);
-    if (!existingSession || existingSession.principal.kind !== "user") {
-      throw new VaultStoreError("unauthorized", "A valid account session is required.");
-    }
-    const { accountKey } = existingSession.principal;
-    const failureKey = `resume:${rateKey}:${accountKey}`;
-    this.assertLoginAllowed(failureKey);
-    const stored = await this.readStoredVault(this.userVaultPath(accountKey));
-    if (!stored || !proofMatches(stored, authProof)) {
-      const failure = this.recordFailedLogin(failureKey);
-      if (failure.blockedUntil > this.now()) {
-        throw this.rateLimitError(failure.blockedUntil, this.now());
+
+    return this.withMutationLock(async () => {
+      const existingSession = this.validSession(sessionToken);
+      if (!existingSession || existingSession.principal.kind !== "user") {
+        throw new VaultStoreError(
+          "unauthorized",
+          "A valid account session is required.",
+        );
       }
-      throw new VaultStoreError(
-        "invalid_credentials",
-        "The account identifier or password is incorrect.",
-      );
-    }
-    this.failedLogins.delete(failureKey);
-    this.deleteSession(sessionToken);
-    const session = this.issueSession({ kind: "user", accountKey });
-    return {
-      revision: stored.revision,
-      payload: structuredClone(stored.payload),
-      legacy: false,
-      ...session,
-    };
+      const { accountKey } = existingSession.principal;
+      const failureKey = `resume:${rateKey}:${accountKey}`;
+      this.assertLoginAllowed(failureKey);
+      const stored = await this.readStoredVault(this.userVaultPath(accountKey));
+      if (!stored || !proofMatches(stored, authProof)) {
+        const failure = this.recordFailedLogin(failureKey);
+        if (failure.blockedUntil > this.now()) {
+          throw this.rateLimitError(failure.blockedUntil, this.now());
+        }
+        throw new VaultStoreError(
+          "invalid_credentials",
+          "The account identifier or password is incorrect.",
+        );
+      }
+      this.failedLogins.delete(failureKey);
+      this.deleteSession(sessionToken);
+      const session = this.issueSession({ kind: "user", accountKey });
+      return {
+        revision: stored.revision,
+        payload: structuredClone(stored.payload),
+        legacy: false,
+        ...session,
+      };
+    });
   }
 
   async claimLegacy(
@@ -493,6 +508,64 @@ export class VaultStore {
     });
   }
 
+  async deleteAccount(input: DeleteAccountInput): Promise<void> {
+    if (
+      input.authProof.byteLength !== 32 ||
+      !isCanonicalEncodedBytes(input.vaultId, 16)
+    ) {
+      throw new VaultStoreError("invalid_input", "The account proof is invalid.");
+    }
+    await this.recoverLegacyClaim();
+    this.requireUserSession(input.sessionToken);
+
+    await this.withMutationLock(async () => {
+      const activeSession = this.requireUserSession(input.sessionToken);
+      if (activeSession.principal.kind !== "user") {
+        throw new VaultStoreError(
+          "unauthorized",
+          "The account could not be authorized for deletion.",
+        );
+      }
+      const { accountKey } = activeSession.principal;
+      const failureKey = `delete:${input.rateKey.slice(0, 256)}:${accountKey}`;
+      this.assertLoginAllowed(failureKey);
+
+      const path = this.userVaultPath(accountKey);
+      const stored = await this.readStoredVault(path);
+      if (!stored) {
+        this.revokeAccountSessions(accountKey);
+        throw new VaultStoreError(
+          "unauthorized",
+          "The account could not be authorized for deletion.",
+        );
+      }
+      if (stored.header.vaultId !== input.vaultId) {
+        throw new VaultStoreError(
+          "unauthorized",
+          "The account could not be authorized for deletion.",
+        );
+      }
+      if (!proofMatches(stored, input.authProof)) {
+        const failure = this.recordFailedLogin(failureKey);
+        if (failure.blockedUntil > this.now()) {
+          throw this.rateLimitError(failure.blockedUntil, this.now());
+        }
+        throw new VaultStoreError(
+          "invalid_credentials",
+          "The account password is incorrect.",
+        );
+      }
+
+      await this.removeLegacyArtifactsForAccount(accountKey, stored);
+      await unlink(path).catch((error: unknown) => {
+        if (!isNodeError(error, "ENOENT")) throw error;
+      });
+      await syncDirectoryBestEffort(dirname(path));
+      this.revokeAccountSessions(accountKey);
+      this.clearFailedLoginsForAccount(accountKey);
+    });
+  }
+
   hasValidSession(sessionToken: string): boolean {
     return Boolean(this.validSession(sessionToken));
   }
@@ -538,6 +611,17 @@ export class VaultStore {
   private deleteSession(sessionToken: string): void {
     if (!isCanonicalBase64Url(sessionToken, 32)) return;
     this.sessions.delete(hashSessionToken(sessionToken));
+  }
+
+  private revokeAccountSessions(accountKey: string): void {
+    for (const [tokenHash, session] of this.sessions) {
+      if (
+        session.principal.kind === "user" &&
+        session.principal.accountKey === accountKey
+      ) {
+        this.sessions.delete(tokenHash);
+      }
+    }
   }
 
   private issueSession(principal: VaultSessionPrincipal): {
@@ -595,6 +679,15 @@ export class VaultStore {
     this.failedLogins.set(rateKey, state);
     this.pruneBoundedMap(this.failedLogins, rateKey, 1_024);
     return state;
+  }
+
+  private clearFailedLoginsForAccount(accountKey: string): void {
+    const accountSuffix = `:${accountKey}`;
+    for (const failureKey of this.failedLogins.keys()) {
+      if (failureKey.endsWith(accountSuffix)) {
+        this.failedLogins.delete(failureKey);
+      }
+    }
   }
 
   private recordIdentifyRequest(rateKey: string): void {
@@ -697,6 +790,30 @@ export class VaultStore {
       return;
     }
     await this.atomicWriteJson(this.legacyBackupPath, legacy);
+  }
+
+  private async removeLegacyArtifactsForAccount(
+    accountKey: string,
+    stored: StoredVaultFile,
+  ): Promise<void> {
+    const marker = await this.readLegacyClaimMarker();
+    if (!marker || marker.accountKey !== accountKey) return;
+
+    const backup = await this.readStoredVault(this.legacyBackupPath);
+    if (backup && !storedVaultAccountsEqual(backup, stored)) {
+      throw new VaultStoreError(
+        "corrupt_store",
+        "The legacy vault backup does not match this account.",
+      );
+    }
+
+    await unlink(this.legacyBackupPath).catch((error: unknown) => {
+      if (!isNodeError(error, "ENOENT")) throw error;
+    });
+    await unlink(this.legacyClaimPath).catch((error: unknown) => {
+      if (!isNodeError(error, "ENOENT")) throw error;
+    });
+    await syncDirectoryBestEffort(this.dataDir);
   }
 
   private async recoverLegacyClaim(): Promise<void> {
@@ -855,6 +972,20 @@ function storedVaultsEqual(first: StoredVaultFile, second: StoredVaultFile): boo
   const firstHash = createHash("sha256").update(JSON.stringify(first)).digest();
   const secondHash = createHash("sha256").update(JSON.stringify(second)).digest();
   return firstHash.byteLength === secondHash.byteLength && timingSafeEqual(firstHash, secondHash);
+}
+
+function storedVaultAccountsEqual(
+  first: StoredVaultFile,
+  second: StoredVaultFile,
+): boolean {
+  const accountIdentity = (stored: StoredVaultFile) => JSON.stringify({
+    createdAt: stored.createdAt,
+    authVerifier: stored.authVerifier,
+    header: stored.header,
+  });
+  const firstHash = createHash("sha256").update(accountIdentity(first)).digest();
+  const secondHash = createHash("sha256").update(accountIdentity(second)).digest();
+  return timingSafeEqual(firstHash, secondHash);
 }
 
 function hashProof(authProof: Uint8Array): string {

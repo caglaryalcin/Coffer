@@ -234,6 +234,20 @@ export async function saveVault(
   return { revision: body.revision, updatedAt: body.updatedAt };
 }
 
+export async function deleteVaultAccount(
+  vaultId: string,
+  authProof: string,
+): Promise<void> {
+  const { body, status } = await postVault({
+    action: "delete_account",
+    vaultId,
+    authProof,
+  });
+  if (status !== 204 || body !== null) {
+    invalidResponse("The vault server returned an invalid account deletion result.", status);
+  }
+}
+
 export async function logoutVault(): Promise<void> {
   const { body, status } = await postVault({ action: "logout" });
   if (status !== 204 || body !== null) {

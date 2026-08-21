@@ -13,8 +13,8 @@ import SignInScreen from "./SignInScreen";
 import ThemeToggle from "./ThemeToggle";
 import TransferCenter, { type ImportDecision } from "./TransferCenter";
 import { formatCode, generateTotp, isTotpExpiring, isValidBase32, normalizeSecret, parseOtpAuthUri, totpWindow, type TotpAlgorithm } from "../lib/totp";
-import { claimLegacyVault, getVaultBootstrap, identifyVault, loginVault, logoutVault, saveVault, setupVault, VAULT_API_TIMEOUT_MS, VaultApiError } from "../lib/vault-api";
-import { createAuthProof, createEncryptedVault, decryptVaultPayload, encryptVaultPayload, unlockVaultHeader, type EncryptedVaultHeader, type VaultPayloadCipher, type VaultRuntime } from "../lib/vault-crypto";
+import { claimLegacyVault, deleteVaultAccount, getVaultBootstrap, identifyVault, loginVault, logoutVault, saveVault, setupVault, VAULT_API_TIMEOUT_MS, VaultApiError } from "../lib/vault-api";
+import { createAuthProof, createEncryptedVault, decryptVaultPayload, encryptVaultPayload, unlockVaultHeader, VaultCryptoError, type EncryptedVaultHeader, type VaultPayloadCipher, type VaultRuntime } from "../lib/vault-crypto";
 import { createEmptyVault, parsePersistedVault, withVaultUpdate, type PersistedVault, type VaultAccount, type VaultGroupColor, type VaultGroupCustomization, type VaultGroupIcon, type VaultTheme } from "../lib/vault-model";
 import { classifyVaultOutbox, clearVaultOutbox, createVaultOutboxRecord, readVaultOutbox, writeVaultOutbox, type VaultOutboxRecord } from "../lib/vault-outbox";
 import { clearVaultResumeSession, readVaultResumeSession, saveVaultResumeSession, touchVaultResumeSession } from "../lib/vault-resume";
@@ -80,6 +80,8 @@ const ACCOUNT_ICON_OPTIONS = serviceBrandIds
   .sort((left, right) => left.label.localeCompare(right.label, "en"));
 const LOCK_SAVE_GRACE_MS = VAULT_API_TIMEOUT_MS + 750;
 const RESUME_ACTIVITY_WRITE_INTERVAL_MS = 1_000;
+const ACCOUNT_EVENT_CHANNEL_NAME = "coffer-account-events-v1";
+const ACCOUNT_DELETION_CLEANUP_MS = VAULT_API_TIMEOUT_MS + 6_000;
 
 async function settleWithin<T>(
   promise: Promise<T>,
@@ -1183,6 +1185,218 @@ export default function VaultApp() {
     }
   }, [beginOpeningSession, openVaultRuntime]);
 
+  const clearDeletedVaultSession = useCallback((vaultId: string): Promise<void> => {
+    if (bootstrapHeaderRef.current?.vaultId !== vaultId) {
+      return clearVaultOutbox(vaultId).then(
+        () => undefined,
+        () => undefined,
+      );
+    }
+
+    const pendingWork = [
+      stagingPromiseRef.current,
+      drainRef.current?.promise ?? null,
+      resumeSavePromiseRef.current,
+      lockPromiseRef.current,
+    ].filter((task): task is Promise<void> => Boolean(task));
+    const cleanupEpoch = beginSessionTransition("locking");
+    const shouldClearClipboard = vaultRef.current?.settings.clearClipboard === true;
+
+    lockingRef.current = true;
+    lockPromiseRef.current = null;
+    conflictPendingRef.current = false;
+    conflictBusyRef.current = false;
+    sessionGenerationRef.current += 1;
+    pendingStageRef.current = null;
+    stagedSaveRef.current = null;
+    stagingPromiseRef.current = null;
+    drainRef.current = null;
+    resumeSavePromiseRef.current = null;
+    runtimeRef.current = null;
+    vaultRef.current = null;
+    bootstrapHeaderRef.current = null;
+    conflictRef.current = null;
+    revisionRef.current = 0;
+    mutationVersionRef.current = 0;
+    savedVersionRef.current = 0;
+    resumeAvailableRef.current = false;
+    resumeAbsoluteExpiresAtRef.current = 0;
+    lastResumeRetryAtRef.current = 0;
+    lastResumeTouchAtRef.current = 0;
+    lastActivityAtRef.current = null;
+    hiddenLockArmedRef.current = false;
+
+    const firstResumeCleanup = clearVaultResumeSession().then(
+      () => true,
+      () => false,
+    );
+    const firstOutboxCleanup = clearVaultOutbox(vaultId).then(
+      () => true,
+      () => false,
+    );
+
+    setAuthStatus("locking");
+    setAuthBusy(false);
+    setRuntime(null);
+    setVault(null);
+    setSaveConflict(null);
+    setConflictBusy(false);
+    setSaveStatus("saved");
+    setSaveError(null);
+    setCodePairs({});
+    setQuery("");
+    setGroup("All");
+    setView("all");
+    setToast(null);
+    setAddOpen(false);
+    setAddMode("qr");
+    setAccountMenuId(null);
+    setEditingAccountId(null);
+    setAccountEditorReturnFocusTo(null);
+    setSelectionMode(false);
+    setSelectedAccountIds(new Set());
+    setCustomizingGroup(null);
+    setGroupCustomizationReturnFocusTo(null);
+    setSetupLink("");
+    setService("");
+    setIdentity("");
+    setSecret("");
+    setNewGroup("Personal");
+    setNewAlgorithm("SHA-1");
+    setNewDigits(6);
+    setNewPeriod(30);
+    setFormError("");
+    for (const timeout of clipboardClearTimersRef.current) window.clearTimeout(timeout);
+    clipboardClearTimersRef.current.clear();
+    if (shouldClearClipboard) {
+      try {
+        void navigator.clipboard.writeText("").catch(() => undefined);
+      } catch {
+        // Clipboard cleanup remains best-effort after account deletion.
+      }
+    }
+
+    const ownsCleanupTransition = () => isVaultSessionTransition(
+      sessionTransitionRef.current,
+      cleanupEpoch,
+      "locking",
+    );
+    const task = Promise.resolve().then(async () => {
+      const pendingSettled = pendingWork.length === 0
+        ? { status: "fulfilled" } as const
+        : await settleWithin(Promise.allSettled(pendingWork), ACCOUNT_DELETION_CLEANUP_MS);
+      const [resumeCleanedInitially, outboxCleanedInitially] = await Promise.all([
+        firstResumeCleanup,
+        firstOutboxCleanup,
+      ]);
+      const [resumeCleanedFinally, outboxCleanedFinally] = await Promise.all([
+        clearVaultResumeSession().then(() => true, () => false),
+        clearVaultOutbox(vaultId).then(() => true, () => false),
+      ]);
+      if (!ownsCleanupTransition()) return;
+
+      const cleanupConfirmed =
+        pendingSettled.status === "fulfilled" &&
+        resumeCleanedInitially &&
+        outboxCleanedInitially &&
+        resumeCleanedFinally &&
+        outboxCleanedFinally;
+      const closedTransition = completeVaultSessionTransition(
+        sessionTransitionRef.current,
+        cleanupEpoch,
+        "locking",
+        "closed",
+      );
+      if (!closedTransition) return;
+      sessionTransitionRef.current = closedTransition;
+      setAuthError(cleanupConfirmed
+        ? null
+        : "The account was deleted, but browser cleanup could not be confirmed. Close this tab before leaving this device.");
+      setAuthStatus("access");
+    });
+    const tracked = task.finally(() => {
+      if (lockPromiseRef.current === tracked) {
+        lockingRef.current = false;
+        lockPromiseRef.current = null;
+      }
+    });
+    lockPromiseRef.current = tracked;
+    return tracked;
+  }, [beginSessionTransition]);
+
+  const deleteOwnAccount = useCallback(async (password: string): Promise<void> => {
+    const header = bootstrapHeaderRef.current;
+    const transition = sessionTransitionRef.current;
+    const generation = sessionGenerationRef.current;
+    if (
+      !header ||
+      !runtimeRef.current ||
+      !vaultRef.current ||
+      transition.phase !== "ready"
+    ) {
+      throw new Error("Unlock your vault again before deleting this account.");
+    }
+
+    let freshRuntime: VaultRuntime;
+    try {
+      freshRuntime = await unlockVaultHeader(password, header);
+    } catch (error) {
+      if (error instanceof VaultCryptoError && error.code === "AUTHENTICATION_FAILED") {
+        throw new Error("The current password is incorrect.");
+      }
+      throw new Error("The current password could not be verified.");
+    }
+    if (
+      sessionGenerationRef.current !== generation ||
+      sessionTransitionRef.current.epoch !== transition.epoch ||
+      sessionTransitionRef.current.phase !== "ready" ||
+      bootstrapHeaderRef.current !== header
+    ) {
+      throw new Error("The vault session changed. Unlock it again before deleting this account.");
+    }
+
+    const authProof = await createAuthProof(freshRuntime.authKey);
+    if (
+      sessionGenerationRef.current !== generation ||
+      sessionTransitionRef.current.epoch !== transition.epoch ||
+      sessionTransitionRef.current.phase !== "ready" ||
+      bootstrapHeaderRef.current !== header
+    ) {
+      throw new Error("The vault session changed. Unlock it again before deleting this account.");
+    }
+
+    try {
+      await deleteVaultAccount(header.vaultId, authProof);
+    } catch (error) {
+      if (error instanceof VaultApiError && error.code === "invalid_credentials") {
+        throw new Error("The current password is incorrect.");
+      }
+      if (error instanceof VaultApiError && error.code === "rate_limited") {
+        throw new Error(error.message);
+      }
+      if (error instanceof VaultApiError && error.code === "unauthorized") {
+        throw new Error("The vault session expired. Sign in again before deleting this account.");
+      }
+      if (error instanceof VaultApiError && (
+        error.code === "request_timeout" ||
+        error.code === "network_error"
+      )) {
+        throw new Error("Account deletion could not be confirmed. Check the connection and try again.");
+      }
+      throw new Error("The encrypted account could not be deleted. No local data was cleared.");
+    }
+
+    const localCleanup = clearDeletedVaultSession(header.vaultId);
+    try {
+      const channel = new BroadcastChannel(ACCOUNT_EVENT_CHANNEL_NAME);
+      channel.postMessage({ type: "account-deleted", vaultId: header.vaultId });
+      channel.close();
+    } catch {
+      // Cross-tab cleanup is best-effort; this tab still clears itself below.
+    }
+    await localCleanup;
+  }, [clearDeletedVaultSession]);
+
   const lockVault = useCallback((): Promise<void> => {
     const currentTransition = sessionTransitionRef.current;
     const pendingLock = lockPromiseRef.current;
@@ -1608,6 +1822,35 @@ export default function VaultApp() {
       }
     };
   }, [beginOpeningSession, openVaultRuntime]);
+
+  useEffect(() => {
+    let channel: BroadcastChannel;
+    try {
+      channel = new BroadcastChannel(ACCOUNT_EVENT_CHANNEL_NAME);
+    } catch {
+      return;
+    }
+    const handleAccountEvent = (event: MessageEvent<unknown>) => {
+      const message = event.data;
+      if (
+        typeof message !== "object" ||
+        message === null ||
+        !("type" in message) ||
+        !("vaultId" in message) ||
+        message.type !== "account-deleted" ||
+        typeof message.vaultId !== "string" ||
+        bootstrapHeaderRef.current?.vaultId !== message.vaultId
+      ) {
+        return;
+      }
+      void clearDeletedVaultSession(message.vaultId);
+    };
+    channel.addEventListener("message", handleAccountEvent);
+    return () => {
+      channel.removeEventListener("message", handleAccountEvent);
+      channel.close();
+    };
+  }, [clearDeletedVaultSession]);
 
   useEffect(() => {
     const retry = () => {
@@ -2040,6 +2283,33 @@ export default function VaultApp() {
     return true;
   };
 
+  const archiveSelectedAccounts = () => {
+    const blockReason = mutationBlockReason();
+    if (blockReason) {
+      setToast(blockReason === "conflict" || blockReason === "conflict-pending"
+        ? "Resolve the encrypted save conflict before archiving accounts."
+        : "Unlock your vault before archiving accounts.");
+      return false;
+    }
+    if (selectedVisibleAccountIds.size === 0) {
+      setToast("Select at least one account to archive.");
+      return false;
+    }
+
+    const selected = new Set(selectedVisibleAccountIds);
+    let archivedCount = 0;
+    const saved = setAccounts((current) => current.map((account) => {
+      if (!selected.has(account.id) || account.archived) return account;
+      archivedCount += 1;
+      return { ...account, archived: true };
+    }));
+    if (!saved) return false;
+
+    exitSelectionMode();
+    setToast(`${archivedCount} ${archivedCount === 1 ? "account" : "accounts"} moved to Archive.`);
+    return true;
+  };
+
   const copyCode = async (account: Account) => {
     if (locked) {
       setToast("Unlock your vault to copy a code.");
@@ -2371,6 +2641,7 @@ export default function VaultApp() {
       onClearSelection={() => setSelectedAccountIds(new Set())}
       onExitSelection={exitSelectionMode}
       onSetFavorite={setSelectedAccountsFavorite}
+      onArchive={archiveSelectedAccounts}
       onMoveToGroup={(groupName) => moveSelectedAccounts(groupName, false)}
       onCreateGroupAndMove={(groupName) => moveSelectedAccounts(groupName, true)}
     />
@@ -2530,6 +2801,7 @@ export default function VaultApp() {
             onNotice={setToast}
             onLockVault={() => void lockVault()}
             onSignOut={() => void lockVault()}
+            onDeleteAccount={deleteOwnAccount}
           />
         ) : (
         <div className="content">

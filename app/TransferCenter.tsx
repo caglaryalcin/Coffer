@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, DragEvent, useMemo, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   createEncryptedBackup,
   createPlainBackup,
@@ -42,17 +42,17 @@ type TransferCenterProps = {
 
 const sourceCopy: Record<ImportSource, { title: string; description: string; badge?: string }> = {
   coffer: {
-    title: "Coffer encrypted backup",
-    description: "Restore accounts, groups, favorites, and TOTP settings from a password-protected Coffer backup.",
+    title: "Coffer backup",
+    description: "Restore accounts, groups, favorites, and TOTP settings from a Coffer backup, with or without a passphrase.",
     badge: "Recommended",
   },
   "2fas": {
-    title: "2FAS mobile backup",
-    description: "Import a .2fas backup from the 2FAS mobile app and review every account before adding it.",
+    title: "2fas integrated import",
+    description: "Import a .2fas file from 2FAS and review every account before adding it.",
   },
   "2fauth": {
-    title: "2FAuth export",
-    description: "Import a schema 1 JSON export from 2FAuth and review every account before adding it.",
+    title: "2fauth integrated import",
+    description: "Import a schema 1 JSON file from 2FAuth and review every account before adding it.",
   },
   otpauth: {
     title: "OTPAuth link list",
@@ -124,6 +124,7 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
   const [importComplete, setImportComplete] = useState<{ imported: number; skipped: number } | null>(null);
   const [exportPassword, setExportPassword] = useState("");
   const [exportPasswordConfirm, setExportPasswordConfirm] = useState("");
+  const [unprotectedBackupConfirm, setUnprotectedBackupConfirm] = useState(false);
   const [twoFasExportPassword, setTwoFasExportPassword] = useState("");
   const [twoFasExportPasswordConfirm, setTwoFasExportPasswordConfirm] = useState("");
   const [plainOpen, setPlainOpen] = useState(false);
@@ -135,8 +136,22 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
   const [exporting, setExporting] = useState<"coffer" | "2fas" | null>(null);
   const [error, setError] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
+  const cofferExportButtonRef = useRef<HTMLButtonElement>(null);
+  const unprotectedBackupBackRef = useRef<HTMLButtonElement>(null);
+  const restoreCofferExportFocusRef = useRef(false);
   const fileReadRevision = useRef(0);
   const importOperationRevision = useRef(0);
+
+  useEffect(() => {
+    if (unprotectedBackupConfirm) {
+      unprotectedBackupBackRef.current?.focus();
+      return;
+    }
+    if (restoreCofferExportFocusRef.current) {
+      restoreCofferExportFocusRef.current = false;
+      cofferExportButtonRef.current?.focus();
+    }
+  }, [unprotectedBackupConfirm]);
 
   const summary = useMemo(() => ({
     fresh: review.filter((item) => item.status === "new").length,
@@ -239,12 +254,12 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
         if (operation !== importOperationRevision.current) return;
         createReview(parseOtpAuthList(input).items);
       } else if (source === "2fas") {
-        if (!fileText) throw new Error("Choose a 2FAS mobile backup to continue.");
+        if (!fileText) throw new Error("Choose a 2FAS file to continue.");
         const restored = await parseTwoFasBackup(fileText, importPassword || undefined);
         if (operation !== importOperationRevision.current) return;
         createReview(restored.items);
       } else if (source === "2fauth") {
-        if (!fileText) throw new Error("Choose a 2FAuth JSON export to continue.");
+        if (!fileText) throw new Error("Choose a 2FAuth JSON file to continue.");
         if (operation !== importOperationRevision.current) return;
         createReview(parseTwoFAuthExport(fileText).items);
       } else {
@@ -305,27 +320,38 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
     setImportPassword("");
     setExportPassword("");
     setExportPasswordConfirm("");
+    setUnprotectedBackupConfirm(false);
     setTwoFasExportPassword("");
     setTwoFasExportPasswordConfirm("");
   };
 
-  const createEncryptedExport = async () => {
+  const createCofferExport = async (unprotectedConfirmed = false) => {
     setError("");
     if (locked) { setError("Unlock your vault before creating a backup."); return; }
-    if (exportPassword.length < 12) { setError("Use a backup passphrase with at least 12 characters."); return; }
-    if (exportPassword !== exportPasswordConfirm) { setError("Passphrases do not match."); return; }
+    const passwordProtected = exportPassword.length > 0 || exportPasswordConfirm.length > 0;
+    if (passwordProtected && exportPassword !== exportPasswordConfirm) { setError("Passphrases do not match."); return; }
+    if (passwordProtected && exportPassword.length < 12) { setError("Use a backup passphrase with at least 12 characters."); return; }
+    if (!passwordProtected && !unprotectedConfirmed) {
+      restoreCofferExportFocusRef.current = false;
+      setUnprotectedBackupConfirm(true);
+      return;
+    }
     const password = exportPassword;
     setBusy(true);
     setExporting("coffer");
     try {
-      const backup = await createEncryptedBackup(portableAccounts, password);
+      const backup = passwordProtected
+        ? await createEncryptedBackup(portableAccounts, password)
+        : createPlainBackup(portableAccounts);
       downloadText(backup, `coffer-backup-${exportDate()}.coffer`, "application/vnd.coffer.backup+json");
-      onNotice("Encrypted Coffer backup downloaded.");
+      onNotice(passwordProtected ? "Password-protected Coffer backup downloaded." : "Unprotected Coffer backup downloaded.");
     } catch {
-      setError("We could not create the encrypted backup.");
+      setError("We could not create the Coffer backup.");
     } finally {
       setExportPassword("");
       setExportPasswordConfirm("");
+      restoreCofferExportFocusRef.current = true;
+      setUnprotectedBackupConfirm(false);
       setExporting(null);
       setBusy(false);
     }
@@ -386,7 +412,7 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
       </div>
 
       {error && <div className="transfer-error" role="alert"><span>!</span>{error}</div>}
-      <div className="sr-status" aria-live="polite">{busy ? (tab === "import" ? "Reading and checking accounts…" : exporting === "2fas" ? "Creating your 2FAS backup…" : "Encrypting your Coffer backup…") : ""}</div>
+      <div className="sr-status" aria-live="polite">{busy ? (tab === "import" ? "Reading and checking accounts…" : exporting === "2fas" ? "Creating your 2FAS backup…" : "Creating your Coffer backup…") : ""}</div>
 
       {tab === "import" ? (
         <div className="transfer-panel">
@@ -396,7 +422,7 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
               <p>IMPORT COMPLETE</p>
               <h2>{importComplete.imported} {importComplete.imported === 1 ? "account was" : "accounts were"} imported.</h2>
               <span>{importComplete.skipped} {importComplete.skipped === 1 ? "entry was" : "entries were"} skipped. Imported accounts were encrypted before being saved to your self-hosted vault.</span>
-              <div><button className="transfer-secondary" onClick={() => { clearImportInputs(); setImportComplete(null); }}>Import another file</button><button className="transfer-primary" onClick={onBack}>View accounts <span>→</span></button></div>
+              <div className="transfer-success-actions"><button className="transfer-secondary" onClick={() => { clearImportInputs(); setImportComplete(null); }}>Import another file</button><button className="transfer-primary" onClick={onBack}>View accounts <span>→</span></button></div>
             </div>
           ) : review.length > 0 ? (
             <div className="review-stage">
@@ -459,7 +485,7 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
                   <div className={`file-drop ${fileName ? "has-file" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
                     <span className="file-icon" /><div><strong>{fileName || "Drop a file here"}</strong><small>{fileName ? "Ready to review" : source === "coffer" ? ".coffer or JSON, up to 5 MiB" : source === "2fas" ? ".2fas or JSON, up to 5 MiB" : "2FAuth JSON, up to 5 MiB"}</small></div><button onClick={() => fileInput.current?.click()} disabled={busy}>{fileName ? "Change file" : "Choose file"}</button>
                   </div>
-                  {source === "coffer" && <label><span>Backup passphrase</span><input type="password" value={importPassword} onChange={(event) => setImportPassword(event.target.value)} placeholder="Enter the passphrase used for this backup" autoComplete="new-password" disabled={busy} /></label>}
+                  {source === "coffer" && <label><span>Backup passphrase (if used)</span><input type="password" value={importPassword} onChange={(event) => setImportPassword(event.target.value)} placeholder="Enter the passphrase if this backup is protected" autoComplete="new-password" disabled={busy} /></label>}
                   {source === "2fas" && <label><span>2FAS backup password</span><input type="password" value={importPassword} onChange={(event) => setImportPassword(event.target.value)} placeholder="Enter the password used for this backup" autoComplete="new-password" disabled={busy} /><small>Leave this blank only if the 2FAS backup was exported without a password.</small></label>}
                 </div>
               )}
@@ -471,13 +497,21 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
       ) : (
         <div className="export-stack">
           <section className="export-card recommended">
-            <div className="export-card-head"><span className="export-icon encrypted" aria-hidden="true" /><div><p>RECOMMENDED</p><h2>Coffer encrypted backup</h2><span>Create a password-protected backup containing accounts, groups, favorites, custom logos, and TOTP settings.</span></div></div>
+            <div className="export-card-head"><span className="export-icon encrypted" aria-hidden="true" /><div><p>RECOMMENDED</p><h2>Coffer backup</h2><span>Create a complete backup containing accounts, groups, favorites, custom logos, and TOTP settings. Add a passphrase for protection, or leave both fields blank.</span></div></div>
             <div className="export-fields">
-              <label><span>Backup passphrase</span><input type="password" value={exportPassword} onChange={(event) => setExportPassword(event.target.value)} placeholder="At least 12 characters" autoComplete="new-password" disabled={busy} /></label>
-              <label><span>Confirm passphrase</span><input type="password" value={exportPasswordConfirm} onChange={(event) => setExportPasswordConfirm(event.target.value)} placeholder="Repeat your passphrase" autoComplete="new-password" disabled={busy} /></label>
+              <label><span>Backup passphrase (optional)</span><input type="password" value={exportPassword} onChange={(event) => { setExportPassword(event.target.value); setUnprotectedBackupConfirm(false); }} placeholder="Leave blank or use 12+ characters" autoComplete="new-password" disabled={busy} /></label>
+              <label><span>Confirm passphrase</span><input type="password" value={exportPasswordConfirm} onChange={(event) => { setExportPasswordConfirm(event.target.value); setUnprotectedBackupConfirm(false); }} placeholder="Repeat it if used" autoComplete="new-password" disabled={busy} /></label>
             </div>
-            <div className="backup-passphrase-important export-passphrase-important" role="note"><span className="backup-passphrase-important-title"><span className="backup-passphrase-important-icon" aria-hidden="true">!</span>Important</span><small>Coffer cannot recover a forgotten backup passphrase.</small></div>
-            <div className="export-card-footer"><p>Store the backup file and passphrase in separate secure locations.</p><button className="transfer-primary" onClick={() => void createEncryptedExport()} disabled={busy}>{exporting === "coffer" ? "Encrypting backup…" : "Create encrypted backup"} <span>↓</span></button></div>
+            <div className="backup-passphrase-important export-passphrase-important" role="note"><span className="backup-passphrase-important-title"><span className="backup-passphrase-important-icon" aria-hidden="true">!</span>Important</span><small>Without a passphrase, anyone with this file can read your authentication secrets. Coffer cannot recover a forgotten passphrase.</small></div>
+            {unprotectedBackupConfirm ? (
+              <div className="final-confirm" role="alertdialog" aria-labelledby="unprotected-backup-confirm-title" aria-describedby="unprotected-backup-confirm-description">
+                <div><strong id="unprotected-backup-confirm-title">Create backup without a passphrase?</strong><span id="unprotected-backup-confirm-description">The downloaded file will contain readable authentication secrets.</span></div>
+                <button ref={unprotectedBackupBackRef} type="button" onClick={() => { restoreCofferExportFocusRef.current = true; setUnprotectedBackupConfirm(false); }} disabled={busy}>Go back</button>
+                <button type="button" onClick={() => void createCofferExport(true)} disabled={busy}>{exporting === "coffer" ? "Creating backup…" : "Download unprotected backup"}</button>
+              </div>
+            ) : (
+              <div className="export-card-footer"><p>If you use a passphrase, store it separately from the backup file.</p><button ref={cofferExportButtonRef} className="transfer-primary" onClick={() => void createCofferExport()} disabled={busy}>{exporting === "coffer" ? "Creating backup…" : exportPassword || exportPasswordConfirm ? "Create protected backup" : "Create unprotected backup"} <span>↓</span></button></div>
+            )}
           </section>
 
           <section className="export-card interoperable">

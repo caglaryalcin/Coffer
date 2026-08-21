@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import type { VaultProfile } from "../lib/vault-model";
 import { PROFILE_IMAGE_ACCEPT, prepareProfileImage } from "./profile-image";
 
@@ -47,6 +47,7 @@ export type SettingsCenterProps = {
   onNotice: (message: string) => void;
   onLockVault: () => void;
   onSignOut: () => void;
+  onDeleteAccount: (password: string) => Promise<void>;
 };
 
 export default function SettingsCenter({
@@ -61,6 +62,7 @@ export default function SettingsCenter({
   onNotice,
   onLockVault,
   onSignOut,
+  onDeleteAccount,
 }: SettingsCenterProps) {
   const [name, setName] = useState(profile.name);
   const [profileNameSource, setProfileNameSource] = useState(profile.name);
@@ -68,7 +70,26 @@ export default function SettingsCenter({
   const [avatarError, setAvatarError] = useState("");
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [profileBusy, setProfileBusy] = useState(false);
+  const [deleteExpanded, setDeleteExpanded] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const deletePasswordRef = useRef<HTMLInputElement>(null);
+  const deleteToggleRef = useRef<HTMLButtonElement>(null);
+  const restoreDeleteToggleFocusRef = useRef(false);
+
+  useEffect(() => {
+    if (deleteExpanded) {
+      deletePasswordRef.current?.focus();
+      return;
+    }
+    if (restoreDeleteToggleFocusRef.current) {
+      restoreDeleteToggleFocusRef.current = false;
+      deleteToggleRef.current?.focus();
+    }
+  }, [deleteExpanded]);
 
   if (profile.name !== profileNameSource) {
     setProfileNameSource(profile.name);
@@ -154,6 +175,40 @@ export default function SettingsCenter({
     }
   };
 
+  const cancelAccountDeletion = () => {
+    if (deleteBusy) return;
+    restoreDeleteToggleFocusRef.current = true;
+    setDeleteExpanded(false);
+    setDeletePassword("");
+    setDeleteConfirmation("");
+    setDeleteError("");
+  };
+
+  const deleteAccount = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (deleteBusy) return;
+    setDeleteError("");
+    if (deleteConfirmation.trim().toLowerCase() !== profile.email.trim().toLowerCase()) {
+      setDeleteError("Enter your sign-in email exactly to confirm account deletion.");
+      return;
+    }
+    if (!deletePassword) {
+      setDeleteError("Enter your current password to delete this account.");
+      return;
+    }
+
+    setDeleteBusy(true);
+    try {
+      await onDeleteAccount(deletePassword);
+    } catch (caught) {
+      setDeletePassword("");
+      setDeleteError(caught instanceof Error
+        ? caught.message
+        : "Coffer could not delete this account. Please try again.");
+      setDeleteBusy(false);
+    }
+  };
+
   return (
     <section className="settings-center" aria-label="Settings">
       <div className="settings-layout">
@@ -162,6 +217,7 @@ export default function SettingsCenter({
           <a href="#security-settings">Security</a>
           <a href="#about-settings">About</a>
           <a href="#session-settings">Vault session</a>
+          <a href="#delete-account-settings">Delete account</a>
         </nav>
 
         <div className="settings-stack">
@@ -249,6 +305,39 @@ export default function SettingsCenter({
           <section className="settings-card session-card" id="session-settings">
             <div className="settings-card-copy"><span className="settings-glyph session-glyph" /><div><h2>Vault session</h2><p>Encrypted vault data is persisted on your self-hosted server and remains available after refresh.</p></div></div>
             <button className="signout-button" onClick={onSignOut}>Lock and sign out</button>
+          </section>
+
+          <section className="settings-card account-delete-card" id="delete-account-settings">
+            <div className="settings-card-copy"><span className="settings-glyph account-delete-glyph" aria-hidden="true" /><div><h2>Delete account</h2><p>Permanently remove this user and its encrypted vault from Coffer server storage.</p></div></div>
+            {!deleteExpanded ? (
+              <button
+                ref={deleteToggleRef}
+                className="account-delete-toggle"
+                type="button"
+                aria-expanded="false"
+                aria-controls="account-delete-confirmation"
+                onClick={() => {
+                  restoreDeleteToggleFocusRef.current = false;
+                  setDeleteExpanded(true);
+                }}
+              >Delete this account</button>
+            ) : (
+              <form id="account-delete-confirmation" className="account-delete-form" onSubmit={(event) => void deleteAccount(event)} aria-busy={deleteBusy}>
+                <div className="account-delete-warning" role="note">
+                  <strong>This action cannot be undone.</strong>
+                  <span>Exported backup files, Kubernetes volume snapshots, and host backups are not removed.</span>
+                </div>
+                <div className="account-delete-fields">
+                  <label><span>Current password</span><input ref={deletePasswordRef} type="password" value={deletePassword} onChange={(event) => { setDeletePassword(event.target.value); setDeleteError(""); }} autoComplete="current-password" disabled={deleteBusy} /></label>
+                  <label><span>Enter {profile.email} to confirm</span><input type="email" value={deleteConfirmation} onChange={(event) => { setDeleteConfirmation(event.target.value); setDeleteError(""); }} autoComplete="off" spellCheck={false} disabled={deleteBusy} /></label>
+                </div>
+                {deleteError && <p className="settings-error" role="alert">{deleteError}</p>}
+                <div className="account-delete-actions">
+                  <button type="button" onClick={cancelAccountDeletion} disabled={deleteBusy}>Cancel</button>
+                  <button type="submit" disabled={deleteBusy}>{deleteBusy ? "Deleting account…" : "Delete account permanently"}</button>
+                </div>
+              </form>
+            )}
           </section>
         </div>
       </div>

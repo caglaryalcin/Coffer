@@ -627,9 +627,11 @@ h1 { margin: 0; font-size: clamp(34px, 4vw, 53px); line-height: .98; letter-spac
 .success-mark { width: 58px; height: 58px; display: grid; place-items: center; margin-bottom: 18px; border-radius: 19px; background: var(--lime); font-size: 25px; font-weight: 850; transform: rotate(-4deg); }
 .transfer-success h2 { margin: 0; font-size: 22px; letter-spacing: -.035em; }
 .transfer-success p { max-width: 380px; margin: 10px 0 20px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.transfer-success-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; margin-top: 22px; }
 .review-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding: 2px 2px 18px; }
 .review-head h2 { margin: 0; font-size: 18px; letter-spacing: -.03em; }
 .review-head p { margin: 6px 0 0; color: var(--muted); font-size: 10px; }
+.review-head > button { min-height: 44px; padding: 0 14px; border: 1px solid var(--theme-accent); border-radius: 10px; background: var(--accent-soft); color: var(--theme-accent-text, #8f4141); font-size: var(--type-ui); font-weight: 700; cursor: pointer; }
 .review-summary { display: flex; gap: 8px; }
 .review-summary span { min-width: 70px; padding: 8px 10px; border-radius: 10px; background: #f0f0ea; color: #62665e; font-size: 10px; font-weight: 700; text-align: center; }
 .review-summary .new { background: #edf4db; color: #597137; }
@@ -667,6 +669,7 @@ h1 { margin: 0; font-size: clamp(34px, 4vw, 53px); line-height: .98; letter-spac
 .export-card-footer { margin-left: 60px; padding-top: 17px; border-top: 1px solid #e2e5d9; }
 .export-passphrase-important { margin: 14px 0 0 60px; }
 .export-card.recommended .export-card-footer { margin-top: 12px; }
+.export-card.recommended > .final-confirm { margin: 12px 0 0 60px; }
 .export-card.danger { padding: 0; overflow: hidden; background: #faf9f6; }
 .danger-toggle { width: 100%; display: grid; grid-template-columns: 45px minmax(0, 1fr) auto; align-items: center; gap: 15px; padding: 20px 24px; border: 0; background: transparent; text-align: left; cursor: pointer; }
 .danger-toggle > span:nth-child(2) strong, .danger-toggle > span:nth-child(2) small, .danger-toggle > span:nth-child(2) em { display: block; }
@@ -874,6 +877,30 @@ h1 { margin: 0; font-size: clamp(34px, 4vw, 53px); line-height: .98; letter-spac
 .settings-about-link:focus-visible { outline: 2px solid var(--theme-accent); outline-offset: 4px; }
 .settings-about-github-icon { width: 18px; height: 18px; flex: 0 0 auto; display: inline-block; background: currentColor; -webkit-mask: url("/brands/github.svg") center / contain no-repeat; mask: url("/brands/github.svg") center / contain no-repeat; }
 .signout-button { flex: 0 0 auto; border: 1px solid #d48370; background: #fff7f4; color: #8f4332; }
+.account-delete-card { display: grid; gap: 20px; }
+.account-delete-glyph {
+  color: #a34f43;
+  background:
+    linear-gradient(currentColor, currentColor) center 13px / 17px 1.5px no-repeat,
+    linear-gradient(currentColor, currentColor) 17px 19px / 1.5px 10px no-repeat,
+    linear-gradient(currentColor, currentColor) 23px 19px / 1.5px 10px no-repeat,
+    #f7e6e1;
+}
+.account-delete-glyph::before { width: 17px; height: 16px; inset: auto; left: 12px; top: 16px; border-color: currentColor; border-top: 0; border-radius: 0 0 4px 4px; }
+.account-delete-glyph::after { content: ""; width: 8px; height: 5px; position: absolute; left: 17px; top: 8px; border: 1.5px solid currentColor; border-bottom: 0; border-radius: 4px 4px 0 0; }
+.account-delete-toggle { min-height: 44px; justify-self: end; padding: 0 16px; border: 1px solid #d48370; border-radius: 11px; background: #fff7f4; color: #8f4332; font-size: var(--type-ui); font-weight: 700; cursor: pointer; }
+.account-delete-form { display: grid; gap: 16px; padding-top: 20px; border-top: 1px solid #ecece5; }
+.account-delete-warning { display: grid; gap: 5px; padding: 14px 15px; border: 1px solid #e2a092; border-left: 3px solid #bd5a48; border-radius: 11px; background: #fff4f1; color: #874032; }
+.account-delete-warning strong { font-size: var(--type-ui); }
+.account-delete-warning span { color: #805c54; font-size: var(--type-caption); line-height: 1.5; }
+.account-delete-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.account-delete-fields label { min-width: 0; display: grid; gap: 8px; color: #545a50; font-size: var(--type-ui); font-weight: 650; }
+.account-delete-fields input { width: 100%; height: 46px; padding: 0 13px; border: 1px solid #d9dbd2; border-radius: 11px; outline: none; background: #fafaf7; color: var(--ink); font-size: var(--type-body); }
+.account-delete-fields input:focus { border-color: var(--theme-accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.account-delete-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.account-delete-actions button { min-height: 44px; padding: 0 16px; border: 1px solid #d5d7cf; border-radius: 11px; background: white; color: #50564c; font-size: var(--type-ui); font-weight: 700; cursor: pointer; }
+.account-delete-actions button[type="submit"] { border-color: #a64f40; background: #a64f40; color: white; }
+.account-delete-actions button:disabled, .account-delete-toggle:disabled { opacity: .48; cursor: not-allowed; }
 
 /* Color themes. Dark is deliberately the no-JavaScript/default canvas so the
    encrypted-vault bootstrap never flashes a bright page before preferences load. */
@@ -1324,6 +1351,7 @@ body.theme-dark { background: #181a1b; color-scheme: dark; }
 .theme-dark .settings-inline-actions button,
 .theme-dark .final-confirm button,
 .theme-dark .replace-confirm button { border-color: var(--line); background: var(--surface-hover); color: #d8d3d0; }
+.theme-dark .review-head > button { border-color: var(--theme-accent); background: var(--accent-soft); color: #e1a0a0; }
 .theme-dark .text-button { border-color: var(--muted); color: var(--muted); }
 
 .theme-dark .transfer-panel,
@@ -1407,6 +1435,15 @@ body.theme-dark { background: #181a1b; color-scheme: dark; }
 .theme-dark .profile-photo-actions button:hover { border-color: var(--theme-accent); background: var(--accent-soft); }
 .theme-dark .profile-photo-actions .profile-photo-remove { border-color: transparent; background: transparent; color: #ffad9c; }
 .theme-dark .profile-photo-error { color: #ffad9c; }
+.theme-dark .account-delete-glyph { color: #ffad9c; background-color: #38231f; }
+.theme-dark .account-delete-form { border-color: var(--line); }
+.theme-dark .account-delete-toggle,
+.theme-dark .account-delete-actions button[type="submit"] { border-color: #875042; background: #3a211c; color: #ffb3a1; }
+.theme-dark .account-delete-warning { border-color: #704238; border-left-color: #df7d65; background: #2d1d18; color: #ffb3a1; }
+.theme-dark .account-delete-warning span { color: #d6a297; }
+.theme-dark .account-delete-fields label { color: #d8d3d0; }
+.theme-dark .account-delete-fields input,
+.theme-dark .account-delete-actions button:not([type="submit"]) { border-color: var(--line); background: var(--surface-hover); color: #d8d3d0; }
 .theme-dark .security-glyph-lock::before,
 .theme-dark .security-glyph-lock::after { border-color: var(--theme-accent); }
 
@@ -1494,6 +1531,8 @@ body.theme-dark { background: #181a1b; color-scheme: dark; }
   .auth-mode-tabs button:not([aria-pressed="true"]),
   .qr-scanner-actions button:not(:first-child),
   .settings-inline-actions button,
+  .account-delete-toggle,
+  .account-delete-actions button:not([type="submit"]),
   .final-confirm button:not(:last-child),
   .replace-confirm button:not(:last-child)
 ):not(:disabled):is(:hover, :focus-visible),
@@ -1518,6 +1557,7 @@ body.theme-dark { background: #181a1b; color-scheme: dark; }
   .transfer-primary,
   .qr-scanner-actions > button:first-child,
   .settings-actions button,
+  .account-delete-actions button[type="submit"],
   .danger-actions button,
   .final-confirm button:last-child,
   .replace-confirm button:last-child,
@@ -1611,6 +1651,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .file-drop button { grid-column: 1 / -1; }
   .transfer-footer, .review-footer, .export-card-footer { align-items: stretch; flex-direction: column; }
   .transfer-primary { width: 100%; }
+  .transfer-success-actions { width: 100%; flex-direction: column; }
+  .transfer-success-actions .transfer-secondary { width: 100%; }
   .review-head { align-items: flex-start; flex-direction: column; }
   .review-summary { width: 100%; }
   .review-summary span { flex: 1; min-width: 0; }
@@ -1620,6 +1662,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .export-fields { grid-template-columns: 1fr; margin-left: 0; }
   .export-card-footer { margin-left: 0; }
   .export-passphrase-important { margin-left: 0; }
+  .export-card.recommended > .final-confirm { margin-left: 0; }
   .danger-toggle { padding: 16px 18px; }
   .danger-body { padding: 0 18px 18px; }
   .plain-options { grid-template-columns: 1fr; }
@@ -1695,6 +1738,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .archive-explainer { grid-template-columns: 40px minmax(0, 1fr); }
   .archive-explainer > span:last-child { grid-column: 2; width: max-content; }
   .settings-form, .profile-field-grid { grid-template-columns: 1fr; }
+  .account-delete-fields { grid-template-columns: 1fr; }
+  .account-delete-toggle { width: 100%; justify-self: stretch; }
+  .account-delete-actions { display: grid; grid-template-columns: 1fr; }
+  .account-delete-actions button { width: 100%; }
   .settings-actions { grid-column: auto; }
   .settings-control-row { grid-template-columns: 1fr; }
   .session-card { align-items: stretch; flex-direction: column; }

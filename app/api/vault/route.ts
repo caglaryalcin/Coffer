@@ -54,6 +54,8 @@ export async function POST(request: Request): Promise<Response> {
         return await claimLegacy(request, body);
       case "save":
         return await save(request, body);
+      case "delete_account":
+        return await deleteAccount(request, body);
       case "logout":
         return logout(request, body);
       default:
@@ -159,6 +161,32 @@ async function save(request: Request, body: JsonObject): Promise<Response> {
     payload: body.payload,
   });
   return json(result);
+}
+
+async function deleteAccount(request: Request, body: JsonObject): Promise<Response> {
+  requireSameOrigin(request);
+  if (!hasExactKeys(body, ["action", "vaultId", "authProof"])) {
+    throw invalidSchema();
+  }
+  const authProof = decodeFixedAuthProof(body.authProof);
+  if (
+    body.action !== "delete_account" ||
+    typeof body.vaultId !== "string" ||
+    !authProof
+  ) {
+    throw invalidSchema();
+  }
+
+  await store.deleteAccount({
+    sessionToken: sessionToken(request),
+    vaultId: body.vaultId,
+    authProof,
+    rateKey: clientRateKey(request),
+  });
+  return new Response(null, {
+    status: 204,
+    headers: responseHeaders({ "Set-Cookie": clearSessionCookie(request) }),
+  });
 }
 
 function logout(request: Request, body: JsonObject): Response {

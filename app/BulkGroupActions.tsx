@@ -15,6 +15,7 @@ export type BulkGroupActionsProps = {
   onClearSelection: () => void;
   onExitSelection: () => void;
   onSetFavorite: (favorite: boolean) => boolean | void;
+  onArchive: () => boolean | void;
   onMoveToGroup: (groupName: string) => boolean | void;
   onCreateGroupAndMove: (groupName: string) => boolean | void;
 };
@@ -65,6 +66,7 @@ export default function BulkGroupActions({
   onClearSelection,
   onExitSelection,
   onSetFavorite,
+  onArchive,
   onMoveToGroup,
   onCreateGroupAndMove,
 }: BulkGroupActionsProps) {
@@ -151,6 +153,17 @@ export default function BulkGroupActions({
             disabled={moveDisabled}
           >
             {allSelectedFavorited ? "Remove from favorites" : "Add to favorites"}
+          </button>
+          <button
+            type="button"
+            className="bulk-secondary-action"
+            onClick={() => {
+              const accepted = onArchive();
+              if (accepted !== false) closeMovePanel();
+            }}
+            disabled={moveDisabled}
+          >
+            Move to Archive
           </button>
           <button
             type="button"
