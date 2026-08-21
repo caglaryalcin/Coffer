@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release tag to publish (for example, v1.0.5)
+        description: Release tag to publish (for example, v1.0.6)
         required: true
-        default: v1.0.5
+        default: v1.0.6
         type: string
 
 permissions:
@@ -16,7 +16,7 @@ permissions:
   packages: write
 
 concurrency:
-  group: docker-publish-${{ github.event.release.tag_name || inputs.version || github.ref }}
+  group: docker-publish
   cancel-in-progress: false
 
 env:
@@ -63,9 +63,6 @@ jobs:
             echo "major=$major"
             echo "revision=$(git rev-parse HEAD)"
           } >> "$GITHUB_OUTPUT"
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4

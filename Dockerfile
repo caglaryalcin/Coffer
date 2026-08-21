@@ -2,7 +2,7 @@
 
 ARG NODE_VERSION=22-bookworm-slim
 
-FROM node:${NODE_VERSION} AS dependencies
+FROM --platform=$BUILDPLATFORM node:${NODE_VERSION} AS dependencies
 WORKDIR /app
 
 ENV CI=true
@@ -18,6 +18,9 @@ ENV NODE_ENV=production
 
 COPY . .
 RUN npm run build
+RUN node scripts/assert-portable-runtime.mjs \
+      /app/dist/standalone /app/node_modules/react && \
+    install -d -m 0755 /runtime-data
 
 FROM node:${NODE_VERSION} AS runner
 WORKDIR /app
@@ -26,14 +29,15 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000
 
-RUN mkdir -p /app/data && chown 1000:1000 /app/data
-
-COPY --from=builder --chown=1000:1000 /app/dist/standalone/dist ./dist
-COPY --from=builder --chown=1000:1000 /app/dist/standalone/node_modules ./node_modules
-COPY --from=builder --chown=1000:1000 /app/dist/standalone/server.js /app/dist/standalone/package.json ./
+# Keep target-platform stages command-free: the portable JS/WASM build is
+# produced once on BUILDPLATFORM, then linked onto each native Node base image.
+COPY --link --from=builder --chown=1000:1000 /runtime-data/ ./data/
+COPY --link --from=builder --chown=1000:1000 /app/dist/standalone/dist ./dist
+COPY --link --from=builder --chown=1000:1000 /app/dist/standalone/node_modules ./node_modules
+COPY --link --from=builder --chown=1000:1000 /app/dist/standalone/server.js /app/dist/standalone/package.json ./
 # Vinext's standalone output omits its React peer dependency.
-COPY --from=builder --chown=1000:1000 /app/node_modules/react ./node_modules/react
-COPY --from=builder --chown=1000:1000 /app/LICENSE /app/THIRD_PARTY_NOTICES.md ./
+COPY --link --from=builder --chown=1000:1000 /app/node_modules/react ./node_modules/react
+COPY --link --from=builder --chown=1000:1000 /app/LICENSE /app/THIRD_PARTY_NOTICES.md ./
 
 USER 1000:1000
 
