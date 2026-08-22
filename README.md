@@ -8,6 +8,8 @@ Coffer is a self-hosted, multi-user authenticator vault. It generates TOTP
 codes in the browser and encrypts each user's vault before storing it on the
 server. It also supports QR imports, groups, backups, and 2FAS transfers.
 
+![](https://raw.githubusercontent.com/caglaryalcin/Coffer/refs/heads/main/screenshots/main.gif)
+
 ## Features
 
 - Multi-user, browser-encrypted vaults
