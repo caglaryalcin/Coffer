@@ -22,9 +22,7 @@ const brandsRoot = resolve(projectRoot, "public", "brands");
 const legacyOutputRoot = resolve(brandsRoot, "selfhst");
 const legacyPublicCatalogPath = resolve(brandsRoot, "selfhst-catalog.json");
 const catalogOutputPath = resolve(scriptDirectory, "selfhst-icons.generated.json");
-const licenseOutputPath = resolve(brandsRoot, "selfhst-LICENSE.txt");
-const attributionOutputPath = resolve(brandsRoot, "selfhst-ATTRIBUTION.txt");
-const OUTPUT_PREFIX = "selfhst-";
+const LEGACY_OUTPUT_PREFIX = "selfhst-";
 
 const allowedElements = new Set([
   "circle",
@@ -458,24 +456,51 @@ function buildCatalog(svgFilenames, upstreamIndex) {
   };
 }
 
-function attributionText() {
-  return `selfh.st/icons SVG collection
+function integratedOutputFilename(sourceFilename) {
+  let reference = sourceFilename.slice(0, -4);
+  let variantSuffix = "";
 
-Source: ${SOURCE_REPOSITORY}
-Pinned commit: ${SOURCE_COMMIT}
-License: Creative Commons Attribution 4.0 International (CC BY 4.0)
-License URL: https://creativecommons.org/licenses/by/4.0/
-Upstream license text: selfhst-LICENSE.txt
+  if (reference.endsWith("-dark")) {
+    reference = reference.slice(0, -5);
+    variantSuffix = "-dark";
+  } else if (reference.endsWith("-light")) {
+    reference = reference.slice(0, -6);
+    variantSuffix = "-light";
+  }
 
-Coffer includes ${EXPECTED_SVG_COUNT} SVG files from ${EXPECTED_FAMILY_COUNT} icon families.
-Names and logos remain the property or trademarks of their respective owners. Their inclusion does not imply affiliation with or endorsement of Coffer.
+  return `${reference}-alt${variantSuffix}.svg`;
+}
 
-Coffer modification:
-- Upstream filenames are prefixed with "selfhst-" to prevent collisions with Coffer's existing icon catalog.
-- selfhst-paypal-light.svg: removed one empty self-closing Adobe Illustrator foreignObject element during passive-SVG sanitization. No visible artwork was changed.
+function managedOutputFilenames(catalog) {
+  const filenames = new Set();
+  if (!catalog || !Array.isArray(catalog.families)) return filenames;
 
-All other SVG files are copied byte-for-byte from the pinned upstream commit.
-`;
+  for (const family of catalog.families) {
+    if (
+      !Array.isArray(family) ||
+      typeof family[0] !== "string" ||
+      !/^[a-z0-9][a-z0-9-]*$/.test(family[0]) ||
+      !Number.isInteger(family[3])
+    ) {
+      fail("The existing integrated icon catalog is invalid.");
+    }
+
+    const [reference, , , variantMask] = family;
+    filenames.add(`${reference}-alt.svg`);
+    if ((variantMask & 2) !== 0) filenames.add(`${reference}-alt-dark.svg`);
+    if ((variantMask & 4) !== 0) filenames.add(`${reference}-alt-light.svg`);
+  }
+
+  return filenames;
+}
+
+async function readExistingCatalog() {
+  try {
+    return JSON.parse(await readFile(catalogOutputPath, "utf8"));
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    fail(`Could not read the existing integrated icon catalog: ${error.message}`);
+  }
 }
 
 async function writeInBatches(entries) {
@@ -488,13 +513,13 @@ async function writeInBatches(entries) {
   }
 }
 
-async function pruneStaleIntegratedAssets(desiredAssets) {
+async function pruneStaleIntegratedAssets(desiredAssets, previouslyManagedAssets) {
   const entries = await readdir(brandsRoot, { withFileTypes: true });
   for (const entry of entries) {
     if (
       entry.isFile() &&
-      entry.name.startsWith(OUTPUT_PREFIX) &&
       entry.name.endsWith(".svg") &&
+      (entry.name.startsWith(LEGACY_OUTPUT_PREFIX) || previouslyManagedAssets.has(entry.name)) &&
       !desiredAssets.has(entry.name)
     ) {
       await rm(join(brandsRoot, entry.name), { force: true });
@@ -520,8 +545,6 @@ async function main() {
   if (
     dirname(catalogOutputPath) !== scriptDirectory ||
     dirname(legacyPublicCatalogPath) !== brandsRoot ||
-    dirname(licenseOutputPath) !== brandsRoot ||
-    dirname(attributionOutputPath) !== brandsRoot ||
     dirname(legacyOutputRoot) !== brandsRoot
   ) {
     fail("Refusing to write outside public/brands.");
@@ -580,6 +603,8 @@ async function main() {
     fail(`Could not parse upstream index.json: ${error.message}`);
   }
   const catalog = buildCatalog(svgFilenames, upstreamIndex);
+  const existingCatalog = await readExistingCatalog();
+  const previouslyManagedAssets = managedOutputFilenames(existingCatalog);
 
   let modifiedCount = 0;
   const prepared = [];
@@ -591,7 +616,7 @@ async function main() {
     validatePassiveSvg(sanitized.source, filename);
     const outputBuffer = sanitized.modified ? Buffer.from(sanitized.source, "utf8") : sourceBuffer;
     if (sanitized.modified) modifiedCount += 1;
-    const outputFilename = `${OUTPUT_PREFIX}${filename}`;
+    const outputFilename = integratedOutputFilename(filename);
     prepared.push({ buffer: outputBuffer, filename: outputFilename });
     contentHash.update(outputFilename, "utf8");
     contentHash.update("\0", "utf8");
@@ -601,16 +626,16 @@ async function main() {
 
   await mkdir(brandsRoot, { recursive: true });
   await writeInBatches(prepared);
-  await pruneStaleIntegratedAssets(new Set(prepared.map(({ filename }) => filename)));
-  await writeFile(licenseOutputPath, readGitBlob(sourceRoot, "LICENSE"));
-  await writeFile(attributionOutputPath, attributionText(), "utf8");
+  const desiredAssets = new Set(prepared.map(({ filename }) => filename));
+  await pruneStaleIntegratedAssets(desiredAssets, previouslyManagedAssets);
   await writeFile(catalogOutputPath, `${JSON.stringify(catalog)}\n`, "utf8");
   await removeLegacyLayout();
 
   const outputEntries = await readdir(brandsRoot, { withFileTypes: true });
-  const outputSvgCount = outputEntries.filter(
-    (entry) => entry.isFile() && entry.name.startsWith(OUTPUT_PREFIX) && entry.name.endsWith(".svg"),
-  ).length;
+  const outputFilenames = new Set(
+    outputEntries.filter((entry) => entry.isFile()).map((entry) => entry.name),
+  );
+  const outputSvgCount = [...desiredAssets].filter((filename) => outputFilenames.has(filename)).length;
   if (outputSvgCount !== EXPECTED_SVG_COUNT) {
     fail(`Expected ${EXPECTED_SVG_COUNT} output SVGs, found ${outputSvgCount}.`);
   }
@@ -619,9 +644,9 @@ async function main() {
     [
       `Imported ${EXPECTED_SVG_COUNT} passive SVGs in ${EXPECTED_FAMILY_COUNT} families.`,
       `Pinned source: ${SOURCE_COMMIT}`,
-      "Sanitized: selfhst-paypal-light.svg (empty foreignObject removed)",
+      "Sanitized: paypal-alt-light.svg (empty foreignObject removed)",
       `SVG content SHA-256: ${contentHash.digest("hex")}`,
-      `Output: ${relative(projectRoot, brandsRoot).replaceAll("\\", "/")}/${OUTPUT_PREFIX}*.svg`,
+      `Output: ${relative(projectRoot, brandsRoot).replaceAll("\\", "/")}/<reference>-alt[-dark|-light].svg`,
     ].join("\n") + "\n",
   );
 }

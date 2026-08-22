@@ -210,7 +210,7 @@ function selfhstBrand(
     variantLabel: variant.label,
     searchTerms: [...new Set([title, reference, ...tags])],
     variantOrder: variant.order,
-    asset: `${id}.svg`,
+    asset: `${reference}-alt${variant.suffix}.svg`,
   };
 }
 

@@ -59,7 +59,7 @@ export function createDemoVault(now = new Date()): PersistedVault {
     {
       id: "demo-aws",
       service: "AWS",
-      identity: "coffer-demo-admin",
+      identity: "coffer-demo-global-infrastructure-security-administrator",
       secret: RFC_6238_SHA_256_SECRET,
       group: "Work",
       color: "orange",
@@ -152,7 +152,7 @@ export function createDemoVault(now = new Date()): PersistedVault {
       favorite: true,
       lastUsed: usedAt(5 * DAY_MS),
       algorithm: "SHA-256",
-      digits: 8,
+      digits: 6,
       period: 60,
       archived: false,
       iconBrand: null,

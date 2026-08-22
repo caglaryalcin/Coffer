@@ -145,6 +145,13 @@ export interface CreatedEncryptedVault {
   runtime: VaultRuntime;
 }
 
+export interface RotatedVaultPassword {
+  header: EncryptedVaultHeader;
+  runtime: VaultRuntime;
+  currentAuthProof: string;
+  nextAuthProof: string;
+}
+
 export interface UnlockedEncryptedVault<T> {
   payload: T;
   runtime: VaultRuntime;
@@ -1007,29 +1014,32 @@ export async function createEncryptedVault<T>(
   }
 }
 
-/**
- * Unlocks only the small public header. Use this before API authentication;
- * fetch the encrypted payload only after authenticating with createAuthProof().
- */
-export async function unlockVaultHeader(
+type UnwrappedVaultKeyMaterial = {
+  rawVaultKey: Uint8Array;
+  rawAuthKey: Uint8Array;
+  authKey: CryptoKey;
+};
+
+async function unwrapVaultKeyMaterial(
   password: string,
   header: EncryptedVaultHeader,
-): Promise<VaultRuntime> {
+): Promise<UnwrappedVaultKeyMaterial> {
   validatePassword(password);
   validateHeader(header);
 
   const salt = decodeExactBase64(header.kdf.salt, "header.kdf.salt", SALT_BYTES);
   let derived: Uint8Array | undefined;
   let kekBytes: Uint8Array | undefined;
-  let authKeyBytes: Uint8Array | undefined;
+  let rawAuthKey: Uint8Array | undefined;
   let rawVaultKey: Uint8Array | undefined;
+  let result: UnwrappedVaultKeyMaterial | undefined;
 
   try {
     derived = await deriveKeyMaterial(password, salt, header.kdf);
     kekBytes = derived.slice(0, AES_KEY_BYTES);
-    authKeyBytes = derived.slice(AES_KEY_BYTES);
+    rawAuthKey = derived.slice(AES_KEY_BYTES);
 
-    const authKey = await importAuthKey(authKeyBytes);
+    const authKey = await importAuthKey(rawAuthKey);
     const actualVerifier = decodeExactBase64(
       await passwordVerifier(authKey),
       "derived password verifier",
@@ -1094,22 +1104,151 @@ export async function unlockVaultHeader(
     if (rawVaultKey.byteLength !== AES_KEY_BYTES) {
       throw new VaultCryptoError("CORRUPT_VAULT", "Wrapped vault key has an invalid length.");
     }
-
-    const vaultKey = await importAesKey(rawVaultKey, ["encrypt", "decrypt"]);
-    const runtime: VaultRuntime = { vaultKey, authKey };
-    await attachVaultResumeSealingMaterial(
-      runtime,
-      header.vaultId,
-      rawVaultKey,
-      authKeyBytes,
-    );
-    return runtime;
+    result = { rawVaultKey, rawAuthKey, authKey };
+    return result;
   } finally {
     salt.fill(0);
     derived?.fill(0);
     kekBytes?.fill(0);
-    authKeyBytes?.fill(0);
-    rawVaultKey?.fill(0);
+    if (!result) {
+      rawAuthKey?.fill(0);
+      rawVaultKey?.fill(0);
+    }
+  }
+}
+
+/**
+ * Unlocks only the small public header. Use this before API authentication;
+ * fetch the encrypted payload only after authenticating with createAuthProof().
+ */
+export async function unlockVaultHeader(
+  password: string,
+  header: EncryptedVaultHeader,
+): Promise<VaultRuntime> {
+  const material = await unwrapVaultKeyMaterial(password, header);
+  try {
+    const vaultKey = await importAesKey(material.rawVaultKey, ["encrypt", "decrypt"]);
+    const runtime: VaultRuntime = { vaultKey, authKey: material.authKey };
+    await attachVaultResumeSealingMaterial(
+      runtime,
+      header.vaultId,
+      material.rawVaultKey,
+      material.rawAuthKey,
+    );
+    return runtime;
+  } finally {
+    material.rawVaultKey.fill(0);
+    material.rawAuthKey.fill(0);
+  }
+}
+
+/**
+ * Verifies the current password, then re-wraps the existing vault key with a
+ * fresh salt and IV derived from the next password. The encrypted payload and
+ * stable vault identity do not change.
+ */
+export async function rotateVaultPassword(
+  currentPassword: string,
+  nextPassword: string,
+  header: EncryptedVaultHeader,
+): Promise<RotatedVaultPassword> {
+  validatePassword(nextPassword);
+  if (currentPassword === nextPassword) {
+    throw new VaultCryptoError("INVALID_INPUT", "The new password must be different from the current password.");
+  }
+
+  const current = await unwrapVaultKeyMaterial(currentPassword, header);
+  let salt: Uint8Array | undefined;
+  let wrapIv: Uint8Array | undefined;
+  let derived: Uint8Array | undefined;
+  let kekBytes: Uint8Array | undefined;
+  let nextAuthKeyBytes: Uint8Array | undefined;
+  let wrappedKey: Uint8Array | undefined;
+
+  try {
+    // The imported HMAC handle is sufficient for the current API proof. Keep
+    // the raw current authentication key alive no longer than necessary.
+    current.rawAuthKey.fill(0);
+    const kdfOptions = resolveKdfOptions({
+      memoryKiB: header.kdf.memoryKiB,
+      iterations: header.kdf.iterations,
+      parallelism: header.kdf.parallelism,
+    });
+    salt = randomBytes(SALT_BYTES);
+    wrapIv = randomBytes(GCM_IV_BYTES);
+    derived = await deriveKeyMaterial(nextPassword, salt, kdfOptions);
+    kekBytes = derived.slice(0, AES_KEY_BYTES);
+    nextAuthKeyBytes = derived.slice(AES_KEY_BYTES);
+    const [kek, vaultKey, nextAuthKey] = await Promise.all([
+      importAesKey(kekBytes, ["encrypt"]),
+      importAesKey(current.rawVaultKey, ["encrypt", "decrypt"]),
+      importAuthKey(nextAuthKeyBytes),
+    ]);
+
+    const nextHeader: EncryptedVaultHeader = {
+      format: header.format,
+      version: header.version,
+      vaultId: header.vaultId,
+      createdAt: header.createdAt,
+      kdf: {
+        algorithm: "argon2id",
+        salt: bytesToBase64(salt),
+        memoryKiB: kdfOptions.memoryKiB,
+        iterations: kdfOptions.iterations,
+        parallelism: kdfOptions.parallelism,
+        hashLength: 64,
+      },
+      passwordVerifier: {
+        algorithm: "HMAC-SHA-256",
+        value: await passwordVerifier(nextAuthKey),
+      },
+      wrappedKey: {
+        algorithm: "AES-256-GCM",
+        iv: "",
+        ciphertext: "",
+        tagLength: 128,
+      },
+    };
+
+    wrappedKey = new Uint8Array(await cryptoApi().subtle.encrypt(
+      {
+        name: "AES-GCM",
+        iv: webCryptoBytes(wrapIv),
+        additionalData: webCryptoBytes(wrapAdditionalData(nextHeader)),
+        tagLength: 128,
+      },
+      kek,
+      webCryptoBytes(current.rawVaultKey),
+    ));
+    nextHeader.wrappedKey = {
+      algorithm: "AES-256-GCM",
+      iv: bytesToBase64(wrapIv),
+      ciphertext: bytesToBase64(wrappedKey),
+      tagLength: 128,
+    };
+    validateHeader(nextHeader);
+
+    const runtime: VaultRuntime = { vaultKey, authKey: nextAuthKey };
+    await attachVaultResumeSealingMaterial(
+      runtime,
+      nextHeader.vaultId,
+      current.rawVaultKey,
+      nextAuthKeyBytes,
+    );
+    const [currentAuthProof, nextAuthProof] = await Promise.all([
+      createAuthProof(current.authKey),
+      createAuthProof(nextAuthKey),
+    ]);
+    return { header: nextHeader, runtime, currentAuthProof, nextAuthProof };
+  } finally {
+    current.rawVaultKey.fill(0);
+    current.rawAuthKey.fill(0);
+    salt?.fill(0);
+    wrapIv?.fill(0);
+    derived?.fill(0);
+    kekBytes?.fill(0);
+    nextAuthKeyBytes?.fill(0);
+    wrappedKey?.fill(0);
   }
 }
 

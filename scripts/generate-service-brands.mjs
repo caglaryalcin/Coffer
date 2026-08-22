@@ -32,8 +32,6 @@ const brandsDirectory = resolve(root, "public", "brands");
 const curatedAssetsDirectory = resolve(root, "scripts", "brand-assets");
 const generatedCatalogPath = resolve(root, "app", "service-brands.generated.ts");
 const selfhstCatalogPath = resolve(root, "scripts", "selfhst-icons.generated.json");
-const selfhstLicensePath = resolve(brandsDirectory, "selfhst-LICENSE.txt");
-const selfhstAttributionPath = resolve(brandsDirectory, "selfhst-ATTRIBUTION.txt");
 const selfhstSource = {
   repository: "https://github.com/selfhst/icons",
   revision: "948e3aa28d3110ee23957473a85431650e10e778",
@@ -95,7 +93,7 @@ function integratedSelfhstAssets(value) {
     references.add(reference);
     for (const variant of selfhstVariants) {
       if ((variantMask & variant.bit) === 0) continue;
-      const filename = `selfhst-${reference}${variant.suffix}.svg`;
+      const filename = `${reference}-alt${variant.suffix}.svg`;
       if (!/^[a-z0-9][a-z0-9-]{0,63}\.svg$/u.test(filename) || assets.has(filename)) {
         throw new Error(`The integrated selfh.st icon catalog contains an invalid asset: ${filename}`);
       }
@@ -232,19 +230,13 @@ if (
   relative(root, brandsDirectory).startsWith("..") ||
   relative(root, curatedAssetsDirectory).startsWith("..") ||
   relative(root, generatedCatalogPath).startsWith("..") ||
-  relative(root, selfhstCatalogPath).startsWith("..") ||
-  relative(brandsDirectory, selfhstLicensePath).startsWith("..") ||
-  relative(brandsDirectory, selfhstAttributionPath).startsWith("..")
+  relative(root, selfhstCatalogPath).startsWith("..")
 ) {
   throw new Error("Generated brand targets must stay inside the project root.");
 }
 
 const selfhstCatalog = JSON.parse(await readFile(selfhstCatalogPath, "utf8"));
 const selfhstAssetFilenames = integratedSelfhstAssets(selfhstCatalog);
-await Promise.all([
-  readFile(selfhstLicensePath),
-  readFile(selfhstAttributionPath),
-]);
 
 const fontAwesomeIcons = new Map([
   ["amazon", faAmazon],
@@ -443,6 +435,12 @@ for (const [id, picker] of brandPickerMetadata) {
 
 generatedBrands.sort((left, right) => left[0].localeCompare(right[0], "en"));
 
+const generatedAssetFilenames = new Set(generatedBrands.map(([slug]) => `${slug}.svg`));
+const assetCollisions = [...selfhstAssetFilenames].filter((filename) => generatedAssetFilenames.has(filename));
+if (assetCollisions.length > 0) {
+  throw new Error(`Integrated icon filenames conflict with core brand assets: ${assetCollisions.join(", ")}`);
+}
+
 await mkdir(brandsDirectory, { recursive: true });
 const desiredAssets = new Set(selfhstAssetFilenames);
 for (const brand of generatedBrands) {
@@ -525,35 +523,6 @@ export const generatedSelfhstServiceBrandFamilies = JSON.parse(
 ) as readonly GeneratedSelfhstServiceBrandFamily[];
 `;
 await writeFile(generatedCatalogPath, generatedSource, "utf8");
-
-const licenses = `Coffer local service-brand assets
-=================================
-
-Generated from Simple Icons ${simpleIconsVersion} (${simpleIconsLicense}).
-Source metadata and upstream provenance are pinned in node_modules/simple-icons/data/simple-icons.json.
-Simple Icons project: https://simpleicons.org
-
-The following curated compatibility assets use Font Awesome Free Brands 7.3.1:
-${[...fontAwesomeIcons.keys()].sort().join(", ")}
-Icons license: CC BY 4.0. Font Awesome project: https://fontawesome.com
-
-The following manually curated local assets are proprietary brand assets and are not
-covered by the Simple Icons, Font Awesome, or Coffer licenses:
-${curatedBrandAssets.map((brand) => `${brand.id} (${brand.title}): ${brand.provider}; ${brand.terms}${brand.termsUrl ? `; ${brand.termsUrl}` : ""}`).join("\n")}
-
-Additional selectable service-icon variants are vendored from selfh.st/icons ${selfhstSource.version}:
-Project: ${selfhstSource.repository}
-Snapshot: ${selfhstSource.revision}
-License: CC BY 4.0 — https://creativecommons.org/licenses/by/4.0/
-Full license and attribution: /brands/selfhst-LICENSE.txt and /brands/selfhst-ATTRIBUTION.txt
-
-The upstream filenames were prefixed with selfhst- for collision-safe integration.
-The empty Adobe Illustrator compatibility foreignObject in selfhst-paypal-light.svg
-was removed during the security-preserving import. No other visual modifications were made.
-
-Brand names and logos may be trademarks of their respective owners. Inclusion does not imply endorsement.
-`;
-await writeFile(join(brandsDirectory, "LICENSES.txt"), licenses, "utf8");
 
 const totalSvgBytes = await totalAssetBytes(desiredAssets);
 console.log(

@@ -7,6 +7,9 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type DragEvent as ReactDragEvent,
+  type HTMLAttributes,
+  type MouseEvent as ReactMouseEvent,
 } from "react";
 import { createDemoVault } from "../../lib/demo-vault";
 import {
@@ -15,21 +18,37 @@ import {
   isTotpExpiring,
   totpWindow,
 } from "../../lib/totp";
-import type {
-  PersistedVault,
-  VaultAccount,
-  VaultGroupCustomization,
-  VaultSettings,
-  VaultTheme,
+import {
+  MAX_GROUP_CUSTOMIZATIONS,
+  type PersistedVault,
+  type VaultAccount,
+  type VaultGroupColor,
+  type VaultGroupCustomization,
+  type VaultGroupIcon,
 } from "../../lib/vault-model";
+import BulkGroupActions, {
+  AccountSelectionIndicator,
+  ArchiveBulkActions,
+  mouseIsOutsideAccountCodeRow,
+  normalizeGroupName,
+} from "../BulkGroupActions";
 import CardViewMenu, { type CardView } from "../CardViewMenu";
+import GroupCustomizationDialog from "../GroupCustomizationDialog";
 import OverflowingIdentity from "../OverflowingIdentity";
 import ProfileMenu from "../ProfileMenu";
 import ServiceLogo, { isServiceBrandId } from "../ServiceLogo";
 import ThemeToggle from "../ThemeToggle";
+import DemoAccountEditor, {
+  type DemoAccountEditorCodePreview,
+  type DemoAccountEditorPatch,
+} from "./DemoAccountEditor";
+import DemoAddAccountDialog, { type DemoNewAccount } from "./DemoAddAccountDialog";
+import DemoBulkLogoPicker from "./DemoBulkLogoPicker";
+import DemoSidebarFooter from "./DemoSidebarFooter";
 import DemoSettingsCenter from "./DemoSettingsCenter";
+import DemoTransferCenter from "./DemoTransferCenter";
 
-type DemoView = "all" | "favorites" | "archive" | "settings";
+type DemoView = "all" | "favorites" | "archive" | "transfer" | "settings";
 type GeneratedCodePair = Readonly<{
   counter: number;
   configKey: string;
@@ -38,17 +57,17 @@ type GeneratedCodePair = Readonly<{
 }>;
 
 const SAFE_SAMPLE_SECRET = "JBSWY3DPEHPK3PXP";
-const DEMO_ADDITIONS = [
-  { service: "Linear", identity: "sample-team@coffer.example", group: "Work", color: "violet" },
-  { service: "Stripe", identity: "sample-billing@coffer.example", group: "Finance", color: "blue" },
-  { service: "Dropbox", identity: "sample-files@coffer.example", group: "Personal", color: "green" },
-  { service: "GitLab", identity: "sample-code@coffer.example", group: "Work", color: "orange" },
-] as const satisfies ReadonlyArray<Pick<VaultAccount, "service" | "identity" | "group" | "color">>;
-
-const FALLBACK_GROUP_CUSTOMIZATION: Pick<VaultGroupCustomization, "icon" | "color"> = {
-  icon: "folder",
-  color: "rose",
+const NEW_GROUP_CUSTOMIZATION: VaultGroupCustomization = { name: "", icon: "folder", color: "rose" };
+const DEFAULT_GROUP_ICONS: readonly VaultGroupIcon[] = ["dot", "folder", "briefcase", "person", "shield", "star", "home", "code"];
+const DEFAULT_GROUP_COLORS: readonly VaultGroupColor[] = ["rose", "amber", "lime", "emerald", "sky", "blue", "violet", "slate"];
+const COMMON_GROUP_STYLES: Readonly<Record<string, Pick<VaultGroupCustomization, "icon" | "color">>> = {
+  personal: { icon: "person", color: "blue" },
+  work: { icon: "briefcase", color: "amber" },
+  finance: { icon: "shield", color: "lime" },
 };
+const SELECTED_ACCOUNT_DRAG_TYPE = "application/x-coffer-demo-selected-accounts";
+const DEMO_ACCOUNT_COLORS: readonly VaultAccount["color"][] = ["violet", "green", "blue", "orange", "ink"];
+const DEMO_SESSION_DURATION_MS = 60 * 60 * 1_000;
 
 const DEMO_SETTINGS_MENU_ITEMS = [
   { id: "demo-profile-settings", label: "Profile" },
@@ -94,26 +113,153 @@ function codePreview(
 }
 
 function groupKey(value: string) {
-  return value.trim().normalize("NFKC").toLocaleLowerCase("en");
+  return normalizeGroupName(value).normalize("NFKC").toLocaleLowerCase("en");
+}
+
+function defaultGroupCustomization(name: string): VaultGroupCustomization {
+  const normalizedName = normalizeGroupName(name);
+  const key = groupKey(normalizedName);
+  const common = COMMON_GROUP_STYLES[key];
+  if (common) return { name: normalizedName, ...common };
+
+  const score = [...key].reduce(
+    (total, character, index) => ((total * 33) + (character.codePointAt(0) ?? 0) + index) >>> 0,
+    5381,
+  );
+  return {
+    name: normalizedName,
+    icon: DEFAULT_GROUP_ICONS[score % DEFAULT_GROUP_ICONS.length],
+    color: DEFAULT_GROUP_COLORS[Math.floor(score / DEFAULT_GROUP_ICONS.length) % DEFAULT_GROUP_COLORS.length],
+  };
+}
+
+function accountInitials(service: string) {
+  const words = service.trim().split(/\s+/u);
+  return (words.length > 1 ? words.map((word) => word[0]).join("") : service.slice(0, 2)).slice(0, 3).toUpperCase();
 }
 
 export default function DemoVaultApp() {
   const [vault, setVault] = useState<PersistedVault>(() => createDemoVault());
-  const [theme, setTheme] = useState<VaultTheme>(() => vault.settings.theme);
+  const [demoSessionKey, setDemoSessionKey] = useState(0);
   const [view, setView] = useState<DemoView>("all");
   const [group, setGroup] = useState<string>("All");
   const [query, setQuery] = useState("");
   const [cardView, setCardView] = useState<CardView>("default");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [accountMenuId, setAccountMenuId] = useState<string | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedAccountIds, setSelectedAccountIds] = useState<Set<string>>(() => new Set());
+  const [draggingSelectedAccounts, setDraggingSelectedAccounts] = useState(false);
+  const [draggedAccountIds, setDraggedAccountIds] = useState<Set<string>>(() => new Set());
+  const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
+  const [customizingGroup, setCustomizingGroup] = useState<string | null>(null);
+  const [creatingGroup, setCreatingGroup] = useState(false);
+  const [groupCustomizationReturnFocusTo, setGroupCustomizationReturnFocusTo] = useState<HTMLElement | null>(null);
+  const [bulkLogoOpen, setBulkLogoOpen] = useState(false);
+  const [bulkLogoReturnFocusTo, setBulkLogoReturnFocusTo] = useState<HTMLButtonElement | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addReturnFocusTo, setAddReturnFocusTo] = useState<HTMLElement | null>(null);
+  const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
+  const [accountEditorReturnFocusTo, setAccountEditorReturnFocusTo] = useState<HTMLButtonElement | null>(null);
   const [codePairs, setCodePairs] = useState<Record<string, GeneratedCodePair>>({});
   const [tick, setTick] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const vaultRef = useRef(vault);
   const demoGenerationRef = useRef(0);
-  const additionSequenceRef = useRef(0);
+  const clipboardClearTimersRef = useRef<Set<number>>(new Set());
+  const selectedAccountDragRef = useRef(false);
+  const selectedAccountDragOriginRef = useRef<string | null>(null);
+  const draggedAccountIdsRef = useRef<Set<string>>(new Set());
+  const suppressSelectedAccountClickRef = useRef(false);
+  const selectedAccountClickResetFrameRef = useRef<number | null>(null);
+  const demoSessionDeadlineRef = useRef<number | null>(null);
   const accounts = vault.accounts;
+  const editingAccount = editingAccountId ? accounts.find((account) => account.id === editingAccountId) ?? null : null;
+  const editingCodePreview: DemoAccountEditorCodePreview | undefined = editingAccount
+    ? { ...codePreview(editingAccount, tick, codePairs[editingAccount.id]), period: editingAccount.period }
+    : undefined;
+
+  const clearSelectedAccountDrag = useCallback(() => {
+    selectedAccountDragRef.current = false;
+    selectedAccountDragOriginRef.current = null;
+    draggedAccountIdsRef.current.clear();
+    setDraggingSelectedAccounts(false);
+    setDraggedAccountIds(new Set());
+    setDragOverGroup(null);
+    if (suppressSelectedAccountClickRef.current) {
+      if (selectedAccountClickResetFrameRef.current !== null) {
+        window.cancelAnimationFrame(selectedAccountClickResetFrameRef.current);
+      }
+      selectedAccountClickResetFrameRef.current = window.requestAnimationFrame(() => {
+        suppressSelectedAccountClickRef.current = false;
+        selectedAccountClickResetFrameRef.current = null;
+      });
+    }
+  }, []);
+
+  const updateSelectedAccountDragZone = (
+    event: ReactMouseEvent<HTMLElement>,
+    draggable: boolean,
+  ) => {
+    const allowed = draggable
+      && mouseIsOutsideAccountCodeRow(event);
+    event.currentTarget.dataset.dragZone = allowed ? "allowed" : "blocked";
+    return allowed;
+  };
+
+  const prepareSelectedAccountDrag = (
+    event: ReactMouseEvent<HTMLElement>,
+    accountId: string,
+    draggable: boolean,
+  ) => {
+    selectedAccountDragOriginRef.current = event.button === 0
+      && updateSelectedAccountDragZone(event, draggable)
+      ? accountId
+      : null;
+  };
+
+  const resetDemoSession = useCallback(() => {
+    const freshVault = createDemoVault();
+    demoGenerationRef.current += 1;
+    selectedAccountDragRef.current = false;
+    selectedAccountDragOriginRef.current = null;
+    draggedAccountIdsRef.current.clear();
+    setDraggedAccountIds(new Set());
+    suppressSelectedAccountClickRef.current = false;
+    if (selectedAccountClickResetFrameRef.current !== null) {
+      window.cancelAnimationFrame(selectedAccountClickResetFrameRef.current);
+      selectedAccountClickResetFrameRef.current = null;
+    }
+    for (const timer of clipboardClearTimersRef.current) window.clearTimeout(timer);
+    clipboardClearTimersRef.current.clear();
+    demoSessionDeadlineRef.current = Date.now() + DEMO_SESSION_DURATION_MS;
+    vaultRef.current = freshVault;
+    setVault(freshVault);
+    setView("all");
+    setGroup("All");
+    setQuery("");
+    setCardView("default");
+    setSidebarCollapsed(false);
+    setAccountMenuId(null);
+    setSelectionMode(false);
+    setSelectedAccountIds(new Set());
+    setDraggingSelectedAccounts(false);
+    setDragOverGroup(null);
+    setCustomizingGroup(null);
+    setCreatingGroup(false);
+    setGroupCustomizationReturnFocusTo(null);
+    setBulkLogoOpen(false);
+    setBulkLogoReturnFocusTo(null);
+    setAddOpen(false);
+    setAddReturnFocusTo(null);
+    setEditingAccountId(null);
+    setAccountEditorReturnFocusTo(null);
+    setCodePairs({});
+    setTick(Date.now());
+    setDemoSessionKey((current) => current + 1);
+    setToast("The one-hour demo session reset to its original sample data.");
+  }, []);
 
   useEffect(() => {
     vaultRef.current = vault;
@@ -128,8 +274,38 @@ export default function DemoVaultApp() {
     };
   }, []);
 
+  useEffect(() => {
+    if (demoSessionDeadlineRef.current === null) {
+      demoSessionDeadlineRef.current = Date.now() + DEMO_SESSION_DURATION_MS;
+    }
+    const resetIfExpired = () => {
+      const deadline = demoSessionDeadlineRef.current;
+      if (deadline !== null && Date.now() >= deadline) resetDemoSession();
+    };
+    const deadline = demoSessionDeadlineRef.current;
+    const timer = window.setTimeout(
+      resetIfExpired,
+      Math.max(0, deadline - Date.now()),
+    );
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") resetIfExpired();
+    };
+    window.addEventListener("focus", resetIfExpired);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("focus", resetIfExpired);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [demoSessionKey, resetDemoSession]);
+
   useEffect(() => () => {
     demoGenerationRef.current += 1;
+    if (selectedAccountClickResetFrameRef.current !== null) {
+      window.cancelAnimationFrame(selectedAccountClickResetFrameRef.current);
+    }
+    for (const timer of clipboardClearTimersRef.current) window.clearTimeout(timer);
+    clipboardClearTimersRef.current.clear();
   }, []);
 
   useEffect(() => {
@@ -143,7 +319,9 @@ export default function DemoVaultApp() {
       const target = event.target as HTMLElement;
       const typing = target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT";
       const searchShortcut = (event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase("en") === "k";
-      if (searchShortcut || (event.key === "/" && !typing)) {
+      const focusSearch = searchShortcut || (event.key === "/" && !typing);
+      if (focusSearch && document.querySelector('[aria-modal="true"]')) return;
+      if (focusSearch) {
         event.preventDefault();
         searchRef.current?.focus();
       } else if (event.key === "Escape") {
@@ -166,13 +344,30 @@ export default function DemoVaultApp() {
     });
   }, []);
 
-  const groups = useMemo(() => Array.from(new Set(
-    accounts.filter((account) => !account.archived).map((account) => account.group),
-  )).sort((left, right) => left.localeCompare(right, "en")), [accounts]);
+  const groups = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const account of accounts) {
+      if (!account.archived) names.set(groupKey(account.group), account.group);
+    }
+    for (const customization of vault.groupCustomizations) {
+      names.set(groupKey(customization.name), customization.name);
+    }
+    return [...names.values()].sort((left, right) => left.localeCompare(right, "en"));
+  }, [accounts, vault.groupCustomizations]);
 
-  const groupCustomizations = useMemo(() => new Map(
+  const groupCustomizationMap = useMemo(() => new Map(
     vault.groupCustomizations.map((customization) => [groupKey(customization.name), customization]),
   ), [vault.groupCustomizations]);
+  const customizationForGroup = useCallback((name: string) => (
+    groupCustomizationMap.get(groupKey(name)) ?? defaultGroupCustomization(name)
+  ), [groupCustomizationMap]);
+  const activeGroupCustomization = creatingGroup
+    ? NEW_GROUP_CUSTOMIZATION
+    : customizingGroup ? customizationForGroup(customizingGroup) : null;
+  const groupCounts = useMemo(() => Object.fromEntries(groups.map((name) => {
+    const key = groupKey(name);
+    return [name, accounts.filter((account) => !account.archived && groupKey(account.group) === key).length];
+  })), [accounts, groups]);
 
   const visibleAccounts = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase("en");
@@ -180,7 +375,7 @@ export default function DemoVaultApp() {
       .filter((account) => {
         if (view === "archive" ? !account.archived : account.archived) return false;
         if (view === "favorites" && !account.favorite) return false;
-        if (view === "all" && group !== "All" && account.group !== group) return false;
+        if (view === "all" && group !== "All" && groupKey(account.group) !== groupKey(group)) return false;
         if (!normalizedQuery) return true;
         return `${account.service}\0${account.identity}\0${account.group}`
           .toLocaleLowerCase("en")
@@ -188,6 +383,32 @@ export default function DemoVaultApp() {
       })
       .sort((left, right) => left.service.localeCompare(right.service, "en") || left.identity.localeCompare(right.identity, "en"));
   }, [accounts, group, query, view]);
+
+  const selectableVisibleIds = useMemo(
+    () => visibleAccounts.map((account) => account.id),
+    [visibleAccounts],
+  );
+  const selectableVisibleIdSet = useMemo(() => new Set(selectableVisibleIds), [selectableVisibleIds]);
+  const selectedVisibleAccountIds = useMemo(
+    () => new Set([...selectedAccountIds].filter((id) => selectableVisibleIdSet.has(id))),
+    [selectableVisibleIdSet, selectedAccountIds],
+  );
+  const allVisibleSelected = selectableVisibleIds.length > 0 && selectableVisibleIds.every(
+    (id) => selectedVisibleAccountIds.has(id),
+  );
+  const allSelectedFavorited = selectedVisibleAccountIds.size > 0 && accounts.every(
+    (account) => !selectedVisibleAccountIds.has(account.id) || account.favorite,
+  );
+  const selectedLogoPreviewAccount = accounts.find((account) => selectedVisibleAccountIds.has(account.id)) ?? null;
+  const selectedLogoSuggestedService = useMemo(() => {
+    const services = new Map<string, string>();
+    for (const account of accounts) {
+      if (selectedVisibleAccountIds.has(account.id)) {
+        services.set(account.service.trim().toLocaleLowerCase("en"), account.service.trim());
+      }
+    }
+    return services.size === 1 ? [...services.values()][0] : null;
+  }, [accounts, selectedVisibleAccountIds]);
 
   const accountConfigurationSetKey = accounts.map(accountConfigurationKey).join("|");
   const codeWindowKey = accounts
@@ -229,16 +450,415 @@ export default function DemoVaultApp() {
     };
   }, [accountConfigurationSetKey, accounts, codeWindowKey]);
 
+  const exitSelectionMode = () => {
+    setSelectionMode(false);
+    setSelectedAccountIds(new Set());
+    clearSelectedAccountDrag();
+    setBulkLogoOpen(false);
+    setBulkLogoReturnFocusTo(null);
+  };
+
   const showAllAccounts = () => {
+    exitSelectionMode();
     setView("all");
     setGroup("All");
     setAccountMenuId(null);
   };
 
-  const openDemoSettingsSection = (sectionId: string) => {
+  const showFavorites = () => {
+    exitSelectionMode();
+    setView("favorites");
+    setGroup("All");
+    setAccountMenuId(null);
+  };
+
+  const showArchive = () => {
+    exitSelectionMode();
+    setView("archive");
+    setGroup("All");
+    setAccountMenuId(null);
+  };
+
+  const showTransfer = () => {
+    exitSelectionMode();
+    setView("transfer");
+    setGroup("All");
+    setAccountMenuId(null);
+  };
+
+  const showSettings = () => {
+    exitSelectionMode();
     setView("settings");
     setGroup("All");
     setAccountMenuId(null);
+  };
+
+  const toggleAccountSelection = (accountId: string) => {
+    setSelectedAccountIds((current) => {
+      const next = new Set(current);
+      if (next.has(accountId)) next.delete(accountId);
+      else next.add(accountId);
+      return next;
+    });
+  };
+
+  const beginGroupCreation = (trigger: HTMLElement) => {
+    if (selectionMode) return;
+    if (vaultRef.current.groupCustomizations.length >= MAX_GROUP_CUSTOMIZATIONS) {
+      setToast("This demo has reached the maximum number of groups.");
+      return;
+    }
+    setAccountMenuId(null);
+    setGroupCustomizationReturnFocusTo(trigger);
+    setCustomizingGroup(null);
+    setCreatingGroup(true);
+  };
+
+  const beginGroupCustomization = (name: string, trigger: HTMLElement) => {
+    if (!groups.some((candidate) => groupKey(candidate) === groupKey(name))) {
+      setToast("This sample group is no longer available.");
+      return;
+    }
+    setAccountMenuId(null);
+    setGroupCustomizationReturnFocusTo(trigger);
+    setCreatingGroup(false);
+    setCustomizingGroup(name);
+  };
+
+  const closeGroupCustomization = () => {
+    setCustomizingGroup(null);
+    setCreatingGroup(false);
+    setGroupCustomizationReturnFocusTo(null);
+  };
+
+  const saveGroupCustomization = (nextCustomization: VaultGroupCustomization) => {
+    if (!creatingGroup && !customizingGroup) return false;
+    const normalizedName = normalizeGroupName(nextCustomization.name);
+    const normalizedKey = groupKey(normalizedName);
+    const previousName = customizingGroup;
+    const previousKey = previousName ? groupKey(previousName) : null;
+    if (!normalizedName || normalizedName.length > 48 || normalizedKey === "all") return false;
+    if (groups.some((name) => (
+      groupKey(name) === normalizedKey && (creatingGroup || groupKey(name) !== previousKey)
+    ))) {
+      setToast("That sample group already exists.");
+      return false;
+    }
+
+    if (creatingGroup) {
+      if (vaultRef.current.groupCustomizations.length >= MAX_GROUP_CUSTOMIZATIONS) return false;
+      setVault((current) => ({
+        ...current,
+        groupCustomizations: [...current.groupCustomizations, {
+          name: normalizedName,
+          icon: nextCustomization.icon,
+          color: nextCustomization.color,
+        }],
+        updatedAt: new Date().toISOString(),
+      }));
+      closeGroupCustomization();
+      setView("all");
+      setGroup(normalizedName);
+      setToast(`${normalizedName} sample group created.`);
+      return true;
+    }
+
+    if (!previousName || !previousKey) return false;
+    setVault((current) => ({
+      ...current,
+      accounts: current.accounts.map((account) => (
+        groupKey(account.group) === previousKey ? { ...account, group: normalizedName } : account
+      )),
+      groupCustomizations: [
+        ...current.groupCustomizations.filter((customization) => (
+          groupKey(customization.name) !== previousKey && groupKey(customization.name) !== normalizedKey
+        )),
+        { name: normalizedName, icon: nextCustomization.icon, color: nextCustomization.color },
+      ],
+      updatedAt: new Date().toISOString(),
+    }));
+    if (groupKey(group) === previousKey) setGroup(normalizedName);
+    closeGroupCustomization();
+    setToast(previousName === normalizedName
+      ? `${normalizedName} sample group updated.`
+      : `${previousName} renamed to ${normalizedName}.`);
+    return true;
+  };
+
+  const deleteGroupCustomization = () => {
+    if (!customizingGroup) return false;
+    const deletedName = customizingGroup;
+    const deletedKey = groupKey(deletedName);
+    if (vaultRef.current.accounts.some((account) => groupKey(account.group) === deletedKey)) {
+      setToast("Move every active and archived sample account before deleting this group.");
+      return false;
+    }
+    if (!vaultRef.current.groupCustomizations.some((customization) => groupKey(customization.name) === deletedKey)) {
+      setToast("This sample group is no longer available.");
+      return false;
+    }
+    setVault((current) => ({
+      ...current,
+      groupCustomizations: current.groupCustomizations.filter(
+        (customization) => groupKey(customization.name) !== deletedKey,
+      ),
+      updatedAt: new Date().toISOString(),
+    }));
+    if (groupKey(group) === deletedKey) setGroup("All");
+    closeGroupCustomization();
+    setToast(`${deletedName} sample group deleted.`);
+    return true;
+  };
+
+  const moveSelectedAccounts = (
+    requestedGroup: string,
+    createGroup: boolean,
+    accountIds: ReadonlySet<string> = selectedVisibleAccountIds,
+  ) => {
+    if (accountIds.size === 0) {
+      setToast("Select at least one sample account to move.");
+      return false;
+    }
+    const normalizedName = normalizeGroupName(requestedGroup);
+    const normalizedKey = groupKey(normalizedName);
+    if (!normalizedName || normalizedName.length > 48 || normalizedKey === "all") {
+      setToast("Use a group name between 1 and 48 characters. “All” is reserved.");
+      return false;
+    }
+    const existingGroup = groups.find((name) => groupKey(name) === normalizedKey);
+    if (createGroup && existingGroup) {
+      setToast("That sample group already exists.");
+      return false;
+    }
+    if (!createGroup && !existingGroup) {
+      setToast("Choose an existing sample group.");
+      return false;
+    }
+    if (createGroup && vaultRef.current.groupCustomizations.length >= MAX_GROUP_CUSTOMIZATIONS) {
+      setToast("This demo has reached the maximum number of groups.");
+      return false;
+    }
+
+    const targetGroup = existingGroup ?? normalizedName;
+    const targetKey = groupKey(targetGroup);
+    const selected = new Set(accountIds);
+    const changedIds = new Set(accounts.filter((account) => (
+      selected.has(account.id) && !account.archived && groupKey(account.group) !== targetKey
+    )).map((account) => account.id));
+    if (changedIds.size === 0) {
+      setToast(`Selected sample accounts are already in ${targetGroup}.`);
+      return false;
+    }
+    setVault((current) => ({
+      ...current,
+      accounts: current.accounts.map((account) => (
+        changedIds.has(account.id) && !account.archived ? { ...account, group: targetGroup } : account
+      )),
+      groupCustomizations: createGroup
+        ? [...current.groupCustomizations, defaultGroupCustomization(targetGroup)]
+        : current.groupCustomizations,
+      updatedAt: new Date().toISOString(),
+    }));
+    setView("all");
+    setGroup(targetGroup);
+    exitSelectionMode();
+    setToast(`${changedIds.size} ${changedIds.size === 1 ? "sample account" : "sample accounts"} moved to ${targetGroup}.`);
+    return true;
+  };
+
+  const applySelectedAccountLogo = (iconBrand: string | null) => {
+    if (selectedVisibleAccountIds.size === 0) return false;
+    if (iconBrand && !isServiceBrandId(iconBrand)) {
+      setToast("Choose a logo from Coffer's local catalog.");
+      return false;
+    }
+    const selected = new Set(selectedVisibleAccountIds);
+    let changedCount = 0;
+    setAccounts((current) => current.map((account) => {
+      if (!selected.has(account.id) || account.archived || (account.iconBrand === iconBrand && !account.iconDataUrl)) {
+        return account;
+      }
+      changedCount += 1;
+      return { ...account, iconBrand, iconDataUrl: null };
+    }));
+    setToast(changedCount === 0
+      ? "The selected sample accounts already use that logo choice."
+      : `Logo applied to ${changedCount} ${changedCount === 1 ? "sample account" : "sample accounts"}.`);
+    return true;
+  };
+
+  const beginSelectedAccountDrag = (event: ReactDragEvent<HTMLElement>, accountId: string) => {
+    const sourceAccount = accounts.find((account) => account.id === accountId);
+    if (
+      view !== "all"
+      || !sourceAccount
+      || sourceAccount.archived
+      || selectedAccountDragOriginRef.current !== accountId
+    ) {
+      event.preventDefault();
+      suppressSelectedAccountClickRef.current = true;
+      clearSelectedAccountDrag();
+      return;
+    }
+    const draggedAccountIds = selectionMode && selectedVisibleAccountIds.has(accountId)
+      ? new Set(selectedVisibleAccountIds)
+      : new Set([accountId]);
+    draggedAccountIdsRef.current = draggedAccountIds;
+    setDraggedAccountIds(new Set(draggedAccountIds));
+    if (selectedAccountClickResetFrameRef.current !== null) {
+      window.cancelAnimationFrame(selectedAccountClickResetFrameRef.current);
+      selectedAccountClickResetFrameRef.current = null;
+    }
+    suppressSelectedAccountClickRef.current = true;
+    selectedAccountDragRef.current = true;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData(SELECTED_ACCOUNT_DRAG_TYPE, "1");
+    event.dataTransfer.setData("text/plain", "coffer-demo-accounts");
+    const card = event.currentTarget.closest(".account-card");
+    if (card instanceof HTMLElement) {
+      const bounds = card.getBoundingClientRect();
+      event.dataTransfer.setDragImage(
+        card,
+        Math.max(0, Math.min(bounds.width, event.clientX - bounds.left)),
+        Math.max(0, Math.min(bounds.height, event.clientY - bounds.top)),
+      );
+    }
+    setDraggingSelectedAccounts(true);
+    setDragOverGroup(null);
+  };
+
+  const acceptsSelectedAccountDrag = () => selectedAccountDragRef.current;
+
+  const canMoveAccountIdsToGroup = (accountIds: ReadonlySet<string>, groupName: string) => {
+    const targetKey = groupKey(groupName);
+    return accounts.some((account) => (
+      accountIds.has(account.id) && !account.archived && groupKey(account.group) !== targetKey
+    ));
+  };
+
+  const canMoveSelectedAccountsToGroup = (groupName: string) => (
+    canMoveAccountIdsToGroup(selectedVisibleAccountIds, groupName)
+  );
+
+  const dragSelectedAccountsOverGroup = (event: ReactDragEvent<HTMLDivElement>, groupName: string) => {
+    if (!acceptsSelectedAccountDrag() || !canMoveAccountIdsToGroup(draggedAccountIdsRef.current, groupName)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    if (dragOverGroup !== groupName) setDragOverGroup(groupName);
+  };
+
+  const leaveSelectedAccountDropTarget = (event: ReactDragEvent<HTMLDivElement>, groupName: string) => {
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    if (dragOverGroup === groupName) setDragOverGroup(null);
+  };
+
+  const dropSelectedAccountsOnGroup = (event: ReactDragEvent<HTMLDivElement>, groupName: string) => {
+    if (!acceptsSelectedAccountDrag() || !canMoveAccountIdsToGroup(draggedAccountIdsRef.current, groupName)) return;
+    event.preventDefault();
+    const draggedAccountIds = new Set(draggedAccountIdsRef.current);
+    clearSelectedAccountDrag();
+    moveSelectedAccounts(groupName, false, draggedAccountIds);
+  };
+
+  const setSelectedAccountsFavorite = (favorite: boolean) => {
+    if (selectedVisibleAccountIds.size === 0) return false;
+    const selected = new Set(selectedVisibleAccountIds);
+    let changedCount = 0;
+    setAccounts((current) => current.map((account) => {
+      if (!selected.has(account.id) || account.archived || account.favorite === favorite) return account;
+      changedCount += 1;
+      return { ...account, favorite };
+    }));
+    setToast(changedCount === 0
+      ? `Selected sample accounts are already ${favorite ? "in Favorites" : "not in Favorites"}.`
+      : `${changedCount} ${changedCount === 1 ? "sample account" : "sample accounts"} ${favorite ? "added to" : "removed from"} Favorites.`);
+    return true;
+  };
+
+  const archiveSelectedAccounts = () => {
+    if (selectedVisibleAccountIds.size === 0) return false;
+    const selected = new Set(selectedVisibleAccountIds);
+    let archivedCount = 0;
+    setAccounts((current) => current.map((account) => {
+      if (!selected.has(account.id) || account.archived) return account;
+      archivedCount += 1;
+      return { ...account, archived: true };
+    }));
+    exitSelectionMode();
+    setToast(`${archivedCount} ${archivedCount === 1 ? "sample account" : "sample accounts"} moved to Archive.`);
+    return true;
+  };
+
+  const restoreSelectedArchivedAccounts = () => {
+    if (selectedVisibleAccountIds.size === 0) return false;
+    const selected = new Set(selectedVisibleAccountIds);
+    let restoredCount = 0;
+    setAccounts((current) => current.map((account) => {
+      if (!selected.has(account.id) || !account.archived) return account;
+      restoredCount += 1;
+      return { ...account, archived: false };
+    }));
+    exitSelectionMode();
+    setToast(`${restoredCount} ${restoredCount === 1 ? "sample account" : "sample accounts"} restored to All codes.`);
+    return true;
+  };
+
+  const deleteSelectedArchivedAccounts = () => {
+    const selected = new Set(selectedVisibleAccountIds);
+    const deleteCount = accounts.filter((account) => selected.has(account.id) && account.archived).length;
+    if (deleteCount === 0) return false;
+    if (!window.confirm(`Remove ${deleteCount} selected demo ${deleteCount === 1 ? "account" : "accounts"}?\n\nThis only changes the temporary demo.`)) {
+      return false;
+    }
+    setAccounts((current) => current.filter((account) => !selected.has(account.id) || !account.archived));
+    exitSelectionMode();
+    setToast(`${deleteCount} ${deleteCount === 1 ? "sample account was" : "sample accounts were"} removed from this demo.`);
+    return true;
+  };
+
+  const restoreAllArchivedAccounts = () => {
+    let restoredCount = 0;
+    setAccounts((current) => current.map((account) => {
+      if (!account.archived) return account;
+      restoredCount += 1;
+      return { ...account, archived: false };
+    }));
+    setAccountMenuId(null);
+    setToast(`${restoredCount} ${restoredCount === 1 ? "sample account" : "sample accounts"} restored to All codes.`);
+  };
+
+  const openDemoAccountEditor = (accountId: string, trigger: HTMLButtonElement) => {
+    if (!vaultRef.current.accounts.some((account) => account.id === accountId)) {
+      setAccountMenuId(null);
+      setToast("This sample account is no longer available.");
+      return;
+    }
+    setAccountEditorReturnFocusTo(trigger);
+    setEditingAccountId(accountId);
+  };
+
+  const saveDemoAccountEdits = (accountId: string, patch: DemoAccountEditorPatch) => {
+    const target = vaultRef.current.accounts.find((account) => account.id === accountId);
+    if (!target) throw new Error("This sample account is no longer available.");
+
+    setAccounts((current) => current.map((account) => (
+      account.id === accountId ? {
+        ...account,
+        service: patch.service,
+        identity: patch.identity,
+        letter: accountInitials(patch.service),
+        iconBrand: patch.iconBrand,
+        iconDataUrl: null,
+        algorithm: patch.algorithm,
+        digits: patch.digits,
+        period: patch.period,
+      } : account
+    )));
+    setToast(`${patch.service} sample account updated. Changes reset on refresh or after one hour.`);
+  };
+
+  const openDemoSettingsSection = (sectionId: string) => {
+    showSettings();
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
         const section = document.getElementById(sectionId);
@@ -280,25 +900,27 @@ export default function DemoVaultApp() {
     setToast("Sample account removed from this demo.");
   };
 
-  const addSampleAccount = () => {
-    const sequence = additionSequenceRef.current;
-    additionSequenceRef.current += 1;
-    const template = DEMO_ADDITIONS[sequence % DEMO_ADDITIONS.length];
-    const copyNumber = Math.floor(sequence / DEMO_ADDITIONS.length) + 1;
-    const suffix = copyNumber > 1 ? ` ${copyNumber}` : "";
+  const openDemoAddAccount = (trigger: HTMLElement) => {
+    exitSelectionMode();
+    setAccountMenuId(null);
+    setAddReturnFocusTo(trigger);
+    setAddOpen(true);
+  };
+
+  const addDemoAccount = (sample: DemoNewAccount) => {
     const account: VaultAccount = {
-      id: `demo-added-${Date.now()}-${sequence}`,
-      service: `${template.service}${suffix}`,
-      identity: template.identity,
+      id: `demo-added-${Date.now()}-${accounts.length}`,
+      service: sample.service,
+      identity: sample.identity,
       secret: SAFE_SAMPLE_SECRET,
-      group: template.group,
-      color: template.color,
-      letter: template.service.slice(0, 2).toUpperCase(),
+      group: sample.group,
+      color: DEMO_ACCOUNT_COLORS[accounts.length % DEMO_ACCOUNT_COLORS.length],
+      letter: accountInitials(sample.service),
       favorite: false,
       lastUsed: Date.now(),
-      algorithm: "SHA-1",
-      digits: 6,
-      period: 30,
+      algorithm: sample.algorithm,
+      digits: sample.digits,
+      period: sample.period,
       archived: false,
       iconBrand: null,
       iconDataUrl: null,
@@ -308,32 +930,6 @@ export default function DemoVaultApp() {
     setGroup("All");
     setAccountMenuId(null);
     setToast(`${account.service} sample account added.`);
-  };
-
-  const updateDemoSettings = (patch: Partial<VaultSettings>) => {
-    setVault((current) => {
-      const nextSettings = { ...current.settings, ...patch };
-      const next = { ...current, settings: nextSettings, updatedAt: new Date().toISOString() };
-      vaultRef.current = next;
-      return next;
-    });
-    if (patch.theme) setTheme(patch.theme);
-    setToast("Demo settings updated for this page only.");
-  };
-
-  const updateDemoProfileName = (name: string) => {
-    const normalizedName = name.trim();
-    if (normalizedName.length < 2 || normalizedName.length > 80) return false;
-    setVault((current) => {
-      const next = {
-        ...current,
-        profile: { ...current.profile, name: normalizedName },
-        updatedAt: new Date().toISOString(),
-      };
-      vaultRef.current = next;
-      return next;
-    });
-    setToast("Demo profile updated for this page only.");
     return true;
   };
 
@@ -371,6 +967,20 @@ export default function DemoVaultApp() {
       ) return;
       navigator.vibrate?.(10);
       setToast(`${account.service} sample code copied.`);
+      if (vaultRef.current.settings.clearClipboard) {
+        const clipboardTimer = window.setTimeout(async () => {
+          try {
+            if (await navigator.clipboard.readText() === code) {
+              await navigator.clipboard.writeText("");
+            }
+          } catch {
+            // Clipboard cleanup is best-effort and may be blocked by browser permissions.
+          } finally {
+            clipboardClearTimersRef.current.delete(clipboardTimer);
+          }
+        }, 30_000);
+        clipboardClearTimersRef.current.add(clipboardTimer);
+      }
     } catch {
       setToast("Clipboard access is unavailable in this browser.");
     }
@@ -379,9 +989,52 @@ export default function DemoVaultApp() {
   const activeAccountCount = accounts.filter((account) => !account.archived).length;
   const favoriteAccountCount = accounts.filter((account) => account.favorite && !account.archived).length;
   const archivedAccountCount = accounts.filter((account) => account.archived).length;
+  const bulkGroupActions = (
+    <BulkGroupActions
+      active={selectionMode}
+      selectedCount={selectedVisibleAccountIds.size}
+      visibleCount={selectableVisibleIds.length}
+      allVisibleSelected={allVisibleSelected}
+      allSelectedFavorited={allSelectedFavorited}
+      showGroupDragHint={view === "all"}
+      groups={groups}
+      onBeginSelection={() => {
+        setAccountMenuId(null);
+        setSelectionMode(true);
+      }}
+      onSelectAllVisible={() => setSelectedAccountIds(new Set(selectableVisibleIds))}
+      onClearSelection={() => setSelectedAccountIds(new Set())}
+      onExitSelection={exitSelectionMode}
+      onSetFavorite={setSelectedAccountsFavorite}
+      onArchive={archiveSelectedAccounts}
+      onChangeLogo={(trigger) => {
+        setBulkLogoReturnFocusTo(trigger);
+        setBulkLogoOpen(true);
+      }}
+      onMoveToGroup={(groupName) => moveSelectedAccounts(groupName, false)}
+      onCreateGroupAndMove={(groupName) => moveSelectedAccounts(groupName, true)}
+    />
+  );
+  const archiveBulkActions = (
+    <ArchiveBulkActions
+      active={selectionMode}
+      selectedCount={selectedVisibleAccountIds.size}
+      visibleCount={selectableVisibleIds.length}
+      allVisibleSelected={allVisibleSelected}
+      onBeginSelection={() => {
+        setAccountMenuId(null);
+        setSelectionMode(true);
+      }}
+      onSelectAllVisible={() => setSelectedAccountIds(new Set(selectableVisibleIds))}
+      onClearSelection={() => setSelectedAccountIds(new Set())}
+      onExitSelection={exitSelectionMode}
+      onRestore={restoreSelectedArchivedAccounts}
+      onDelete={deleteSelectedArchivedAccounts}
+    />
+  );
 
   return (
-    <main className={`app-shell demo-shell theme-${theme} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+    <main key={demoSessionKey} className={`app-shell demo-shell theme-${vault.settings.theme} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar" id="demo-primary-sidebar">
         <button
           type="button"
@@ -406,44 +1059,97 @@ export default function DemoVaultApp() {
           <button type="button" title="All sample codes" className={`nav-item ${view === "all" ? "active" : ""}`} onClick={showAllAccounts}>
             <span className="nav-icon grid-icon" aria-hidden="true" />All codes<span className="nav-count">{activeAccountCount}</span>
           </button>
-          <button type="button" title="Favorite sample accounts" className={`nav-item ${view === "favorites" ? "active" : ""}`} onClick={() => { setView("favorites"); setGroup("All"); setAccountMenuId(null); }}>
+          <button type="button" title="Favorite sample accounts" className={`nav-item ${view === "favorites" ? "active" : ""}`} onClick={showFavorites}>
             <span className="nav-icon star-icon" aria-hidden="true" />Favorites<span className="nav-count">{favoriteAccountCount}</span>
           </button>
-          <button type="button" title="Archived sample accounts" className={`nav-item ${view === "archive" ? "active" : ""}`} onClick={() => { setView("archive"); setGroup("All"); setAccountMenuId(null); }}>
+          <button type="button" title="Archived sample accounts" className={`nav-item ${view === "archive" ? "active" : ""}`} onClick={showArchive}>
             <span className="nav-icon trash-icon" aria-hidden="true" />Archive<span className="nav-count">{archivedAccountCount}</span>
           </button>
-          <button type="button" className="nav-item demo-disabled-nav" title="Unavailable in demo — no data is imported or saved" disabled>
+          <button type="button" className={`nav-item ${view === "transfer" ? "active" : ""}`} title="Preview data and backup" onClick={showTransfer}>
             <span className="nav-icon transfer-icon" aria-hidden="true" />Data &amp; backup
           </button>
-          <button type="button" className={`nav-item ${view === "settings" ? "active" : ""}`} title="Demo settings" onClick={() => { setView("settings"); setGroup("All"); setAccountMenuId(null); }}>
+          <button type="button" className={`nav-item ${view === "settings" ? "active" : ""}`} title="Demo settings" onClick={showSettings}>
             <span className="nav-icon settings-icon" aria-hidden="true" />Settings
           </button>
         </nav>
 
-        <div className="sidebar-label">Groups</div>
-        <nav className="group-nav" aria-label="Sample account groups">
+        <div className="sidebar-groups-heading">
+          <span className="sidebar-label" id="demo-sidebar-groups-label">Groups</span>
+          <button
+            type="button"
+            className="group-add-button"
+            onClick={(event) => beginGroupCreation(event.currentTarget)}
+            disabled={selectionMode}
+            aria-label="Create sample group"
+            aria-haspopup="dialog"
+            aria-expanded={creatingGroup}
+            title={selectionMode ? "Finish selecting accounts before creating a group" : "Create sample group"}
+          ><span aria-hidden="true">+</span></button>
+        </div>
+        <nav className="group-nav" aria-labelledby="demo-sidebar-groups-label">
           {groups.map((name) => {
-            const customization = groupCustomizations.get(groupKey(name)) ?? FALLBACK_GROUP_CUSTOMIZATION;
-            const active = view === "all" && group === name;
-            const count = accounts.filter((account) => !account.archived && account.group === name).length;
+            const customization = customizationForGroup(name);
+            const active = view === "all" && groupKey(group) === groupKey(name);
+            const selectionMoveReady = selectionMode && view === "all" && selectedVisibleAccountIds.size > 0 && canMoveSelectedAccountsToGroup(name);
+            const dragMoveReady = draggingSelectedAccounts && canMoveAccountIdsToGroup(draggedAccountIds, name);
+            const dropReady = selectionMoveReady || dragMoveReady;
+            const dropTarget = dragMoveReady && dragOverGroup === name;
             return (
-              <div key={name} className={`group-nav-row ${active ? "active" : ""}`}>
+              <div
+                key={name}
+                className={`group-nav-row ${active ? "active" : ""} ${dropReady ? "drop-ready" : ""} ${dropTarget ? "drop-target" : ""}`}
+                onDragEnter={(event) => dragSelectedAccountsOverGroup(event, name)}
+                onDragOver={(event) => dragSelectedAccountsOverGroup(event, name)}
+                onDragLeave={(event) => leaveSelectedAccountDropTarget(event, name)}
+                onDrop={(event) => dropSelectedAccountsOnGroup(event, name)}
+              >
                 <button
                   type="button"
                   className="group-nav-main"
+                  data-group-name={name}
                   aria-pressed={active}
-                  title={`Open ${name} sample accounts`}
-                  onClick={() => { setGroup(name); setView("all"); setAccountMenuId(null); }}
+                  title={selectionMoveReady
+                    ? `Move selected sample accounts to ${name}`
+                    : `Open ${name}. Right-click or press F2 to customize.`}
+                  onClick={() => {
+                    if (selectionMoveReady) {
+                      moveSelectedAccounts(name, false);
+                      return;
+                    }
+                    exitSelectionMode();
+                    setGroup(name);
+                    setView("all");
+                    setAccountMenuId(null);
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    beginGroupCustomization(name, event.currentTarget);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "F2" || (event.shiftKey && event.key === "F10")) {
+                      event.preventDefault();
+                      beginGroupCustomization(name, event.currentTarget);
+                    }
+                  }}
                 >
                   <span className="group-symbol" data-icon={customization.icon} data-color={customization.color} aria-hidden="true" />
                   <span className="group-name">{name}</span>
-                  <span className="group-count">{count}</span>
+                  <span className="group-count">{groupCounts[name]}</span>
                 </button>
+                <button
+                  type="button"
+                  className="group-options-button more-button"
+                  onClick={(event) => beginGroupCustomization(name, event.currentTarget)}
+                  aria-haspopup="dialog"
+                  aria-label={`Customize ${name} sample group`}
+                  title={`Customize ${name} sample group`}
+                ><span aria-hidden="true">•••</span></button>
               </div>
             );
           })}
         </nav>
 
+        <DemoSidebarFooter onAbout={() => openDemoSettingsSection("demo-about-settings")} />
       </aside>
 
       <section className="workspace" id="demo-codes">
@@ -462,7 +1168,20 @@ export default function DemoVaultApp() {
           </label>
           <div className="top-actions">
             <span className="sync-state demo-badge" role="status"><i />Demo changes are not saved</span>
-            <ThemeToggle theme={theme} onToggle={() => updateDemoSettings({ theme: theme === "dark" ? "light" : "dark" })} />
+            <button
+              type="button"
+              className="icon-button lock-button"
+              disabled
+              aria-disabled="true"
+              aria-label="Lock vault (disabled in public demo)"
+              title="Vault locking is disabled in the public demo"
+            ><span aria-hidden="true" /></button>
+            <ThemeToggle
+              theme={vault.settings.theme}
+              onToggle={() => undefined}
+              disabled
+              disabledReason="Theme settings are read-only in the public demo"
+            />
             <ProfileMenu
               profile={vault.profile}
               items={DEMO_SETTINGS_MENU_ITEMS}
@@ -477,46 +1196,108 @@ export default function DemoVaultApp() {
           <span className="demo-badge" aria-hidden="true">Live demo</span>
           <div className="demo-banner-copy">
             <strong id="demo-banner-title">Explore a temporary sample vault</strong>
-            <p>Sample accounts only. Changes reset when you refresh this page. Never enter real secrets in this demo.</p>
+            <p>Sample accounts only. Changes reset on refresh and automatically every hour. Never enter real secrets in this demo.</p>
           </div>
         </section>
 
-        {view === "settings" ? (
+        {view === "transfer" ? (
+          <DemoTransferCenter />
+        ) : view === "settings" ? (
           <DemoSettingsCenter
             profile={vault.profile}
             settings={vault.settings}
-            onProfileNameChange={updateDemoProfileName}
-            onSettingsChange={updateDemoSettings}
           />
         ) : (
         <div className="content">
-          {view !== "archive" && (
+          {view !== "archive" && !selectionMode && (
             <div className="title-row title-row-actions-only">
               <div className="title-row-account-actions">
                 <CardViewMenu value={cardView} onChange={setCardView} onOpen={() => setAccountMenuId(null)} />
-                <button type="button" className="add-button" onClick={addSampleAccount}><span aria-hidden="true">+</span>Add sample account</button>
+                <button type="button" className="add-button" onClick={(event) => openDemoAddAccount(event.currentTarget)}><span aria-hidden="true">+</span>Add sample account</button>
+                {selectableVisibleIds.length > 0 && bulkGroupActions}
+              </div>
+            </div>
+          )}
+
+          {view === "archive" && !selectionMode && archivedAccountCount > 0 && (
+            <div className="title-row title-row-actions-only">
+              <div className="title-row-account-actions">
+                <button type="button" className="add-button restore-all-button" onClick={restoreAllArchivedAccounts}>
+                  <span aria-hidden="true">&#8634;</span>
+                  Restore all codes
+                </button>
               </div>
             </div>
           )}
 
           {view === "archive" ? (
-            <section className="archive-explainer" aria-label="About the demo Archive">
-              <span className="archive-explainer-icon" aria-hidden="true"><span className="nav-icon trash-icon" /></span>
-              <div><strong>Temporary archive</strong><p>These sample accounts keep generating codes and return after a demo reset.</p></div>
-              <span>{archivedAccountCount} archived</span>
-            </section>
+            <>
+              <section className="archive-explainer" aria-label="About the demo Archive">
+                <span className="archive-explainer-icon" aria-hidden="true"><span className="nav-icon trash-icon" /></span>
+                <div><strong>Temporary archive</strong><p>These sample accounts keep generating codes and return after a demo reset.</p></div>
+                <span>{archivedAccountCount} archived</span>
+              </section>
+              {selectableVisibleIds.length > 0 && archiveBulkActions}
+            </>
           ) : query.trim() ? (
             <p className="result-count" role="status">{visibleAccounts.length} {visibleAccounts.length === 1 ? "account" : "accounts"}</p>
           ) : null}
 
+          {view !== "archive" && selectionMode && bulkGroupActions}
+
           {visibleAccounts.length > 0 ? (
             <section className="account-grid" data-card-view={cardView} aria-label="Sample authenticator accounts">
+              <span className="visually-hidden" id="demo-account-drag-instructions">With a mouse, hold outside the code row and drag a sample account to a sidebar group. Dragging a selected account moves the selection together. Keyboard and touch users can use Move to group.</span>
               {visibleAccounts.map((account) => {
                 const { current: currentCode, next: nextCode, remaining } = codePreview(account, tick, codePairs[account.id]);
                 const revealNextCode = isTotpExpiring(remaining);
+                const selected = selectedVisibleAccountIds.has(account.id);
                 const accessibleCurrentCode = currentCode?.replace(/\s/gu, "").split("").join(" ");
+                const draggableAccount = view === "all" && !account.archived;
+                const accountCardProps: HTMLAttributes<HTMLElement> = {
+                  draggable: draggableAccount,
+                  "aria-describedby": draggableAccount ? "demo-account-drag-instructions" : undefined,
+                  title: draggableAccount
+                    ? selectionMode && selected
+                      ? "Hold and drag outside the code area to move selected sample accounts"
+                      : "Hold and drag outside the code area to move this sample account"
+                    : undefined,
+                  onMouseDown: (event) => prepareSelectedAccountDrag(event, account.id, draggableAccount),
+                  onMouseEnter: (event) => updateSelectedAccountDragZone(event, draggableAccount),
+                  onMouseMove: (event) => {
+                    if (!selectedAccountDragRef.current) updateSelectedAccountDragZone(event, draggableAccount);
+                  },
+                  onMouseUp: () => {
+                    if (!selectedAccountDragRef.current) selectedAccountDragOriginRef.current = null;
+                  },
+                  onMouseLeave: (event) => {
+                    delete event.currentTarget.dataset.dragZone;
+                    if (event.buttons === 0) selectedAccountDragOriginRef.current = null;
+                  },
+                  onDragStart: (event) => beginSelectedAccountDrag(event, account.id),
+                  onDragEnd: clearSelectedAccountDrag,
+                  ...(selectionMode ? {
+                    role: "button",
+                    tabIndex: 0,
+                    "aria-label": `${selected ? "Deselect" : "Select"} ${account.service} ${account.identity}`,
+                    "aria-pressed": selected,
+                    onClick: () => {
+                      if (!suppressSelectedAccountClickRef.current) toggleAccountSelection(account.id);
+                    },
+                    onKeyDown: (event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        toggleAccountSelection(account.id);
+                      }
+                    },
+                  } : {}),
+                };
                 return (
-                  <article className={`account-card ${account.archived ? "archived-card" : ""}`} key={account.id}>
+                  <article
+                    className={`account-card ${account.archived ? "archived-card" : ""} ${selectionMode ? "selection-mode" : ""} ${selected ? "selected" : ""} ${draggingSelectedAccounts && draggedAccountIds.has(account.id) ? "drag-source" : ""}`}
+                    key={account.id}
+                    {...accountCardProps}
+                  >
                     <div className="account-topline">
                       <ServiceLogo
                         service={account.service}
@@ -526,6 +1307,9 @@ export default function DemoVaultApp() {
                         iconDataUrl={account.iconDataUrl}
                       />
                       <div className="service-meta"><h2>{account.service}</h2><OverflowingIdentity text={account.identity} /></div>
+                      {selectionMode ? (
+                        <AccountSelectionIndicator selected={selected} />
+                      ) : (
                       <div className="account-card-actions">
                         {account.archived && <span className="archived-badge">Archived</span>}
                         {!account.archived && (
@@ -539,29 +1323,37 @@ export default function DemoVaultApp() {
                         <div
                           className="account-menu-wrap"
                           onBlur={(event) => {
-                            if (!event.currentTarget.contains(event.relatedTarget)) setAccountMenuId(null);
+                            if (editingAccountId !== account.id && !event.currentTarget.contains(event.relatedTarget)) {
+                              setAccountMenuId(null);
+                            }
                           }}
                         >
                           <button
                             type="button"
                             className="more-button"
+                            aria-haspopup="menu"
                             aria-expanded={accountMenuId === account.id}
                             aria-controls={accountMenuId === account.id ? `demo-account-menu-${account.id}` : undefined}
                             onClick={() => setAccountMenuId((current) => current === account.id ? null : account.id)}
                             aria-label={`Open ${account.service} sample options`}
                           >•••</button>
                           {accountMenuId === account.id && (
-                            <div className="account-menu" id={`demo-account-menu-${account.id}`}>
-                              {!account.archived && <button type="button" onClick={() => toggleFavorite(account.id)}>{account.favorite ? "Remove from Favorites" : "Add to Favorites"}</button>}
-                              <button type="button" onClick={() => toggleArchive(account.id)}>{account.archived ? "Restore to All codes" : "Move to Archive"}</button>
-                              {account.archived && <button type="button" className="danger" onClick={() => removeSampleAccount(account.id)}>Remove sample account</button>}
+                            <div className="account-menu" id={`demo-account-menu-${account.id}`} role="menu">
+                              <button type="button" role="menuitem" onClick={(event) => openDemoAccountEditor(account.id, event.currentTarget)}>Edit account</button>
+                              {!account.archived && <button type="button" role="menuitem" onClick={() => toggleFavorite(account.id)}>{account.favorite ? "Remove from Favorites" : "Add to Favorites"}</button>}
+                              {!account.archived && <button type="button" role="menuitem" onClick={() => toggleArchive(account.id)}>Move to Archive</button>}
+                              {account.archived && <button type="button" role="menuitem" className="danger" onClick={() => removeSampleAccount(account.id)}>Remove sample account</button>}
                             </div>
                           )}
                         </div>
                       </div>
+                      )}
                     </div>
                     <div className="code-row">
-                      <div className="code-stack">
+                      <div className={`code-stack ${!selectionMode && !revealNextCode ? "copy-current-area" : ""}`}>
+                        {selectionMode ? (
+                          <span className={`code selection-code ${revealNextCode ? "expiring-code" : ""}`} aria-hidden="true"><span className="code-value" data-digits={account.digits}>{currentCode ?? "--- ---"}</span></span>
+                        ) : (
                         <button
                           type="button"
                           className={`code ${revealNextCode ? "expiring-code" : ""}`}
@@ -569,8 +1361,9 @@ export default function DemoVaultApp() {
                           aria-label={accessibleCurrentCode
                             ? `Copy ${account.service} ${account.identity} sample code ${accessibleCurrentCode}`
                             : `Copy ${account.service} ${account.identity} sample code when ready`}
-                        ><span className="code-value" aria-hidden="true">{currentCode ?? "--- ---"}</span></button>
-                        <div className={`next-code ${revealNextCode ? "visible" : ""}`} aria-hidden={!revealNextCode}>
+                        ><span className="code-value" data-digits={account.digits} aria-hidden="true">{currentCode ?? "--- ---"}</span></button>
+                        )}
+                        <div className={`next-code ${revealNextCode ? "visible" : ""}`} aria-hidden={selectionMode || !revealNextCode ? true : undefined}>
                           <span className="visually-hidden">{nextCode ? `Next sample code ${nextCode.replace(/\s/gu, "").split("").join(" ")}` : "Next sample code loading"}</span>
                           <span className="next-code-label" aria-hidden="true">Next</span>
                           <span className="next-code-value" aria-hidden="true">{nextCode ?? "--- ---"}</span>
@@ -585,8 +1378,8 @@ export default function DemoVaultApp() {
                 );
               })}
 
-              {view !== "archive" && (
-                <button type="button" className="add-card" onClick={addSampleAccount} aria-label="Add another safe sample authenticator account">
+              {view !== "archive" && !selectionMode && (
+                <button type="button" className="add-card" onClick={(event) => openDemoAddAccount(event.currentTarget)} aria-label="Add another safe sample authenticator account">
                   <span className="add-card-icon" aria-hidden="true">+</span>
                   <strong>Add a sample account</strong>
                   <small>Uses a known dummy secret and stays only in this demo</small>
@@ -601,13 +1394,72 @@ export default function DemoVaultApp() {
               {view === "archive" ? (
                 <button type="button" onClick={() => { if (query.trim()) setQuery(""); else showAllAccounts(); }}>{query.trim() ? "Clear search" : "Back to all codes"}</button>
               ) : (
-                <button type="button" onClick={addSampleAccount}>Add sample account</button>
+                <button type="button" onClick={(event) => openDemoAddAccount(event.currentTarget)}>Add sample account</button>
               )}
             </section>
           )}
         </div>
         )}
       </section>
+
+      <DemoAddAccountDialog
+        open={addOpen}
+        groups={groups.length > 0 ? groups : ["Personal"]}
+        preferredGroup={group !== "All" ? group : undefined}
+        returnFocusTo={addReturnFocusTo}
+        onAdd={addDemoAccount}
+        onClose={() => {
+          setAddOpen(false);
+          setAddReturnFocusTo(null);
+        }}
+      />
+
+      <GroupCustomizationDialog
+        open={creatingGroup || Boolean(customizingGroup)}
+        group={activeGroupCustomization}
+        mode={creatingGroup ? "create" : "edit"}
+        existingNames={groups}
+        onCancel={closeGroupCustomization}
+        onSave={saveGroupCustomization}
+        onDelete={creatingGroup ? undefined : deleteGroupCustomization}
+        deleteDisabledReason={customizingGroup && accounts.some(
+          (account) => groupKey(account.group) === groupKey(customizingGroup),
+        ) ? "Move every active and archived sample account to another group before deleting this group." : undefined}
+        returnFocusTo={groupCustomizationReturnFocusTo}
+      />
+
+      <DemoAccountEditor
+        account={editingAccount}
+        codePreview={editingCodePreview}
+        onClose={() => {
+          setEditingAccountId(null);
+          setAccountEditorReturnFocusTo(null);
+        }}
+        onSave={saveDemoAccountEdits}
+        returnFocusTo={accountEditorReturnFocusTo}
+        renderIcon={({ color, iconBrand, iconDataUrl, letter, service: previewService }) => (
+          <ServiceLogo
+            color={color}
+            fallback={letter}
+            service={previewService}
+            brandId={isServiceBrandId(iconBrand) ? iconBrand : null}
+            iconDataUrl={iconDataUrl}
+          />
+        )}
+      />
+
+      <DemoBulkLogoPicker
+        open={bulkLogoOpen}
+        selectedCount={selectedVisibleAccountIds.size}
+        suggestedService={selectedLogoSuggestedService}
+        previewAccount={selectedLogoPreviewAccount}
+        returnFocusTo={bulkLogoReturnFocusTo}
+        onApply={applySelectedAccountLogo}
+        onClose={() => {
+          setBulkLogoOpen(false);
+          setBulkLogoReturnFocusTo(null);
+        }}
+      />
 
       <div className={`toast ${toast ? "visible" : ""}`} role="status" aria-live="polite">
         <span className="toast-check" aria-hidden="true">✓</span>{toast}

@@ -27,6 +27,7 @@ export type VaultLoginResult = {
 };
 
 export type VaultSaveResult = { revision: number; updatedAt: string };
+export type VaultChangePasswordResult = { revision: number; updatedAt: string };
 export type LegacyClaimResult = { claimed: true; revision: number };
 
 export class VaultApiError extends Error {
@@ -230,6 +231,24 @@ export async function saveVault(
     typeof body.updatedAt !== "string"
   ) {
     invalidResponse("The vault server returned an invalid save result.", status);
+  }
+  return { revision: body.revision, updatedAt: body.updatedAt };
+}
+
+export async function changeVaultPassword(input: {
+  vaultId: string;
+  expectedRevision: number;
+  currentAuthProof: string;
+  nextAuthProof: string;
+  header: EncryptedVaultHeader;
+}): Promise<VaultChangePasswordResult> {
+  const { body, status } = await postVault({ action: "change_password", ...input });
+  if (
+    !isRecord(body) ||
+    !isRevision(body.revision) ||
+    typeof body.updatedAt !== "string"
+  ) {
+    invalidResponse("The vault server returned an invalid password change result.", status);
   }
   return { revision: body.revision, updatedAt: body.updatedAt };
 }

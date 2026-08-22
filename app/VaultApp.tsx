@@ -1,8 +1,8 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type HTMLAttributes, type MouseEvent as ReactMouseEvent } from "react";
 import AccountEditor, { type AccountEditorCodePreview, type AccountIconOption } from "./AccountEditor";
-import BulkGroupActions, { AccountSelectionIndicator, ArchiveBulkActions, normalizeGroupName } from "./BulkGroupActions";
+import BulkGroupActions, { AccountSelectionIndicator, ArchiveBulkActions, mouseIsOutsideAccountCodeRow, normalizeGroupName } from "./BulkGroupActions";
 import BulkLogoPicker, { retainedAccountIconBytes, type BulkAccountLogoPatch } from "./BulkLogoPicker";
 import CardViewMenu, { CARD_VIEW_STORAGE_KEY, parseCardView, readCardViewPreference, writeCardViewPreference, type CardView } from "./CardViewMenu";
 import GroupCustomizationDialog from "./GroupCustomizationDialog";
@@ -16,8 +16,8 @@ import SignInScreen from "./SignInScreen";
 import ThemeToggle from "./ThemeToggle";
 import TransferCenter, { type ImportDecision } from "./TransferCenter";
 import { formatCode, generateTotp, isTotpExpiring, isValidBase32, normalizeSecret, parseOtpAuthUri, totpWindow, type TotpAlgorithm } from "../lib/totp";
-import { claimLegacyVault, deleteVaultAccount, getVaultBootstrap, identifyVault, loginVault, logoutVault, saveVault, setupVault, VAULT_API_TIMEOUT_MS, VaultApiError } from "../lib/vault-api";
-import { createAuthProof, createEncryptedVault, decryptVaultPayload, encryptVaultPayload, unlockVaultHeader, VaultCryptoError, type EncryptedVaultHeader, type VaultPayloadCipher, type VaultRuntime } from "../lib/vault-crypto";
+import { changeVaultPassword, claimLegacyVault, deleteVaultAccount, getVaultBootstrap, identifyVault, loginVault, logoutVault, saveVault, setupVault, VAULT_API_TIMEOUT_MS, VaultApiError } from "../lib/vault-api";
+import { createAuthProof, createEncryptedVault, decryptVaultPayload, encryptVaultPayload, rotateVaultPassword, unlockVaultHeader, VaultCryptoError, type EncryptedVaultHeader, type VaultPayloadCipher, type VaultRuntime } from "../lib/vault-crypto";
 import { createEmptyVault, MAX_GROUP_CUSTOMIZATIONS, parsePersistedVault, withVaultUpdate, type PersistedVault, type VaultAccount, type VaultGroupColor, type VaultGroupCustomization, type VaultGroupIcon, type VaultTheme } from "../lib/vault-model";
 import { classifyVaultOutbox, clearVaultOutbox, createVaultOutboxRecord, readVaultOutbox, writeVaultOutbox, type VaultOutboxRecord } from "../lib/vault-outbox";
 import { clearVaultResumeSession, readVaultResumeSession, saveVaultResumeSession, touchVaultResumeSession } from "../lib/vault-resume";
@@ -259,6 +259,7 @@ export default function VaultApp() {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedAccountIds, setSelectedAccountIds] = useState<Set<string>>(() => new Set());
   const [draggingSelectedAccounts, setDraggingSelectedAccounts] = useState(false);
+  const [draggedAccountIds, setDraggedAccountIds] = useState<Set<string>>(() => new Set());
   const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
   const [bulkLogoOpen, setBulkLogoOpen] = useState(false);
   const [bulkLogoReturnFocusTo, setBulkLogoReturnFocusTo] = useState<HTMLButtonElement | null>(null);
@@ -291,11 +292,20 @@ export default function VaultApp() {
   const stagingPromiseRef = useRef<Promise<void> | null>(null);
   const drainRef = useRef<SaveDrain | null>(null);
   const flushVaultSavesRef = useRef<() => Promise<void>>(async () => undefined);
+  const accountEventChannelRef = useRef<BroadcastChannel | null>(null);
   const lockPromiseRef = useRef<Promise<void> | null>(null);
   const lockingRef = useRef(false);
+  const passwordChangeRef = useRef(false);
+  const passwordChangeLockRequestRef = useRef<"local" | "server" | null>(null);
+  const passwordChangePostLockErrorRef = useRef<string | null>(null);
   const conflictBusyRef = useRef(false);
   const conflictPendingRef = useRef(false);
   const clipboardClearTimersRef = useRef<Set<number>>(new Set());
+  const selectedAccountDragRef = useRef(false);
+  const selectedAccountDragOriginRef = useRef<string | null>(null);
+  const draggedAccountIdsRef = useRef<Set<string>>(new Set());
+  const suppressSelectedAccountClickRef = useRef(false);
+  const selectedAccountClickResetFrameRef = useRef<number | null>(null);
   const sessionGenerationRef = useRef(0);
   const sessionTransitionRef = useRef<VaultSessionTransition>({
     epoch: 0,
@@ -308,6 +318,45 @@ export default function VaultApp() {
   const resumeSavePromiseRef = useRef<Promise<void> | null>(null);
   const lastResumeRetryAtRef = useRef(0);
   const lastResumeTouchAtRef = useRef(0);
+
+  const clearSelectedAccountDrag = useCallback(() => {
+    selectedAccountDragRef.current = false;
+    selectedAccountDragOriginRef.current = null;
+    draggedAccountIdsRef.current.clear();
+    setDraggingSelectedAccounts(false);
+    setDraggedAccountIds(new Set());
+    setDragOverGroup(null);
+    if (suppressSelectedAccountClickRef.current) {
+      if (selectedAccountClickResetFrameRef.current !== null) {
+        window.cancelAnimationFrame(selectedAccountClickResetFrameRef.current);
+      }
+      selectedAccountClickResetFrameRef.current = window.requestAnimationFrame(() => {
+        suppressSelectedAccountClickRef.current = false;
+        selectedAccountClickResetFrameRef.current = null;
+      });
+    }
+  }, []);
+
+  const updateSelectedAccountDragZone = (
+    event: ReactMouseEvent<HTMLElement>,
+    draggable: boolean,
+  ) => {
+    const allowed = draggable
+      && mouseIsOutsideAccountCodeRow(event);
+    event.currentTarget.dataset.dragZone = allowed ? "allowed" : "blocked";
+    return allowed;
+  };
+
+  const prepareSelectedAccountDrag = (
+    event: ReactMouseEvent<HTMLElement>,
+    accountId: string,
+    draggable: boolean,
+  ) => {
+    selectedAccountDragOriginRef.current = event.button === 0
+      && updateSelectedAccountDragZone(event, draggable)
+      ? accountId
+      : null;
+  };
 
   const signedIn = authStatus === "ready" && Boolean(vault && runtime);
   const locked = !signedIn;
@@ -371,13 +420,16 @@ export default function VaultApp() {
     return next.epoch;
   }, []);
 
-  const mutationBlockReason = useCallback(() => vaultMutationBlockReason({
-    phase: sessionTransitionRef.current.phase,
-    runtimeAvailable: Boolean(runtimeRef.current),
-    vaultAvailable: Boolean(vaultRef.current),
-    conflictPending: conflictPendingRef.current,
-    conflictPresent: Boolean(conflictRef.current),
-  }), []);
+  const mutationBlockReason = useCallback(() => {
+    if (passwordChangeRef.current) return "locking" as const;
+    return vaultMutationBlockReason({
+      phase: sessionTransitionRef.current.phase,
+      runtimeAvailable: Boolean(runtimeRef.current),
+      vaultAvailable: Boolean(vaultRef.current),
+      conflictPending: conflictPendingRef.current,
+      conflictPresent: Boolean(conflictRef.current),
+    });
+  }, []);
 
   const saveResumeSession = useCallback((
     activeRuntime: VaultRuntime,
@@ -420,6 +472,7 @@ export default function VaultApp() {
       !activeRuntime ||
       !activeHeader ||
       lockingRef.current ||
+      passwordChangeRef.current ||
       conflictPendingRef.current
     ) {
       return;
@@ -1357,8 +1410,7 @@ export default function VaultApp() {
     setAccountEditorReturnFocusTo(null);
     setSelectionMode(false);
     setSelectedAccountIds(new Set());
-    setDraggingSelectedAccounts(false);
-    setDragOverGroup(null);
+    clearSelectedAccountDrag();
     setBulkLogoOpen(false);
     setBulkLogoReturnFocusTo(null);
     setCustomizingGroup(null);
@@ -1429,9 +1481,12 @@ export default function VaultApp() {
     });
     lockPromiseRef.current = tracked;
     return tracked;
-  }, [beginSessionTransition]);
+  }, [beginSessionTransition, clearSelectedAccountDrag]);
 
   const deleteOwnAccount = useCallback(async (password: string): Promise<void> => {
+    if (passwordChangeRef.current) {
+      throw new Error("Wait for the password change to finish before deleting this account.");
+    }
     const header = bootstrapHeaderRef.current;
     const transition = sessionTransitionRef.current;
     const generation = sessionGenerationRef.current;
@@ -1495,16 +1550,28 @@ export default function VaultApp() {
 
     const localCleanup = clearDeletedVaultSession(header.vaultId);
     try {
-      const channel = new BroadcastChannel(ACCOUNT_EVENT_CHANNEL_NAME);
-      channel.postMessage({ type: "account-deleted", vaultId: header.vaultId });
-      channel.close();
+      accountEventChannelRef.current?.postMessage({
+        type: "account-deleted",
+        vaultId: header.vaultId,
+      });
     } catch {
       // Cross-tab cleanup is best-effort; this tab still clears itself below.
     }
     await localCleanup;
   }, [clearDeletedVaultSession]);
 
-  const lockVault = useCallback((): Promise<void> => {
+  const lockVault = useCallback((localOnly = false): Promise<void> => {
+    if (passwordChangeRef.current) {
+      const requestedMode = localOnly ? "local" : "server";
+      if (
+        passwordChangeLockRequestRef.current === null ||
+        requestedMode === "server"
+      ) {
+        passwordChangeLockRequestRef.current = requestedMode;
+      }
+      setToast("Wait for the password change to finish before locking the vault.");
+      return Promise.resolve();
+    }
     const currentTransition = sessionTransitionRef.current;
     const pendingLock = lockPromiseRef.current;
     if (currentTransition.phase === "locking" && pendingLock) return pendingLock;
@@ -1537,8 +1604,7 @@ export default function VaultApp() {
     setCodePairs({});
     setSelectionMode(false);
     setSelectedAccountIds(new Set());
-    setDraggingSelectedAccounts(false);
-    setDragOverGroup(null);
+    clearSelectedAccountDrag();
     setBulkLogoOpen(false);
     setBulkLogoReturnFocusTo(null);
     for (const timeout of clipboardClearTimersRef.current) window.clearTimeout(timeout);
@@ -1678,10 +1744,12 @@ export default function VaultApp() {
           : null,
       );
 
-      try {
-        await logoutVault();
-      } catch {
-        // Local key material is cleared even if the bounded logout request fails.
+      if (!localOnly) {
+        try {
+          await logoutVault();
+        } catch {
+          // Local key material is cleared even if the bounded logout request fails.
+        }
       }
       if (!ownsLockTransition()) return;
       const closedTransition = completeVaultSessionTransition(
@@ -1702,7 +1770,213 @@ export default function VaultApp() {
     });
     lockPromiseRef.current = tracked;
     return tracked;
-  }, [attemptVaultSave, beginSessionTransition, stagePendingVaults]);
+  }, [attemptVaultSave, beginSessionTransition, clearSelectedAccountDrag, stagePendingVaults]);
+
+  const changeOwnPassword = useCallback(async (
+    currentPassword: string,
+    nextPassword: string,
+  ): Promise<void> => {
+    if (passwordChangeRef.current) {
+      throw new Error("A password change is already in progress.");
+    }
+
+    const header = bootstrapHeaderRef.current;
+    const transition = sessionTransitionRef.current;
+    const generation = sessionGenerationRef.current;
+    if (
+      !header ||
+      !runtimeRef.current ||
+      !vaultRef.current ||
+      transition.phase !== "ready" ||
+      conflictPendingRef.current ||
+      conflictRef.current
+    ) {
+      throw new Error("Unlock a conflict-free vault before changing its password.");
+    }
+
+    const sessionIsCurrent = () => (
+      sessionGenerationRef.current === generation &&
+      sessionTransitionRef.current.epoch === transition.epoch &&
+      sessionTransitionRef.current.phase === "ready" &&
+      bootstrapHeaderRef.current === header &&
+      Boolean(runtimeRef.current) &&
+      Boolean(vaultRef.current)
+    );
+
+    passwordChangeRef.current = true;
+    try {
+      await stagePendingVaults();
+      await flushVaultSavesRef.current();
+      if (!sessionIsCurrent()) {
+        throw new Error("The vault session changed. Unlock it again before changing the password.");
+      }
+      if (
+        pendingStageRef.current ||
+        stagingPromiseRef.current ||
+        stagedSaveRef.current ||
+        conflictPendingRef.current ||
+        conflictRef.current ||
+        savedVersionRef.current !== mutationVersionRef.current
+      ) {
+        throw new Error("The latest vault changes must be saved before changing the password.");
+      }
+
+      let rotation: Awaited<ReturnType<typeof rotateVaultPassword>>;
+      try {
+        rotation = await rotateVaultPassword(currentPassword, nextPassword, header);
+      } catch (error) {
+        if (error instanceof VaultCryptoError && error.code === "AUTHENTICATION_FAILED") {
+          throw new Error("The current password is incorrect.");
+        }
+        if (error instanceof VaultCryptoError && error.code === "INVALID_INPUT") {
+          throw new Error(error.message);
+        }
+        throw new Error("The current password could not be verified securely.");
+      }
+      if (!sessionIsCurrent()) {
+        throw new Error("The vault session changed. Unlock it again before changing the password.");
+      }
+
+      const expectedRevision = revisionRef.current;
+      const requestChange = () => changeVaultPassword({
+        vaultId: header.vaultId,
+        expectedRevision,
+        currentAuthProof: rotation.currentAuthProof,
+        nextAuthProof: rotation.nextAuthProof,
+        header: rotation.header,
+      });
+      let result;
+      try {
+        result = await requestChange();
+      } catch (error) {
+        if (
+          error instanceof VaultApiError &&
+          (
+            error.code === "request_timeout" ||
+            error.code === "network_error" ||
+            error.code === "invalid_response" ||
+            error.status >= 500
+          )
+        ) {
+          try {
+            result = await requestChange();
+          } catch (retryError) {
+            passwordChangeLockRequestRef.current ??= "local";
+            passwordChangePostLockErrorRef.current = "The password change could not be confirmed. Try the new password first; if it is rejected, use the previous password.";
+            throw retryError;
+          }
+        } else {
+          throw error;
+        }
+      }
+
+      if (result.revision !== expectedRevision + 1) {
+        passwordChangeLockRequestRef.current ??= "local";
+        passwordChangePostLockErrorRef.current = "The password change result could not be verified. Sign in with the new password first; if it is rejected, use the previous password.";
+        throw new Error("The vault server returned an unexpected password-change revision.");
+      }
+      if (!sessionIsCurrent()) {
+        try {
+          accountEventChannelRef.current?.postMessage({
+            type: "password-changed",
+            vaultId: header.vaultId,
+          });
+        } catch {
+          // Other tabs will still be rejected after their server session expires.
+        }
+        throw new Error("The password changed, but this vault session closed. Sign in with the new password.");
+      }
+
+      revisionRef.current = result.revision;
+      bootstrapHeaderRef.current = rotation.header;
+      runtimeRef.current = rotation.runtime;
+      setRuntime(rotation.runtime);
+      setSaveStatus("saved");
+      setSaveError(null);
+      try {
+        accountEventChannelRef.current?.postMessage({
+          type: "password-changed",
+          vaultId: header.vaultId,
+        });
+      } catch {
+        // Cross-tab locking is best-effort; other server sessions are revoked.
+      }
+
+      const rotatedSessionIsCurrent = () => (
+        sessionGenerationRef.current === generation &&
+        sessionTransitionRef.current.epoch === transition.epoch &&
+        sessionTransitionRef.current.phase === "ready" &&
+        bootstrapHeaderRef.current === rotation.header &&
+        runtimeRef.current === rotation.runtime &&
+        Boolean(vaultRef.current)
+      );
+      const previousResumeSave = resumeSavePromiseRef.current;
+      if (previousResumeSave) {
+        const previousResumeResult = await settleWithin(previousResumeSave, 5_500);
+        if (!rotatedSessionIsCurrent()) return;
+        if (previousResumeResult.status !== "fulfilled") {
+          resumeAvailableRef.current = false;
+          setToast("Password changed, but browser refresh recovery could not be renewed. Sign in again after a refresh.");
+          return;
+        }
+      }
+      if (!rotatedSessionIsCurrent()) return;
+      const resumeClearResult = await settleWithin(clearVaultResumeSession(), 5_500);
+      if (!rotatedSessionIsCurrent()) return;
+      if (resumeClearResult.status !== "fulfilled") {
+        resumeAvailableRef.current = false;
+        setToast("Password changed, but browser refresh recovery could not be renewed. Sign in again after a refresh.");
+        return;
+      }
+      resumeAvailableRef.current = false;
+      resumeAbsoluteExpiresAtRef.current = 0;
+      lastResumeRetryAtRef.current = 0;
+      lastResumeTouchAtRef.current = 0;
+      await settleWithin(
+        saveResumeSession(rotation.runtime, rotation.header),
+        5_500,
+      );
+    } catch (error) {
+      if (error instanceof VaultApiError) {
+        if (error.code === "invalid_credentials") {
+          throw new Error("The current password is incorrect.");
+        }
+        if (error.code === "rate_limited") throw new Error(error.message);
+        if (error.code === "unauthorized") {
+          passwordChangeLockRequestRef.current ??= "local";
+          passwordChangePostLockErrorRef.current = "The vault session expired during the password change. Sign in again to confirm which password is active.";
+          throw new Error("The vault session expired. Sign in again before changing the password.");
+        }
+        if (error.code === "revision_conflict") {
+          passwordChangeLockRequestRef.current ??= "local";
+          passwordChangePostLockErrorRef.current = "The vault changed in another session. Sign in again before changing the password.";
+          throw new Error("The vault changed in another session. Lock and sign in again before changing the password.");
+        }
+        if (error.code === "request_timeout" || error.code === "network_error") {
+          passwordChangeLockRequestRef.current ??= "local";
+          passwordChangePostLockErrorRef.current = "The password change could not be confirmed. Try the new password first; if it is rejected, use the previous password.";
+          throw new Error("The password change could not be confirmed. Try the new password first; if it is rejected, use the previous password.");
+        }
+        if (error.code === "invalid_response" || error.status >= 500) {
+          passwordChangeLockRequestRef.current ??= "local";
+          passwordChangePostLockErrorRef.current = "The password change could not be confirmed. Try the new password first; if it is rejected, use the previous password.";
+          throw new Error("The password change could not be confirmed. Sign in with the new password first; if it is rejected, use the previous password.");
+        }
+        throw new Error("The encrypted vault password could not be changed.");
+      }
+      throw error;
+    } finally {
+      passwordChangeRef.current = false;
+      const queuedLock = passwordChangeLockRequestRef.current;
+      const postLockError = passwordChangePostLockErrorRef.current;
+      passwordChangeLockRequestRef.current = null;
+      passwordChangePostLockErrorRef.current = null;
+      if (queuedLock) {
+        await lockVault(queuedLock === "local");
+        if (postLockError) setAuthError(postLockError);
+      }
+    }
+  }, [lockVault, saveResumeSession, stagePendingVaults]);
 
   const chooseServerConflictVersion = useCallback(async () => {
     const conflict = conflictRef.current;
@@ -1946,6 +2220,7 @@ export default function VaultApp() {
     let channel: BroadcastChannel;
     try {
       channel = new BroadcastChannel(ACCOUNT_EVENT_CHANNEL_NAME);
+      accountEventChannelRef.current = channel;
     } catch {
       return;
     }
@@ -1956,20 +2231,33 @@ export default function VaultApp() {
         message === null ||
         !("type" in message) ||
         !("vaultId" in message) ||
-        message.type !== "account-deleted" ||
+        typeof message.type !== "string" ||
         typeof message.vaultId !== "string" ||
         bootstrapHeaderRef.current?.vaultId !== message.vaultId
       ) {
         return;
       }
-      void clearDeletedVaultSession(message.vaultId);
+      if (message.type === "account-deleted") {
+        void clearDeletedVaultSession(message.vaultId);
+      } else if (message.type === "password-changed") {
+        const postLockError = "The vault password was changed in another tab. Sign in again with the new password.";
+        if (passwordChangeRef.current) {
+          passwordChangePostLockErrorRef.current = postLockError;
+          void lockVault(true);
+        } else {
+          void lockVault(true).then(() => setAuthError(postLockError));
+        }
+      }
     };
     channel.addEventListener("message", handleAccountEvent);
     return () => {
       channel.removeEventListener("message", handleAccountEvent);
+      if (accountEventChannelRef.current === channel) {
+        accountEventChannelRef.current = null;
+      }
       channel.close();
     };
-  }, [clearDeletedVaultSession]);
+  }, [clearDeletedVaultSession, lockVault]);
 
   useEffect(() => {
     const retry = () => {
@@ -2246,8 +2534,7 @@ export default function VaultApp() {
   const exitSelectionMode = () => {
     setSelectionMode(false);
     setSelectedAccountIds(new Set());
-    setDraggingSelectedAccounts(false);
-    setDragOverGroup(null);
+    clearSelectedAccountDrag();
     setBulkLogoOpen(false);
     setBulkLogoReturnFocusTo(null);
   };
@@ -2427,7 +2714,49 @@ export default function VaultApp() {
     return true;
   };
 
-  const moveSelectedAccounts = (requestedGroup: string, createGroup: boolean) => {
+  const deleteGroupCustomization = () => {
+    if (!customizingGroup) return false;
+    const blockReason = mutationBlockReason();
+    if (blockReason === "conflict" || blockReason === "conflict-pending") {
+      setToast("Resolve the encrypted save conflict before deleting groups.");
+      return false;
+    }
+    if (blockReason) {
+      setToast("Unlock your vault before deleting groups.");
+      return false;
+    }
+
+    const deletedName = customizingGroup;
+    const deletedKey = groupKey(deletedName);
+    const currentVault = vaultRef.current;
+    if (!currentVault) return false;
+    if (currentVault.accounts.some((account) => groupKey(account.group) === deletedKey)) {
+      setToast("Move every active and archived account to another group before deleting this group.");
+      return false;
+    }
+    if (!currentVault.groupCustomizations.some((customization) => groupKey(customization.name) === deletedKey)) {
+      setToast("This group is no longer available.");
+      return false;
+    }
+
+    const saved = commitVault((current) => withVaultUpdate(current, {
+      groupCustomizations: current.groupCustomizations.filter(
+        (customization) => groupKey(customization.name) !== deletedKey,
+      ),
+    }));
+    if (!saved) return false;
+
+    if (groupKey(group) === deletedKey) setGroup("All");
+    closeGroupCustomization();
+    setToast(`${deletedName} group deleted.`);
+    return true;
+  };
+
+  const moveSelectedAccounts = (
+    requestedGroup: string,
+    createGroup: boolean,
+    accountIds: ReadonlySet<string> = selectedVisibleAccountIds,
+  ) => {
     const blockReason = mutationBlockReason();
     if (blockReason) {
       setToast(blockReason === "conflict" || blockReason === "conflict-pending"
@@ -2435,7 +2764,7 @@ export default function VaultApp() {
         : "Unlock your vault before moving accounts.");
       return false;
     }
-    if (selectedVisibleAccountIds.size === 0) {
+    if (accountIds.size === 0) {
       setToast("Select at least one account to move.");
       return false;
     }
@@ -2472,7 +2801,7 @@ export default function VaultApp() {
         return false;
       }
     }
-    const selected = new Set(selectedVisibleAccountIds);
+    const selected = new Set(accountIds);
     const changed = new Set(accounts
       .filter((account) => selected.has(account.id) && !account.archived && groupKey(account.group) !== targetGroupKey)
       .map((account) => account.id));
@@ -2556,30 +2885,61 @@ export default function VaultApp() {
     return true;
   };
 
-  const beginSelectedAccountDrag = (event: ReactDragEvent<HTMLButtonElement>) => {
-    if (view !== "all" || !selectionMode || selectedVisibleAccountIds.size === 0) {
+  const beginSelectedAccountDrag = (event: ReactDragEvent<HTMLElement>, accountId: string) => {
+    const sourceAccount = accounts.find((account) => account.id === accountId);
+    if (
+      view !== "all"
+      || !sourceAccount
+      || sourceAccount.archived
+      || selectedAccountDragOriginRef.current !== accountId
+    ) {
       event.preventDefault();
+      suppressSelectedAccountClickRef.current = true;
+      clearSelectedAccountDrag();
       return;
     }
+    const draggedAccountIds = selectionMode && selectedVisibleAccountIds.has(accountId)
+      ? new Set(selectedVisibleAccountIds)
+      : new Set([accountId]);
+    draggedAccountIdsRef.current = draggedAccountIds;
+    setDraggedAccountIds(new Set(draggedAccountIds));
+    if (selectedAccountClickResetFrameRef.current !== null) {
+      window.cancelAnimationFrame(selectedAccountClickResetFrameRef.current);
+      selectedAccountClickResetFrameRef.current = null;
+    }
+    suppressSelectedAccountClickRef.current = true;
+    selectedAccountDragRef.current = true;
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData(SELECTED_ACCOUNT_DRAG_TYPE, "1");
+    event.dataTransfer.setData("text/plain", "coffer-accounts");
+    const card = event.currentTarget.closest(".account-card");
+    if (card instanceof HTMLElement) {
+      const bounds = card.getBoundingClientRect();
+      event.dataTransfer.setDragImage(
+        card,
+        Math.max(0, Math.min(bounds.width, event.clientX - bounds.left)),
+        Math.max(0, Math.min(bounds.height, event.clientY - bounds.top)),
+      );
+    }
     setDraggingSelectedAccounts(true);
     setDragOverGroup(null);
   };
 
-  const acceptsSelectedAccountDrag = (event: ReactDragEvent<HTMLElement>) => (
-    draggingSelectedAccounts && Array.from(event.dataTransfer.types).includes(SELECTED_ACCOUNT_DRAG_TYPE)
-  );
+  const acceptsSelectedAccountDrag = () => selectedAccountDragRef.current;
 
-  const canMoveSelectedAccountsToGroup = (groupName: string) => {
+  const canMoveAccountIdsToGroup = (accountIds: ReadonlySet<string>, groupName: string) => {
     const targetGroupKey = groupKey(groupName);
     return accounts.some((account) => (
-      selectedVisibleAccountIds.has(account.id) && !account.archived && groupKey(account.group) !== targetGroupKey
+      accountIds.has(account.id) && !account.archived && groupKey(account.group) !== targetGroupKey
     ));
   };
 
+  const canMoveSelectedAccountsToGroup = (groupName: string) => (
+    canMoveAccountIdsToGroup(selectedVisibleAccountIds, groupName)
+  );
+
   const dragSelectedAccountsOverGroup = (event: ReactDragEvent<HTMLDivElement>, groupName: string) => {
-    if (!acceptsSelectedAccountDrag(event) || !canMoveSelectedAccountsToGroup(groupName)) return;
+    if (!acceptsSelectedAccountDrag() || !canMoveAccountIdsToGroup(draggedAccountIdsRef.current, groupName)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
     if (dragOverGroup !== groupName) setDragOverGroup(groupName);
@@ -2591,11 +2951,11 @@ export default function VaultApp() {
   };
 
   const dropSelectedAccountsOnGroup = (event: ReactDragEvent<HTMLDivElement>, groupName: string) => {
-    if (!acceptsSelectedAccountDrag(event) || !canMoveSelectedAccountsToGroup(groupName)) return;
+    if (!acceptsSelectedAccountDrag() || !canMoveAccountIdsToGroup(draggedAccountIdsRef.current, groupName)) return;
     event.preventDefault();
-    setDraggingSelectedAccounts(false);
-    setDragOverGroup(null);
-    moveSelectedAccounts(groupName, false);
+    const draggedAccountIds = new Set(draggedAccountIdsRef.current);
+    clearSelectedAccountDrag();
+    moveSelectedAccounts(groupName, false, draggedAccountIds);
   };
 
   const setSelectedAccountsFavorite = (favorite: boolean) => {
@@ -3150,8 +3510,10 @@ export default function VaultApp() {
           {groups.map((name) => {
             const customization = customizationForGroup(name);
             const active = view === "all" && groupKey(group) === groupKey(name);
-            const dropReady = draggingSelectedAccounts && selectionMode && view === "all" && canMoveSelectedAccountsToGroup(name);
-            const dropTarget = dropReady && dragOverGroup === name;
+            const selectionMoveReady = selectionMode && view === "all" && selectedVisibleAccountIds.size > 0 && canMoveSelectedAccountsToGroup(name);
+            const dragMoveReady = draggingSelectedAccounts && canMoveAccountIdsToGroup(draggedAccountIds, name);
+            const dropReady = selectionMoveReady || dragMoveReady;
+            const dropTarget = dragMoveReady && dragOverGroup === name;
             return (
               <div
                 key={name}
@@ -3166,8 +3528,17 @@ export default function VaultApp() {
                   className="group-nav-main"
                   data-group-name={name}
                   aria-pressed={active}
-                  title={`Open ${name}. Right-click or press F2 to customize.`}
-                  onClick={() => { setGroup(name); setView("all"); }}
+                  title={selectionMoveReady
+                    ? `Move selected accounts to ${name}`
+                    : `Open ${name}. Right-click or press F2 to customize.`}
+                  onClick={() => {
+                    if (selectionMoveReady) {
+                      moveSelectedAccounts(name, false);
+                      return;
+                    }
+                    setGroup(name);
+                    setView("all");
+                  }}
                   onContextMenu={(event) => {
                     event.preventDefault();
                     beginGroupCustomization(name, event.currentTarget);
@@ -3280,6 +3651,7 @@ export default function VaultApp() {
             onNotice={setToast}
             onLockVault={() => void lockVault()}
             onSignOut={() => void lockVault()}
+            onChangePassword={changeOwnPassword}
             onDeleteAccount={deleteOwnAccount}
           />
         ) : (
@@ -3327,6 +3699,7 @@ export default function VaultApp() {
 
           {visibleAccounts.length > 0 ? (
             <section className="account-grid" data-card-view={cardView} aria-label="Authenticator accounts">
+              <span className="visually-hidden" id="account-drag-instructions">With a mouse, hold outside the code row and drag an account to a sidebar group. Dragging a selected account moves the selection together. Keyboard and touch users can use Move to group.</span>
               {visibleAccounts.map((account) => {
                 const { current: currentCode, next: nextCode, remaining } = accountCodePreview(
                   account,
@@ -3336,24 +3709,50 @@ export default function VaultApp() {
                 const revealNextCode = !locked && isTotpExpiring(remaining);
                 const selected = selectedVisibleAccountIds.has(account.id);
                 const accessibleCurrentCode = currentCode?.replace(/\s/gu, "").split("").join(" ");
-                const draggableSelection = view === "all" && selectionMode && selected;
-                return <article className={`account-card ${account.archived ? "archived-card" : ""} ${selectionMode ? "selection-mode" : ""} ${selected ? "selected" : ""} ${draggingSelectedAccounts && selected ? "drag-source" : ""}`} key={account.id}>
-                  {selectionMode && (
-                    <button
-                      type="button"
-                      className="account-selection-surface"
-                      onClick={() => toggleAccountSelection(account.id)}
-                      draggable={draggableSelection}
-                      onDragStart={beginSelectedAccountDrag}
-                      onDragEnd={() => {
-                        setDraggingSelectedAccounts(false);
-                        setDragOverGroup(null);
-                      }}
-                      aria-label={`${selected ? "Deselect" : "Select"} ${account.service} ${account.identity}`}
-                      aria-pressed={selected}
-                      title={draggableSelection ? "Drag selected accounts to a sidebar group" : undefined}
-                    />
-                  )}
+                const draggableAccount = view === "all" && !account.archived;
+                const accountCardProps: HTMLAttributes<HTMLElement> = {
+                  draggable: draggableAccount,
+                  "aria-describedby": draggableAccount ? "account-drag-instructions" : undefined,
+                  title: draggableAccount
+                    ? selectionMode && selected
+                      ? "Hold and drag outside the code area to move selected accounts"
+                      : "Hold and drag outside the code area to move this account"
+                    : undefined,
+                  onMouseDown: (event) => prepareSelectedAccountDrag(event, account.id, draggableAccount),
+                  onMouseEnter: (event) => updateSelectedAccountDragZone(event, draggableAccount),
+                  onMouseMove: (event) => {
+                    if (!selectedAccountDragRef.current) updateSelectedAccountDragZone(event, draggableAccount);
+                  },
+                  onMouseUp: () => {
+                    if (!selectedAccountDragRef.current) selectedAccountDragOriginRef.current = null;
+                  },
+                  onMouseLeave: (event) => {
+                    delete event.currentTarget.dataset.dragZone;
+                    if (event.buttons === 0) selectedAccountDragOriginRef.current = null;
+                  },
+                  onDragStart: (event) => beginSelectedAccountDrag(event, account.id),
+                  onDragEnd: clearSelectedAccountDrag,
+                  ...(selectionMode ? {
+                    role: "button",
+                    tabIndex: 0,
+                    "aria-label": `${selected ? "Deselect" : "Select"} ${account.service} ${account.identity}`,
+                    "aria-pressed": selected,
+                    onClick: () => {
+                      if (!suppressSelectedAccountClickRef.current) toggleAccountSelection(account.id);
+                    },
+                    onKeyDown: (event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        toggleAccountSelection(account.id);
+                      }
+                    },
+                  } : {}),
+                };
+                return <article
+                  className={`account-card ${account.archived ? "archived-card" : ""} ${selectionMode ? "selection-mode" : ""} ${selected ? "selected" : ""} ${draggingSelectedAccounts && draggedAccountIds.has(account.id) ? "drag-source" : ""}`}
+                  key={account.id}
+                  {...accountCardProps}
+                >
                   <div className="account-topline">
                     <ServiceLogo
                       service={account.service}
@@ -3388,15 +3787,16 @@ export default function VaultApp() {
                     )}
                   </div>
                   <div className="code-row">
-                    <div className="code-stack">
+                    <div className={`code-stack ${!selectionMode && !locked && !revealNextCode ? "copy-current-area" : ""}`}>
                       {selectionMode ? (
-                        <span className={`code selection-code ${revealNextCode ? "expiring-code" : ""}`} aria-hidden="true"><span className="code-value">{locked ? "••• •••" : currentCode ?? "--- ---"}</span></span>
+                        <span className={`code selection-code ${revealNextCode ? "expiring-code" : ""}`} aria-hidden="true"><span className="code-value" data-digits={account.digits}>{locked ? "••• •••" : currentCode ?? "--- ---"}</span></span>
                       ) : (
                         <button
+                          type="button"
                           className={`code ${revealNextCode ? "expiring-code" : ""}`}
                           onClick={() => copyCode(account)}
                           aria-label={accessibleCurrentCode ? `Copy ${account.service} ${account.identity} code ${accessibleCurrentCode}` : `Copy ${account.service} ${account.identity} code when ready`}
-                        ><span className="code-value" aria-hidden="true">{locked ? "••• •••" : currentCode ?? "--- ---"}</span></button>
+                        ><span className="code-value" data-digits={account.digits} aria-hidden="true">{locked ? "••• •••" : currentCode ?? "--- ---"}</span></button>
                       )}
                       <div className={`next-code ${revealNextCode ? "visible" : ""}`} aria-hidden={selectionMode || !revealNextCode ? true : undefined}>
                         <span className="visually-hidden">{locked ? "Next code hidden" : nextCode ? `Next code ${nextCode.replace(/\s/gu, "").split("").join(" ")}` : "Next code loading"}</span>
@@ -3492,6 +3892,10 @@ export default function VaultApp() {
         existingNames={groups}
         onCancel={closeGroupCustomization}
         onSave={saveGroupCustomization}
+        onDelete={creatingGroup ? undefined : deleteGroupCustomization}
+        deleteDisabledReason={customizingGroup && accounts.some(
+          (account) => groupKey(account.group) === groupKey(customizingGroup),
+        ) ? "Move every active and archived account to another group before deleting this group." : undefined}
         returnFocusTo={groupCustomizationReturnFocusTo}
       />
 

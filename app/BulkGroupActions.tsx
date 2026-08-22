@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent, type MouseEvent as ReactMouseEvent } from "react";
 
 export type BulkGroupActionsProps = {
   active: boolean;
@@ -42,6 +42,18 @@ export type ArchiveBulkActionsProps = {
 
 export function normalizeGroupName(value: string) {
   return value.trim().replace(/\s+/g, " ");
+}
+
+export function mouseIsOutsideAccountCodeRow(event: ReactMouseEvent<HTMLElement>) {
+  const card = event.currentTarget.closest(".account-card");
+  const codeRow = card?.querySelector(".code-row");
+  if (!(codeRow instanceof HTMLElement)) return false;
+
+  const bounds = codeRow.getBoundingClientRect();
+  return event.clientX < bounds.left
+    || event.clientX > bounds.right
+    || event.clientY < bounds.top
+    || event.clientY > bounds.bottom;
 }
 
 function uniqueGroupNames(groups: readonly string[]) {
@@ -234,7 +246,7 @@ export default function BulkGroupActions({
             <strong>{selectedCount} selected</strong>
             <span>{visibleCount} visible</span>
           </div>
-          {showGroupDragHint && selectedCount > 0 && <span className="bulk-drag-hint">Drag a selected card to a sidebar group, or use Move to group.</span>}
+          {showGroupDragHint && selectedCount > 0 && <span className="bulk-drag-hint">Hold outside the code row and drag a selected card to a sidebar group, or use Move to group.</span>}
         </div>
 
         <div className="bulk-action-buttons">

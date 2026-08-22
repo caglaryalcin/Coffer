@@ -37,7 +37,7 @@ COPY --link --from=builder --chown=1000:1000 /app/dist/standalone/node_modules .
 COPY --link --from=builder --chown=1000:1000 /app/dist/standalone/server.js /app/dist/standalone/package.json ./
 # Vinext's standalone output omits its React peer dependency.
 COPY --link --from=builder --chown=1000:1000 /app/node_modules/react ./node_modules/react
-COPY --link --from=builder --chown=1000:1000 /app/LICENSE /app/THIRD_PARTY_NOTICES.md ./
+COPY --link --from=builder --chown=1000:1000 /app/LICENSE ./
 
 USER 1000:1000
 

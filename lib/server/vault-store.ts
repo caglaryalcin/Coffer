@@ -67,8 +67,8 @@ type LegacyClaimMarker = {
 
 type FailedLoginState = { attempts: number[]; blockedUntil: number };
 type VaultSessionPrincipal =
-  | { kind: "user"; accountKey: string }
-  | { kind: "legacy" };
+  | { kind: "user"; accountKey: string; vaultId: string }
+  | { kind: "legacy"; vaultId: string };
 type VaultSession = { principal: VaultSessionPrincipal; expiresAt: number };
 
 export type VaultStoreOptions = {
@@ -106,6 +106,16 @@ export type DeleteAccountInput = {
   rateKey: string;
 };
 
+export type ChangePasswordInput = {
+  sessionToken: string;
+  vaultId: string;
+  expectedRevision: number;
+  currentAuthProof: Uint8Array;
+  nextAuthProof: Uint8Array;
+  header: VaultCryptoHeader;
+  rateKey: string;
+};
+
 export type IdentifyResult =
   | { configured: false }
   | {
@@ -137,8 +147,13 @@ export type SetupResult = {
   sessionExpiresAt: string;
 };
 export type SaveResult = { revision: number; updatedAt: string };
+export type ChangePasswordResult = {
+  revision: number;
+  updatedAt: string;
+  sessionToken: string;
+  sessionExpiresAt: string;
+};
 export type ClaimLegacyResult = { claimed: true; revision: number };
-
 export type VaultStoreErrorCode =
   | "already_configured"
   | "not_configured"
@@ -231,7 +246,7 @@ export class VaultStore {
     const session = this.validSession(sessionToken);
     if (!session) return { authenticated: false };
     const stored = await this.readStoredVault(this.pathForPrincipal(session.principal));
-    if (!stored) {
+    if (!stored || stored.header.vaultId !== session.principal.vaultId) {
       this.deleteSession(sessionToken);
       return { authenticated: false };
     }
@@ -280,7 +295,11 @@ export class VaultStore {
         payload: structuredClone(input.payload),
       };
       await this.atomicWriteJson(path, stored);
-      const session = this.issueSession({ kind: "user", accountKey });
+      const session = this.issueSession({
+        kind: "user",
+        accountKey,
+        vaultId: stored.header.vaultId,
+      });
       return { revision: stored.revision, ...session };
     });
   }
@@ -297,13 +316,12 @@ export class VaultStore {
     await this.recoverLegacyClaim();
 
     return this.withMutationLock(async () => {
-      let principal: VaultSessionPrincipal = { kind: "user", accountKey };
       let stored = await this.readStoredVault(this.userVaultPath(accountKey));
-      if (!stored) {
+      const legacy = !stored;
+      if (legacy) {
         stored = await this.readStoredVault(this.vaultPath);
-        principal = { kind: "legacy" };
       }
-      const failureKey = principal.kind === "legacy" && stored
+      const failureKey = legacy && stored
         ? `login:${rateKey}:legacy`
         : `login:${rateKey}:${accountKey}`;
       this.assertLoginAllowed(failureKey);
@@ -318,6 +336,9 @@ export class VaultStore {
         );
       }
       this.failedLogins.delete(failureKey);
+      const principal: VaultSessionPrincipal = legacy
+        ? { kind: "legacy", vaultId: stored.header.vaultId }
+        : { kind: "user", accountKey, vaultId: stored.header.vaultId };
       const session = this.issueSession(principal);
       return {
         revision: stored.revision,
@@ -350,7 +371,14 @@ export class VaultStore {
       const failureKey = `resume:${rateKey}:${accountKey}`;
       this.assertLoginAllowed(failureKey);
       const stored = await this.readStoredVault(this.userVaultPath(accountKey));
-      if (!stored || !proofMatches(stored, authProof)) {
+      if (!stored || stored.header.vaultId !== existingSession.principal.vaultId) {
+        this.deleteSession(sessionToken);
+        throw new VaultStoreError(
+          "unauthorized",
+          "The account session no longer matches this encrypted vault.",
+        );
+      }
+      if (!proofMatches(stored, authProof)) {
         const failure = this.recordFailedLogin(failureKey);
         if (failure.blockedUntil > this.now()) {
           throw this.rateLimitError(failure.blockedUntil, this.now());
@@ -362,7 +390,11 @@ export class VaultStore {
       }
       this.failedLogins.delete(failureKey);
       this.deleteSession(sessionToken);
-      const session = this.issueSession({ kind: "user", accountKey });
+      const session = this.issueSession({
+        kind: "user",
+        accountKey,
+        vaultId: stored.header.vaultId,
+      });
       return {
         revision: stored.revision,
         payload: structuredClone(stored.payload),
@@ -392,6 +424,7 @@ export class VaultStore {
           "A valid legacy vault session is required.",
         );
       }
+      const legacyVaultId = activeSession.principal.vaultId;
 
       let marker = await this.readLegacyClaimMarker();
       if (marker) {
@@ -410,7 +443,18 @@ export class VaultStore {
             "The claimed legacy vault is unavailable.",
           );
         }
-        activeSession.principal = { kind: "user", accountKey };
+        if (claimed.header.vaultId !== legacyVaultId) {
+          this.deleteSession(sessionToken);
+          throw new VaultStoreError(
+            "unauthorized",
+            "The legacy session no longer matches this encrypted vault.",
+          );
+        }
+        activeSession.principal = {
+          kind: "user",
+          accountKey,
+          vaultId: claimed.header.vaultId,
+        };
         return { claimed: true, revision: claimed.revision };
       }
 
@@ -426,6 +470,13 @@ export class VaultStore {
         throw new VaultStoreError(
           "legacy_unavailable",
           "The legacy vault is no longer available.",
+        );
+      }
+      if (legacy.header.vaultId !== legacyVaultId) {
+        this.deleteSession(sessionToken);
+        throw new VaultStoreError(
+          "unauthorized",
+          "The legacy session no longer matches this encrypted vault.",
         );
       }
 
@@ -452,7 +503,11 @@ export class VaultStore {
         status: "committed",
         committedAt: new Date(this.now()).toISOString(),
       } satisfies LegacyClaimMarker);
-      activeSession.principal = { kind: "user", accountKey };
+      activeSession.principal = {
+        kind: "user",
+        accountKey,
+        vaultId: legacy.header.vaultId,
+      };
       return { claimed: true, revision: legacy.revision };
     });
   }
@@ -483,6 +538,13 @@ export class VaultStore {
           "No vault has been configured for this account.",
         );
       }
+      if (stored.header.vaultId !== activeSession.principal.vaultId) {
+        this.deleteSession(input.sessionToken);
+        throw new VaultStoreError(
+          "unauthorized",
+          "The account session no longer matches this encrypted vault.",
+        );
+      }
       if (stored.header.vaultId !== input.vaultId) {
         throw new VaultStoreError(
           "unauthorized",
@@ -505,6 +567,132 @@ export class VaultStore {
       };
       await this.atomicWriteJson(path, next);
       return { revision: next.revision, updatedAt };
+    });
+  }
+
+  async changePassword(input: ChangePasswordInput): Promise<ChangePasswordResult> {
+    if (
+      input.currentAuthProof.byteLength !== 32 ||
+      input.nextAuthProof.byteLength !== 32 ||
+      !Number.isSafeInteger(input.expectedRevision) ||
+      input.expectedRevision < 1 ||
+      input.expectedRevision >= Number.MAX_SAFE_INTEGER ||
+      !isCanonicalEncodedBytes(input.vaultId, 16) ||
+      !isVaultCryptoHeader(input.header)
+    ) {
+      throw new VaultStoreError("invalid_input", "The password change data is invalid.");
+    }
+    this.requireUserSession(input.sessionToken);
+
+    return this.withMutationLock(async () => {
+      const activeSession = this.requireUserSession(input.sessionToken);
+      if (activeSession.principal.kind !== "user") {
+        throw new VaultStoreError(
+          "legacy_claim_required",
+          "Claim the legacy vault before changing its password.",
+        );
+      }
+
+      const { accountKey } = activeSession.principal;
+      const path = this.userVaultPath(accountKey);
+      const stored = await this.readStoredVault(path);
+      if (!stored) {
+        throw new VaultStoreError(
+          "not_configured",
+          "No vault has been configured for this account.",
+        );
+      }
+      if (stored.header.vaultId !== activeSession.principal.vaultId) {
+        this.deleteSession(input.sessionToken);
+        throw new VaultStoreError(
+          "unauthorized",
+          "The account session no longer matches this encrypted vault.",
+        );
+      }
+      if (stored.header.vaultId !== input.vaultId) {
+        throw new VaultStoreError(
+          "unauthorized",
+          "The vault session does not match this encrypted vault.",
+        );
+      }
+      if (
+        input.header.vaultId !== stored.header.vaultId ||
+        input.header.createdAt !== stored.header.createdAt
+      ) {
+        throw new VaultStoreError(
+          "invalid_input",
+          "The replacement vault header does not match this encrypted vault.",
+        );
+      }
+
+      const exactRetry =
+        stored.revision === input.expectedRevision + 1 &&
+        vaultHeadersEqual(stored.header, input.header) &&
+        proofMatches(stored, input.nextAuthProof);
+      if (exactRetry) {
+        this.revokeAccountSessions(accountKey);
+        const session = this.issueSession({
+          kind: "user",
+          accountKey,
+          vaultId: stored.header.vaultId,
+        });
+        this.clearFailedLoginsForAccount(accountKey);
+        return {
+          revision: stored.revision,
+          updatedAt: stored.updatedAt,
+          ...session,
+        };
+      }
+
+      if (stored.revision !== input.expectedRevision) {
+        throw new VaultStoreError(
+          "revision_conflict",
+          "The vault changed since it was loaded.",
+          { currentRevision: stored.revision },
+        );
+      }
+
+      const failureKey = `password-change:${input.rateKey.slice(0, 256)}:${accountKey}`;
+      this.assertLoginAllowed(failureKey);
+      if (!proofMatches(stored, input.currentAuthProof)) {
+        const failure = this.recordFailedLogin(failureKey);
+        if (failure.blockedUntil > this.now()) {
+          throw this.rateLimitError(failure.blockedUntil, this.now());
+        }
+        throw new VaultStoreError(
+          "invalid_credentials",
+          "The current password is incorrect.",
+        );
+      }
+      if (
+        proofMatches(stored, input.nextAuthProof) ||
+        input.header.kdf.salt === stored.header.kdf.salt ||
+        input.header.passwordVerifier.value === stored.header.passwordVerifier.value ||
+        input.header.wrappedKey.iv === stored.header.wrappedKey.iv
+      ) {
+        throw new VaultStoreError(
+          "invalid_input",
+          "The replacement vault credentials must use fresh key material.",
+        );
+      }
+
+      const updatedAt = new Date(this.now()).toISOString();
+      const next: StoredVaultFile = {
+        ...stored,
+        revision: stored.revision + 1,
+        updatedAt,
+        authVerifier: { algorithm: "SHA-256", value: hashProof(input.nextAuthProof) },
+        header: structuredClone(input.header),
+      };
+      await this.atomicWriteJson(path, next);
+      this.revokeAccountSessions(accountKey);
+      const session = this.issueSession({
+        kind: "user",
+        accountKey,
+        vaultId: next.header.vaultId,
+      });
+      this.clearFailedLoginsForAccount(accountKey);
+      return { revision: next.revision, updatedAt, ...session };
     });
   }
 
@@ -537,6 +725,13 @@ export class VaultStore {
         throw new VaultStoreError(
           "unauthorized",
           "The account could not be authorized for deletion.",
+        );
+      }
+      if (stored.header.vaultId !== activeSession.principal.vaultId) {
+        this.deleteSession(input.sessionToken);
+        throw new VaultStoreError(
+          "unauthorized",
+          "The account session no longer matches this encrypted vault.",
         );
       }
       if (stored.header.vaultId !== input.vaultId) {
@@ -968,6 +1163,27 @@ function proofMatches(stored: StoredVaultFile, authProof: Uint8Array): boolean {
   return candidate.byteLength === expected.byteLength && timingSafeEqual(candidate, expected);
 }
 
+function vaultHeadersEqual(left: VaultCryptoHeader, right: VaultCryptoHeader): boolean {
+  return (
+    left.format === right.format &&
+    left.version === right.version &&
+    left.vaultId === right.vaultId &&
+    left.createdAt === right.createdAt &&
+    left.kdf.algorithm === right.kdf.algorithm &&
+    left.kdf.salt === right.kdf.salt &&
+    left.kdf.memoryKiB === right.kdf.memoryKiB &&
+    left.kdf.iterations === right.kdf.iterations &&
+    left.kdf.parallelism === right.kdf.parallelism &&
+    left.kdf.hashLength === right.kdf.hashLength &&
+    left.passwordVerifier.algorithm === right.passwordVerifier.algorithm &&
+    left.passwordVerifier.value === right.passwordVerifier.value &&
+    left.wrappedKey.algorithm === right.wrappedKey.algorithm &&
+    left.wrappedKey.iv === right.wrappedKey.iv &&
+    left.wrappedKey.ciphertext === right.wrappedKey.ciphertext &&
+    left.wrappedKey.tagLength === right.wrappedKey.tagLength
+  );
+}
+
 function storedVaultsEqual(first: StoredVaultFile, second: StoredVaultFile): boolean {
   const firstHash = createHash("sha256").update(JSON.stringify(first)).digest();
   const secondHash = createHash("sha256").update(JSON.stringify(second)).digest();
@@ -980,8 +1196,8 @@ function storedVaultAccountsEqual(
 ): boolean {
   const accountIdentity = (stored: StoredVaultFile) => JSON.stringify({
     createdAt: stored.createdAt,
-    authVerifier: stored.authVerifier,
-    header: stored.header,
+    vaultId: stored.header.vaultId,
+    vaultCreatedAt: stored.header.createdAt,
   });
   const firstHash = createHash("sha256").update(accountIdentity(first)).digest();
   const secondHash = createHash("sha256").update(accountIdentity(second)).digest();

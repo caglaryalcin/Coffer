@@ -54,6 +54,8 @@ export async function POST(request: Request): Promise<Response> {
         return await claimLegacy(request, body);
       case "save":
         return await save(request, body);
+      case "change_password":
+        return await changePassword(request, body);
       case "delete_account":
         return await deleteAccount(request, body);
       case "logout":
@@ -161,6 +163,46 @@ async function save(request: Request, body: JsonObject): Promise<Response> {
     payload: body.payload,
   });
   return json(result);
+}
+
+async function changePassword(request: Request, body: JsonObject): Promise<Response> {
+  requireSameOrigin(request);
+  if (!hasExactKeys(body, [
+    "action",
+    "vaultId",
+    "expectedRevision",
+    "currentAuthProof",
+    "nextAuthProof",
+    "header",
+  ])) {
+    throw invalidSchema();
+  }
+  const currentAuthProof = decodeFixedAuthProof(body.currentAuthProof);
+  const nextAuthProof = decodeFixedAuthProof(body.nextAuthProof);
+  if (
+    body.action !== "change_password" ||
+    typeof body.vaultId !== "string" ||
+    !isRevision(body.expectedRevision) ||
+    !currentAuthProof ||
+    !nextAuthProof ||
+    !isVaultCryptoHeader(body.header)
+  ) {
+    throw invalidSchema();
+  }
+
+  const result = await store.changePassword({
+    sessionToken: sessionToken(request),
+    vaultId: body.vaultId,
+    expectedRevision: body.expectedRevision,
+    currentAuthProof,
+    nextAuthProof,
+    header: body.header,
+    rateKey: clientRateKey(request),
+  });
+  return json(
+    { revision: result.revision, updatedAt: result.updatedAt },
+    { headers: { "Set-Cookie": sessionCookie(request, result.sessionToken) } },
+  );
 }
 
 async function deleteAccount(request: Request, body: JsonObject): Promise<Response> {

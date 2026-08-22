@@ -25,6 +25,8 @@ export type GroupCustomizationDialogProps = {
   returnFocusTo?: HTMLElement | null;
   onCancel: () => void;
   onSave: (value: GroupCustomizationValue) => boolean | void | Promise<boolean | void>;
+  onDelete?: () => boolean | void | Promise<boolean | void>;
+  deleteDisabledReason?: string;
 };
 
 export const GROUP_ICON_OPTIONS = [
@@ -104,6 +106,8 @@ function GroupCustomizationDialogContent({
   returnFocusTo,
   onCancel,
   onSave,
+  onDelete,
+  deleteDisabledReason,
 }: Omit<GroupCustomizationDialogProps, "open" | "group"> & { group: GroupCustomizationValue }) {
   const titleId = useId();
   const descriptionId = useId();
@@ -117,8 +121,10 @@ function GroupCustomizationDialogContent({
   const [icon, setIcon] = useState<VaultGroupIcon>(group.icon);
   const [color, setColor] = useState<VaultGroupColor>(group.color);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [error, setError] = useState("");
-  const isBusy = busy || saving;
+  const isBusy = busy || saving || deleting;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -213,6 +219,34 @@ function GroupCustomizationDialogContent({
     } finally {
       submitInFlightRef.current = false;
       if (mountedRef.current) setSaving(false);
+    }
+  };
+
+  const deleteGroup = async () => {
+    if (!onDelete || deleteDisabledReason || isBusy || submitInFlightRef.current) return;
+    if (!confirmingDelete) {
+      setError("");
+      setConfirmingDelete(true);
+      return;
+    }
+
+    setError("");
+    setDeleting(true);
+    submitInFlightRef.current = true;
+    try {
+      const accepted = await onDelete();
+      if (mountedRef.current && accepted === false) {
+        setError("The group could not be deleted.");
+        setConfirmingDelete(false);
+      }
+    } catch (caught) {
+      if (mountedRef.current) {
+        setError(caught instanceof Error ? caught.message : "The group could not be deleted.");
+        setConfirmingDelete(false);
+      }
+    } finally {
+      submitInFlightRef.current = false;
+      if (mountedRef.current) setDeleting(false);
     }
   };
 
@@ -326,11 +360,29 @@ function GroupCustomizationDialogContent({
             </div>
           </fieldset>
 
+          {onDelete && (
+            <p className={`group-customization-delete-note ${confirmingDelete ? "confirming" : ""}`}>
+              {deleteDisabledReason
+                ? deleteDisabledReason
+                : confirmingDelete
+                  ? "Delete this empty group? This cannot be undone. Accounts are never deleted with a group."
+                  : "This group is empty. Delete it when you no longer need it."}
+            </p>
+          )}
+
           {error && <p id={errorId} className="group-customization-error" role="alert">{error}</p>}
 
           <footer className="group-customization-actions">
+            {onDelete && (
+              <button
+                type="button"
+                className="group-customization-delete-action"
+                onClick={() => void deleteGroup()}
+                disabled={isBusy || Boolean(deleteDisabledReason)}
+              >{deleting ? "Deleting…" : confirmingDelete ? "Confirm delete" : "Delete group"}</button>
+            )}
             <button type="button" onClick={close} disabled={isBusy}>Cancel</button>
-            <button type="submit" disabled={isBusy}>{isBusy ? "Saving…" : mode === "create" ? "Create group" : "Save changes"}</button>
+            <button type="submit" disabled={isBusy}>{saving || busy ? "Saving…" : mode === "create" ? "Create group" : "Save changes"}</button>
           </footer>
         </form>
       </section>
