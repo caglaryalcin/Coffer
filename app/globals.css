@@ -794,6 +794,10 @@ h1 { margin: 0; font-size: clamp(34px, 4vw, 53px); line-height: .98; letter-spac
 .demo-shell .workspace { min-height: 100vh; }
 .demo-shell .content { padding-top: 20px; }
 .demo-shell .settings-center { padding-top: 28px; }
+.demo-lock-panel .subtitle { max-width: 470px; margin: 12px auto 0; }
+.demo-lock-icon { width: 58px; height: 58px; display: grid; place-items: center; margin: 4px 0 22px; border: 1px solid rgba(202,115,115,.42); border-radius: 18px; background: var(--accent-soft); color: var(--theme-accent); }
+.demo-lock-icon.lock-button > span { transform: scale(1.25); }
+.demo-unlock-button { margin-top: 26px; }
 .sync-state.demo-badge { border: 1px solid rgba(202,115,115,.34); background: var(--accent-soft); color: var(--theme-accent); font-weight: 700; }
 .sync-state.demo-badge i { background: var(--theme-accent); box-shadow: 0 0 0 4px var(--accent-soft); }
 .demo-banner { width: min(1484px, calc(100% - clamp(56px, 6vw, 96px))); display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 15px; margin: 26px auto 0; padding: 15px 17px; border: 1px solid rgba(202,115,115,.34); border-radius: 18px; background: linear-gradient(135deg, rgba(202,115,115,.12), rgba(255,255,255,.72)); }

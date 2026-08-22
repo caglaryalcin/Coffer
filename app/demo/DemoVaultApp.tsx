@@ -141,6 +141,7 @@ function accountInitials(service: string) {
 export default function DemoVaultApp() {
   const [vault, setVault] = useState<PersistedVault>(() => createDemoVault());
   const [demoSessionKey, setDemoSessionKey] = useState(0);
+  const [demoLocked, setDemoLocked] = useState(false);
   const [view, setView] = useState<DemoView>("all");
   const [group, setGroup] = useState<string>("All");
   const [query, setQuery] = useState("");
@@ -165,6 +166,9 @@ export default function DemoVaultApp() {
   const [tick, setTick] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const demoLockButtonRef = useRef<HTMLButtonElement>(null);
+  const demoUnlockButtonRef = useRef<HTMLButtonElement>(null);
+  const demoWasLockedRef = useRef(false);
   const vaultRef = useRef(vault);
   const demoGenerationRef = useRef(0);
   const clipboardClearTimersRef = useRef<Set<number>>(new Set());
@@ -236,6 +240,7 @@ export default function DemoVaultApp() {
     demoSessionDeadlineRef.current = Date.now() + DEMO_SESSION_DURATION_MS;
     vaultRef.current = freshVault;
     setVault(freshVault);
+    setDemoLocked(false);
     setView("all");
     setGroup("All");
     setQuery("");
@@ -313,6 +318,15 @@ export default function DemoVaultApp() {
     const timer = window.setTimeout(() => setToast(null), 2_600);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    if (demoLocked) {
+      demoWasLockedRef.current = true;
+      demoUnlockButtonRef.current?.focus();
+    } else if (demoWasLockedRef.current) {
+      demoLockButtonRef.current?.focus();
+    }
+  }, [demoLocked]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -992,6 +1006,32 @@ export default function DemoVaultApp() {
   const activeAccountCount = accounts.filter((account) => !account.archived).length;
   const favoriteAccountCount = accounts.filter((account) => account.favorite && !account.archived).length;
   const archivedAccountCount = accounts.filter((account) => account.archived).length;
+
+  if (demoLocked) {
+    return (
+      <main className={`transfer-center auth-screen demo-lock-screen theme-${vault.settings.theme}`} aria-labelledby="demo-lock-title">
+        <section className="transfer-panel auth-loading demo-lock-panel">
+          <div className="auth-brand">
+            <span className="brand-mark" aria-hidden="true">C</span>
+            <span>Coffer</span>
+          </div>
+          <span className="demo-lock-icon lock-button" aria-hidden="true"><span /></span>
+          <h1 id="demo-lock-title">Demo vault locked</h1>
+          <p className="subtitle">Your temporary sample data is hidden but remains in this browser&apos;s memory. No password is required for the public demo.</p>
+          <button
+            ref={demoUnlockButtonRef}
+            type="button"
+            className="transfer-primary demo-unlock-button"
+            onClick={() => {
+              setDemoLocked(false);
+              setToast("Demo vault unlocked.");
+            }}
+          >Unlock demo <span aria-hidden="true">→</span></button>
+        </section>
+      </main>
+    );
+  }
+
   const bulkGroupActions = (
     <BulkGroupActions
       active={selectionMode}
@@ -1172,18 +1212,27 @@ export default function DemoVaultApp() {
           <div className="top-actions">
             <span className="sync-state demo-badge" role="status"><i />Demo changes are not saved</span>
             <button
+              ref={demoLockButtonRef}
               type="button"
               className="icon-button lock-button"
-              disabled
-              aria-disabled="true"
-              aria-label="Lock vault (disabled in public demo)"
-              title="Vault locking is disabled in the public demo"
+              onClick={() => {
+                clearSelectedAccountDrag();
+                setAccountMenuId(null);
+                setDemoLocked(true);
+              }}
+              aria-label="Lock demo vault"
+              title="Lock demo vault"
             ><span aria-hidden="true" /></button>
             <ThemeToggle
               theme={vault.settings.theme}
-              onToggle={() => undefined}
-              disabled
-              disabledReason="Theme settings are read-only in the public demo"
+              onToggle={() => setVault((current) => ({
+                ...current,
+                settings: {
+                  ...current.settings,
+                  theme: current.settings.theme === "dark" ? "light" : "dark",
+                },
+                updatedAt: new Date().toISOString(),
+              }))}
             />
             <ProfileMenu
               profile={vault.profile}
