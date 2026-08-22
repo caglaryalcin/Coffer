@@ -3094,6 +3094,13 @@ export default function VaultApp() {
     />
   );
 
+  const showAllAccounts = () => {
+    exitSelectionMode();
+    setAccountMenuId(null);
+    setView("all");
+    setGroup("All");
+  };
+
   return (
     <main className={`app-shell theme-${theme} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar" id="primary-sidebar">
@@ -3109,10 +3116,15 @@ export default function VaultApp() {
           <span aria-hidden="true" />
         </button>
 
-        <div className="brand"><span className="brand-mark" aria-hidden="true">C</span><span className="brand-name">Coffer</span></div>
+        <div className="brand">
+          <button type="button" className="brand-home" onClick={showAllAccounts} aria-label="Go to All codes" title="All codes">
+            <span className="brand-mark" aria-hidden="true">C</span>
+            <span className="brand-name">Coffer</span>
+          </button>
+        </div>
 
         <nav className="primary-nav" aria-label="Primary navigation">
-          <button title="All codes" className={`nav-item ${view === "all" ? "active" : ""}`} onClick={() => { setView("all"); setGroup("All"); }}><span className="nav-icon grid-icon" aria-hidden="true" />All codes<span className="nav-count">{accounts.filter((account) => !account.archived).length}</span></button>
+          <button title="All codes" className={`nav-item ${view === "all" ? "active" : ""}`} onClick={showAllAccounts}><span className="nav-icon grid-icon" aria-hidden="true" />All codes<span className="nav-count">{accounts.filter((account) => !account.archived).length}</span></button>
           <button title="Favorites" className={`nav-item ${view === "favorites" ? "active" : ""}`} onClick={() => { setView("favorites"); setGroup("All"); }}><span className="nav-icon star-icon" aria-hidden="true">✦</span>Favorites<span className="nav-count">{accounts.filter((account) => account.favorite && !account.archived).length}</span></button>
           <button title="Archive" className={`nav-item ${view === "archive" ? "active" : ""}`} onClick={() => { exitSelectionMode(); setView("archive"); setGroup("All"); }}><span className="nav-icon trash-icon" aria-hidden="true" />Archive<span className="nav-count">{accounts.filter((account) => account.archived).length}</span></button>
           <button title="Data and backup" className={`nav-item ${view === "transfer" ? "active" : ""}`} onClick={() => { exitSelectionMode(); setView("transfer"); }}><span className="nav-icon transfer-icon" aria-hidden="true" />Data &amp; backup</button>

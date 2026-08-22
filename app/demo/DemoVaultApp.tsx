@@ -396,8 +396,10 @@ export default function DemoVaultApp() {
         </button>
 
         <div className="brand">
-          <span className="brand-mark" aria-hidden="true">C</span>
-          <span className="brand-name">Coffer</span>
+          <button type="button" className="brand-home" onClick={showAllAccounts} aria-label="Go to all sample codes" title="All sample codes">
+            <span className="brand-mark" aria-hidden="true">C</span>
+            <span className="brand-name">Coffer</span>
+          </button>
         </div>
 
         <nav className="primary-nav" aria-label="Demo navigation">
