@@ -26,6 +26,9 @@ yarn-error.log*
 # Repository-only branding exports and source artwork
 /assets/
 
+# Repository-only screenshots used by README
+/screenshots/
+
 # Media files are excluded from the Docker build context by default.
 # Runtime assets under public/ are explicitly restored below.
 **/*.png
