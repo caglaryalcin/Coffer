@@ -2756,6 +2756,7 @@ export default function VaultApp() {
     requestedGroup: string,
     createGroup: boolean,
     accountIds: ReadonlySet<string> = selectedVisibleAccountIds,
+    openTargetGroup = true,
   ) => {
     const blockReason = mutationBlockReason();
     if (blockReason) {
@@ -2828,8 +2829,10 @@ export default function VaultApp() {
           : account,
       ));
     if (!saved) return false;
-    setView("all");
-    setGroup(targetGroup);
+    if (openTargetGroup) {
+      setView("all");
+      setGroup(targetGroup);
+    }
     exitSelectionMode();
     setToast(`${movedCount} ${movedCount === 1 ? "account" : "accounts"} moved to ${targetGroup}.`);
     return true;
@@ -2955,7 +2958,7 @@ export default function VaultApp() {
     event.preventDefault();
     const draggedAccountIds = new Set(draggedAccountIdsRef.current);
     clearSelectedAccountDrag();
-    moveSelectedAccounts(groupName, false, draggedAccountIds);
+    moveSelectedAccounts(groupName, false, draggedAccountIds, false);
   };
 
   const setSelectedAccountsFavorite = (favorite: boolean) => {

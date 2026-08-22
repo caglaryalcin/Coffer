@@ -178,8 +178,9 @@ button { color: inherit; }
 .profile-menu button:focus-visible { outline: 2px solid var(--theme-accent); outline-offset: -1px; }
 .sidebar-footer { min-height: 44px; display: flex; align-items: center; justify-content: space-between; flex: 0 0 auto; gap: 8px; margin: auto -18px -20px; padding: 8px 12px; border-top: 1px solid #353836; color: #858a83; }
 .sidebar-footer-version { min-width: 0; flex: 1 1 auto; overflow: hidden; color: inherit; font-size: 11px; font-weight: 560; letter-spacing: .01em; text-overflow: ellipsis; white-space: nowrap; }
-.sidebar-footer-update { display: block; margin-left: -3px; padding: 2px 3px; border-radius: 6px; color: var(--theme-accent); font-weight: 750; text-decoration: none; }
-.sidebar-footer-update:is(:hover, :focus-visible) { background: var(--accent-soft); color: #f8f8f2; text-decoration: underline; }
+.sidebar-footer-update { display: inline-block; flex: 0 1 auto; color: var(--orange); font-weight: 750; text-decoration: none; }
+.sidebar-footer-update:hover { color: #ffad8e; text-decoration: underline; text-underline-offset: 2px; }
+.sidebar-footer-update:focus-visible { outline: 1px solid currentColor; outline-offset: 3px; border-radius: 2px; }
 .sidebar-footer-links { display: flex; flex: 0 0 auto; align-items: center; gap: 2px; }
 .sidebar-footer-link { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 8px; background: transparent; color: #8e938c; text-decoration: none; cursor: pointer; }
 .sidebar-footer-link:is(:hover, :focus-visible) { border-color: var(--theme-accent); background: var(--accent-soft); color: #f8f8f2; }
@@ -1586,6 +1587,7 @@ body.theme-dark { background: #181a1b; color-scheme: dark; }
 .theme-dark .qr-scanner-actions > button:first-child { border-color: var(--theme-accent); background: var(--theme-accent); color: var(--paper); }
 .theme-dark .qr-scanner-fallback { color: var(--muted) !important; }
 .theme-dark .toast { border-color: var(--line); background: var(--surface-hover); color: #fff; box-shadow: 0 14px 36px rgba(0,0,0,.38); }
+.theme-dark .toast-check { background: #74ad4b; color: #15200f; }
 
 .theme-dark .eyebrow span { background: var(--theme-accent); }
 .theme-dark .vault-status.locked .vault-status-icon { background: var(--surface-hover); }

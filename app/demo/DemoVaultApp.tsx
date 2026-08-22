@@ -614,6 +614,7 @@ export default function DemoVaultApp() {
     requestedGroup: string,
     createGroup: boolean,
     accountIds: ReadonlySet<string> = selectedVisibleAccountIds,
+    openTargetGroup = true,
   ) => {
     if (accountIds.size === 0) {
       setToast("Select at least one sample account to move.");
@@ -659,8 +660,10 @@ export default function DemoVaultApp() {
         : current.groupCustomizations,
       updatedAt: new Date().toISOString(),
     }));
-    setView("all");
-    setGroup(targetGroup);
+    if (openTargetGroup) {
+      setView("all");
+      setGroup(targetGroup);
+    }
     exitSelectionMode();
     setToast(`${changedIds.size} ${changedIds.size === 1 ? "sample account" : "sample accounts"} moved to ${targetGroup}.`);
     return true;
@@ -757,7 +760,7 @@ export default function DemoVaultApp() {
     event.preventDefault();
     const draggedAccountIds = new Set(draggedAccountIdsRef.current);
     clearSelectedAccountDrag();
-    moveSelectedAccounts(groupName, false, draggedAccountIds);
+    moveSelectedAccounts(groupName, false, draggedAccountIds, false);
   };
 
   const setSelectedAccountsFavorite = (favorite: boolean) => {
