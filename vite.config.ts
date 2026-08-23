@@ -28,9 +28,7 @@ export default defineConfig(async () => {
   }
 
   return {
-    cacheDir: process.env.COFFER_DEMO_MODE === "1"
-      ? "node_modules/.vite-demo"
-      : "node_modules/.vite",
+    cacheDir: "node_modules/.vite",
     define: {
       __COFFER_VERSION__: JSON.stringify(packageMetadata.version),
     },
