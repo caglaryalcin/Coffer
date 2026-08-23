@@ -20,15 +20,15 @@ server. It also supports QR imports, groups, backups, and 2FAS transfers.
 - Groups, favorites, archive, search, and bulk actions
 - Automatic local service logos and custom logo uploads
 
-![](![](https://raw.githubusercontent.com/caglaryalcin/Coffer/refs/heads/main/screenshots/platform-logo.png))
+![](https://raw.githubusercontent.com/caglaryalcin/Coffer/refs/heads/main/screenshots/platform-logo.png)
 
 - Encrypted backups plus 2fas, 2fAuth, and OTPAuth transfers
 
-![](https://raw.githubusercontent.com/caglaryalcin/Coffer/refs/heads/main/screenshots/export.png)
+![](https://raw.githubusercontent.com/caglaryalcin/Coffer/refs/heads/main/screenshots/import.png)
   
 - Responsive light and dark interfaces
 
-![](https://raw.githubusercontent.com/caglaryalcin/Coffer/refs/heads/main/screenshots/import.png)
+![](https://raw.githubusercontent.com/caglaryalcin/Coffer/refs/heads/main/screenshots/light-dark.png)
 
 ## Docker Compose
 
