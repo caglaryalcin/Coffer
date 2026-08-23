@@ -159,6 +159,9 @@ export function createDemoVault(now = new Date()): PersistedVault {
       iconDataUrl: null,
     },
   ];
+  accounts.sort((left, right) => (
+    left.service.localeCompare(right.service, "en") || left.identity.localeCompare(right.identity, "en")
+  ));
 
   return parsePersistedVault({
     format: VAULT_PAYLOAD_FORMAT,

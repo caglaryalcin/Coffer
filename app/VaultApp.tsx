@@ -23,6 +23,7 @@ import { classifyVaultOutbox, clearVaultOutbox, createVaultOutboxRecord, readVau
 import { clearVaultResumeSession, readVaultResumeSession, saveVaultResumeSession, touchVaultResumeSession } from "../lib/vault-resume";
 import { remainingAutoLockMs } from "../lib/auto-lock";
 import type { EditableAccountPatch } from "../lib/account-editor";
+import { reorderVisibleAccounts, type AccountDropEdge } from "../lib/account-order";
 import { appendGroupToOrder, mergeVisibleGroupOrder, moveGroupName, orderedVisibleGroupNames, removeGroupFromOrder, renameGroupInOrder, type GroupDropEdge } from "../lib/group-order";
 import {
   beginVaultSessionTransition,
@@ -75,6 +76,7 @@ type ReadyVaultSessionPublication = {
   saveError: string | null;
 };
 type GroupDropTarget = { name: string; edge: GroupDropEdge };
+type AccountDropTarget = { id: string; edge: AccountDropEdge; axis: "horizontal" | "vertical" };
 const EMPTY_ACCOUNTS: Account[] = [];
 const ADD_ACCOUNT_PALETTE: Account["color"][] = ["violet", "green", "blue", "orange"];
 const CATALOG_ACCOUNT_ICON_OPTIONS = serviceBrandIds.flatMap((id) => {
@@ -118,6 +120,19 @@ const LOCK_SAVE_GRACE_MS = VAULT_API_TIMEOUT_MS + 750;
 const RESUME_ACTIVITY_WRITE_INTERVAL_MS = 1_000;
 const ACCOUNT_EVENT_CHANNEL_NAME = "coffer-account-events-v1";
 const ACCOUNT_DELETION_CLEANUP_MS = VAULT_API_TIMEOUT_MS + 6_000;
+
+function accountDropPlacement(event: ReactDragEvent<HTMLElement>): Pick<AccountDropTarget, "edge" | "axis"> {
+  const bounds = event.currentTarget.getBoundingClientRect();
+  const grid = event.currentTarget.closest(".account-grid");
+  const gridColumns = grid instanceof HTMLElement
+    ? window.getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/u).filter(Boolean).length
+    : 1;
+  const axis: AccountDropTarget["axis"] = gridColumns > 1 ? "horizontal" : "vertical";
+  const before = axis === "horizontal"
+    ? event.clientX < bounds.left + (bounds.width / 2)
+    : event.clientY < bounds.top + (bounds.height / 2);
+  return { axis, edge: before ? "before" : "after" };
+}
 
 function normalizedServiceName(value: string): string {
   return value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase("en");
@@ -264,6 +279,7 @@ export default function VaultApp() {
   const [draggingSelectedAccounts, setDraggingSelectedAccounts] = useState(false);
   const [draggedAccountIds, setDraggedAccountIds] = useState<Set<string>>(() => new Set());
   const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
+  const [accountDropTarget, setAccountDropTarget] = useState<AccountDropTarget | null>(null);
   const [draggingGroup, setDraggingGroup] = useState<string | null>(null);
   const [groupDropTarget, setGroupDropTarget] = useState<GroupDropTarget | null>(null);
   const [bulkLogoOpen, setBulkLogoOpen] = useState(false);
@@ -334,6 +350,7 @@ export default function VaultApp() {
     setDraggingSelectedAccounts(false);
     setDraggedAccountIds(new Set());
     setDragOverGroup(null);
+    setAccountDropTarget(null);
     if (suppressSelectedAccountClickRef.current) {
       if (selectedAccountClickResetFrameRef.current !== null) {
         window.cancelAnimationFrame(selectedAccountClickResetFrameRef.current);
@@ -2976,7 +2993,9 @@ export default function VaultApp() {
   );
 
   const dragSelectedAccountsOverGroup = (event: ReactDragEvent<HTMLDivElement>, groupName: string) => {
-    if (!acceptsSelectedAccountDrag() || !canMoveAccountIdsToGroup(draggedAccountIdsRef.current, groupName)) return;
+    if (!acceptsSelectedAccountDrag()) return;
+    setAccountDropTarget(null);
+    if (!canMoveAccountIdsToGroup(draggedAccountIdsRef.current, groupName)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
     if (dragOverGroup !== groupName) setDragOverGroup(groupName);
@@ -2993,6 +3012,53 @@ export default function VaultApp() {
     const draggedAccountIds = new Set(draggedAccountIdsRef.current);
     clearSelectedAccountDrag();
     moveSelectedAccounts(groupName, false, draggedAccountIds, false);
+  };
+
+  const dragSelectedAccountsOverAccount = (event: ReactDragEvent<HTMLElement>, targetAccountId: string) => {
+    if (!acceptsSelectedAccountDrag() || draggedAccountIdsRef.current.has(targetAccountId)) {
+      setAccountDropTarget(null);
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+    setDragOverGroup(null);
+    const placement = accountDropPlacement(event);
+    setAccountDropTarget((current) => (
+      current?.id === targetAccountId && current.edge === placement.edge && current.axis === placement.axis
+        ? current
+        : { id: targetAccountId, ...placement }
+    ));
+  };
+
+  const leaveSelectedAccountCardDropTarget = (event: ReactDragEvent<HTMLElement>, targetAccountId: string) => {
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    setAccountDropTarget((current) => current?.id === targetAccountId ? null : current);
+  };
+
+  const dropSelectedAccountsOnAccount = (event: ReactDragEvent<HTMLElement>, targetAccountId: string) => {
+    if (!acceptsSelectedAccountDrag() || draggedAccountIdsRef.current.has(targetAccountId)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const placement = accountDropTarget?.id === targetAccountId
+      ? accountDropTarget
+      : { id: targetAccountId, ...accountDropPlacement(event) };
+    const movedIds = new Set(draggedAccountIdsRef.current);
+    const visibleIds = visibleAccounts.map((account) => account.id);
+    const nextAccounts = reorderVisibleAccounts(accounts, visibleIds, movedIds, targetAccountId, placement.edge);
+    clearSelectedAccountDrag();
+    if (nextAccounts === accounts) return;
+
+    const saved = setAccounts((current) => reorderVisibleAccounts(
+      current,
+      visibleIds,
+      movedIds,
+      targetAccountId,
+      placement.edge,
+    ));
+    if (saved) {
+      setToast(movedIds.size === 1 ? "Account position updated." : `${movedIds.size} account positions updated.`);
+    }
   };
 
   const beginGroupReorder = (event: ReactDragEvent<HTMLButtonElement>, groupName: string) => {
@@ -3838,7 +3904,7 @@ export default function VaultApp() {
 
           {visibleAccounts.length > 0 ? (
             <section className="account-grid" data-card-view={cardView} aria-label="Authenticator accounts">
-              <span className="visually-hidden" id="account-drag-instructions">With a mouse, hold outside the code row and drag an account to a sidebar group. Dragging a selected account moves the selection together. Keyboard and touch users can use Move to group.</span>
+              <span className="visually-hidden" id="account-drag-instructions">With a mouse, hold outside the code row and drag an account onto another card to reorder it, or onto a sidebar group to move it. Dragging a selected account moves the selection together. Keyboard and touch users can use Move to group.</span>
               {visibleAccounts.map((account) => {
                 const { current: currentCode, next: nextCode, remaining } = accountCodePreview(
                   account,
@@ -3849,13 +3915,14 @@ export default function VaultApp() {
                 const selected = selectedVisibleAccountIds.has(account.id);
                 const accessibleCurrentCode = currentCode?.replace(/\s/gu, "").split("").join(" ");
                 const draggableAccount = view === "all" && !account.archived;
+                const reorderTarget = accountDropTarget?.id === account.id ? accountDropTarget : null;
                 const accountCardProps: HTMLAttributes<HTMLElement> = {
                   draggable: draggableAccount,
                   "aria-describedby": draggableAccount ? "account-drag-instructions" : undefined,
                   title: draggableAccount
                     ? selectionMode && selected
-                      ? "Hold and drag outside the code area to move selected accounts"
-                      : "Hold and drag outside the code area to move this account"
+                      ? "Hold and drag outside the code area to reorder or move selected accounts"
+                      : "Hold and drag outside the code area to reorder this account or move it to a group"
                     : undefined,
                   onMouseDown: (event) => prepareSelectedAccountDrag(event, account.id, draggableAccount),
                   onMouseEnter: (event) => updateSelectedAccountDragZone(event, draggableAccount),
@@ -3870,6 +3937,10 @@ export default function VaultApp() {
                     if (event.buttons === 0) selectedAccountDragOriginRef.current = null;
                   },
                   onDragStart: (event) => beginSelectedAccountDrag(event, account.id),
+                  onDragEnter: (event) => dragSelectedAccountsOverAccount(event, account.id),
+                  onDragOver: (event) => dragSelectedAccountsOverAccount(event, account.id),
+                  onDragLeave: (event) => leaveSelectedAccountCardDropTarget(event, account.id),
+                  onDrop: (event) => dropSelectedAccountsOnAccount(event, account.id),
                   onDragEnd: clearSelectedAccountDrag,
                   ...(selectionMode ? {
                     role: "button",
@@ -3888,7 +3959,7 @@ export default function VaultApp() {
                   } : {}),
                 };
                 return <article
-                  className={`account-card ${account.archived ? "archived-card" : ""} ${selectionMode ? "selection-mode" : ""} ${selected ? "selected" : ""} ${draggingSelectedAccounts && draggedAccountIds.has(account.id) ? "drag-source" : ""}`}
+                  className={`account-card ${account.archived ? "archived-card" : ""} ${selectionMode ? "selection-mode" : ""} ${selected ? "selected" : ""} ${draggingSelectedAccounts && draggedAccountIds.has(account.id) ? "drag-source" : ""} ${reorderTarget ? `account-drop-${reorderTarget.edge} account-drop-${reorderTarget.axis}` : ""}`}
                   key={account.id}
                   {...accountCardProps}
                 >

@@ -170,7 +170,7 @@ export default function SignInScreen({
 
   if (status === "loading" || isLocking) {
     return (
-      <main className="transfer-center auth-screen theme-dark" aria-labelledby={ids.title}>
+      <main className="transfer-center auth-screen auth-loading-screen theme-dark" aria-labelledby={ids.title}>
         <section className="transfer-panel auth-loading" role="status" aria-live="polite">
           <div className={`auth-brand${isCreateAccount ? "" : " compact"}`}>
             <span className="brand-mark" aria-hidden="true">C</span>
