@@ -14,10 +14,21 @@ server. It also supports QR imports, groups, backups, and 2FAS transfers.
 
 - Multi-user, browser-encrypted vaults
 - TOTP generation with QR and manual account setup
+
+![](https://raw.githubusercontent.com/caglaryalcin/Coffer/refs/heads/main/screenshots/qr.png)
+
 - Groups, favorites, archive, search, and bulk actions
 - Automatic local service logos and custom logo uploads
-- Encrypted backups plus 2FAS, 2FAuth, and OTPAuth transfers
+
+![](![](https://raw.githubusercontent.com/caglaryalcin/Coffer/refs/heads/main/screenshots/platform-logo.png))
+
+- Encrypted backups plus 2fas, 2fAuth, and OTPAuth transfers
+
+![](https://raw.githubusercontent.com/caglaryalcin/Coffer/refs/heads/main/screenshots/export.png)
+  
 - Responsive light and dark interfaces
+
+![](https://raw.githubusercontent.com/caglaryalcin/Coffer/refs/heads/main/screenshots/import.png)
 
 ## Docker Compose
 
