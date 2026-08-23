@@ -23,6 +23,7 @@ import { classifyVaultOutbox, clearVaultOutbox, createVaultOutboxRecord, readVau
 import { clearVaultResumeSession, readVaultResumeSession, saveVaultResumeSession, touchVaultResumeSession } from "../lib/vault-resume";
 import { remainingAutoLockMs } from "../lib/auto-lock";
 import type { EditableAccountPatch } from "../lib/account-editor";
+import { appendGroupToOrder, mergeVisibleGroupOrder, moveGroupName, orderedVisibleGroupNames, removeGroupFromOrder, renameGroupInOrder, type GroupDropEdge } from "../lib/group-order";
 import {
   beginVaultSessionTransition,
   classifyVaultSaveRecovery,
@@ -73,6 +74,7 @@ type ReadyVaultSessionPublication = {
   saveStatus: SaveStatus;
   saveError: string | null;
 };
+type GroupDropTarget = { name: string; edge: GroupDropEdge };
 const EMPTY_ACCOUNTS: Account[] = [];
 const ADD_ACCOUNT_PALETTE: Account["color"][] = ["violet", "green", "blue", "orange"];
 const CATALOG_ACCOUNT_ICON_OPTIONS = serviceBrandIds.flatMap((id) => {
@@ -111,6 +113,7 @@ const ACCOUNT_ICON_OPTIONS = [
   }),
 ];
 const SELECTED_ACCOUNT_DRAG_TYPE = "application/x-coffer-selected-accounts";
+const GROUP_REORDER_DRAG_TYPE = "application/x-coffer-group-order";
 const LOCK_SAVE_GRACE_MS = VAULT_API_TIMEOUT_MS + 750;
 const RESUME_ACTIVITY_WRITE_INTERVAL_MS = 1_000;
 const ACCOUNT_EVENT_CHANNEL_NAME = "coffer-account-events-v1";
@@ -261,6 +264,8 @@ export default function VaultApp() {
   const [draggingSelectedAccounts, setDraggingSelectedAccounts] = useState(false);
   const [draggedAccountIds, setDraggedAccountIds] = useState<Set<string>>(() => new Set());
   const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
+  const [draggingGroup, setDraggingGroup] = useState<string | null>(null);
+  const [groupDropTarget, setGroupDropTarget] = useState<GroupDropTarget | null>(null);
   const [bulkLogoOpen, setBulkLogoOpen] = useState(false);
   const [bulkLogoReturnFocusTo, setBulkLogoReturnFocusTo] = useState<HTMLButtonElement | null>(null);
   const [customizingGroup, setCustomizingGroup] = useState<string | null>(null);
@@ -306,6 +311,9 @@ export default function VaultApp() {
   const draggedAccountIdsRef = useRef<Set<string>>(new Set());
   const suppressSelectedAccountClickRef = useRef(false);
   const selectedAccountClickResetFrameRef = useRef<number | null>(null);
+  const groupDragNameRef = useRef<string | null>(null);
+  const suppressGroupClickRef = useRef(false);
+  const groupClickResetFrameRef = useRef<number | null>(null);
   const sessionGenerationRef = useRef(0);
   const sessionTransitionRef = useRef<VaultSessionTransition>({
     epoch: 0,
@@ -334,6 +342,30 @@ export default function VaultApp() {
         suppressSelectedAccountClickRef.current = false;
         selectedAccountClickResetFrameRef.current = null;
       });
+    }
+  }, []);
+
+  const clearGroupDrag = useCallback(() => {
+    groupDragNameRef.current = null;
+    setDraggingGroup(null);
+    setGroupDropTarget(null);
+    if (suppressGroupClickRef.current) {
+      if (groupClickResetFrameRef.current !== null) {
+        window.cancelAnimationFrame(groupClickResetFrameRef.current);
+      }
+      groupClickResetFrameRef.current = window.requestAnimationFrame(() => {
+        suppressGroupClickRef.current = false;
+        groupClickResetFrameRef.current = null;
+      });
+    }
+  }, []);
+
+  useEffect(() => () => {
+    if (selectedAccountClickResetFrameRef.current !== null) {
+      window.cancelAnimationFrame(selectedAccountClickResetFrameRef.current);
+    }
+    if (groupClickResetFrameRef.current !== null) {
+      window.cancelAnimationFrame(groupClickResetFrameRef.current);
     }
   }, []);
 
@@ -383,16 +415,11 @@ export default function VaultApp() {
     ];
   }, [bulkLogoOpen, editingAccountId]);
 
-  const groups = useMemo(() => {
-    const names = new Map<string, string>();
-    for (const account of accounts) {
-      if (!account.archived) names.set(groupKey(account.group), account.group);
-    }
-    for (const customization of groupCustomizations) {
-      names.set(groupKey(customization.name), customization.name);
-    }
-    return Array.from(names.values());
-  }, [accounts, groupCustomizations]);
+  const groups = useMemo(() => orderedVisibleGroupNames(
+    accounts,
+    groupCustomizations,
+    vault?.groupOrder ?? [],
+  ), [accounts, groupCustomizations, vault?.groupOrder]);
   const entryGroups = useMemo(() => {
     const names = new Map<string, string>();
     for (const name of ["Personal", "Work", "Finance", ...groups]) {
@@ -1411,6 +1438,7 @@ export default function VaultApp() {
     setSelectionMode(false);
     setSelectedAccountIds(new Set());
     clearSelectedAccountDrag();
+    clearGroupDrag();
     setBulkLogoOpen(false);
     setBulkLogoReturnFocusTo(null);
     setCustomizingGroup(null);
@@ -1481,7 +1509,7 @@ export default function VaultApp() {
     });
     lockPromiseRef.current = tracked;
     return tracked;
-  }, [beginSessionTransition, clearSelectedAccountDrag]);
+  }, [beginSessionTransition, clearGroupDrag, clearSelectedAccountDrag]);
 
   const deleteOwnAccount = useCallback(async (password: string): Promise<void> => {
     if (passwordChangeRef.current) {
@@ -1605,6 +1633,7 @@ export default function VaultApp() {
     setSelectionMode(false);
     setSelectedAccountIds(new Set());
     clearSelectedAccountDrag();
+    clearGroupDrag();
     setBulkLogoOpen(false);
     setBulkLogoReturnFocusTo(null);
     for (const timeout of clipboardClearTimersRef.current) window.clearTimeout(timeout);
@@ -1770,7 +1799,7 @@ export default function VaultApp() {
     });
     lockPromiseRef.current = tracked;
     return tracked;
-  }, [attemptVaultSave, beginSessionTransition, clearSelectedAccountDrag, stagePendingVaults]);
+  }, [attemptVaultSave, beginSessionTransition, clearGroupDrag, clearSelectedAccountDrag, stagePendingVaults]);
 
   const changeOwnPassword = useCallback(async (
     currentPassword: string,
@@ -2658,6 +2687,7 @@ export default function VaultApp() {
           icon: nextCustomization.icon,
           color: nextCustomization.color,
         }],
+        groupOrder: appendGroupToOrder(current.groupOrder, normalized),
       }));
       if (!saved) return false;
 
@@ -2695,6 +2725,7 @@ export default function VaultApp() {
           icon: nextCustomization.icon,
           color: nextCustomization.color,
         }],
+        groupOrder: renameGroupInOrder(current.groupOrder, previousName, normalized),
       });
     });
     if (!saved) return false;
@@ -2743,6 +2774,7 @@ export default function VaultApp() {
       groupCustomizations: current.groupCustomizations.filter(
         (customization) => groupKey(customization.name) !== deletedKey,
       ),
+      groupOrder: removeGroupFromOrder(current.groupOrder, deletedName),
     }));
     if (!saved) return false;
 
@@ -2822,6 +2854,7 @@ export default function VaultApp() {
             ...current.groupCustomizations,
             defaultGroupCustomization(targetGroup),
           ],
+          groupOrder: appendGroupToOrder(current.groupOrder, targetGroup),
         }))
       : setAccounts((current) => current.map((account) =>
         changed.has(account.id) && !account.archived
@@ -2901,6 +2934,7 @@ export default function VaultApp() {
       clearSelectedAccountDrag();
       return;
     }
+    clearGroupDrag();
     const draggedAccountIds = selectionMode && selectedVisibleAccountIds.has(accountId)
       ? new Set(selectedVisibleAccountIds)
       : new Set([accountId]);
@@ -2959,6 +2993,89 @@ export default function VaultApp() {
     const draggedAccountIds = new Set(draggedAccountIdsRef.current);
     clearSelectedAccountDrag();
     moveSelectedAccounts(groupName, false, draggedAccountIds, false);
+  };
+
+  const beginGroupReorder = (event: ReactDragEvent<HTMLButtonElement>, groupName: string) => {
+    const blockReason = mutationBlockReason();
+    if (selectionMode || selectedAccountDragRef.current || groups.length < 2 || blockReason) {
+      event.preventDefault();
+      if (blockReason) {
+        setToast(blockReason === "conflict" || blockReason === "conflict-pending"
+          ? "Resolve the encrypted save conflict before reordering groups."
+          : "Unlock your vault before reordering groups.");
+      }
+      return;
+    }
+
+    clearSelectedAccountDrag();
+    if (groupClickResetFrameRef.current !== null) {
+      window.cancelAnimationFrame(groupClickResetFrameRef.current);
+      groupClickResetFrameRef.current = null;
+    }
+    suppressGroupClickRef.current = true;
+    groupDragNameRef.current = groupName;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData(GROUP_REORDER_DRAG_TYPE, "1");
+    event.dataTransfer.setData("text/plain", "coffer-group-order");
+    const row = event.currentTarget.closest(".group-nav-row");
+    if (row instanceof HTMLElement) {
+      const bounds = row.getBoundingClientRect();
+      event.dataTransfer.setDragImage(
+        row,
+        Math.max(0, Math.min(bounds.width, event.clientX - bounds.left)),
+        Math.max(0, Math.min(bounds.height, event.clientY - bounds.top)),
+      );
+    }
+    setDraggingGroup(groupName);
+    setGroupDropTarget(null);
+  };
+
+  const dragGroupOver = (event: ReactDragEvent<HTMLDivElement>, targetName: string) => {
+    const sourceName = groupDragNameRef.current;
+    if (!sourceName || groupKey(sourceName) === groupKey(targetName)) {
+      setGroupDropTarget(null);
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const edge: GroupDropEdge = event.clientY < bounds.top + (bounds.height / 2) ? "before" : "after";
+    setGroupDropTarget((current) => (
+      current?.name === targetName && current.edge === edge ? current : { name: targetName, edge }
+    ));
+  };
+
+  const leaveGroupDropTarget = (event: ReactDragEvent<HTMLDivElement>, targetName: string) => {
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    setGroupDropTarget((current) => current?.name === targetName ? null : current);
+  };
+
+  const dropGroupOnGroup = (event: ReactDragEvent<HTMLDivElement>, targetName: string) => {
+    const sourceName = groupDragNameRef.current;
+    if (!sourceName || groupKey(sourceName) === groupKey(targetName)) return;
+
+    event.preventDefault();
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const fallbackEdge: GroupDropEdge = event.clientY < bounds.top + (bounds.height / 2) ? "before" : "after";
+    const edge = groupDropTarget?.name === targetName ? groupDropTarget.edge : fallbackEdge;
+    const nextGroups = moveGroupName(groups, sourceName, targetName, edge);
+    const changed = nextGroups.some((name, index) => name !== groups[index]);
+    clearGroupDrag();
+    if (!changed) return;
+
+    const blockReason = mutationBlockReason();
+    if (blockReason) {
+      setToast(blockReason === "conflict" || blockReason === "conflict-pending"
+        ? "Resolve the encrypted save conflict before reordering groups."
+        : "Unlock your vault before reordering groups.");
+      return;
+    }
+
+    const saved = commitVault((current) => withVaultUpdate(current, {
+      groupOrder: mergeVisibleGroupOrder(current.groupOrder, nextGroups),
+    }));
+    if (saved) setToast(`${sourceName} group moved.`);
   };
 
   const setSelectedAccountsFavorite = (favorite: boolean) => {
@@ -3517,24 +3634,43 @@ export default function VaultApp() {
             const dragMoveReady = draggingSelectedAccounts && canMoveAccountIdsToGroup(draggedAccountIds, name);
             const dropReady = selectionMoveReady || dragMoveReady;
             const dropTarget = dragMoveReady && dragOverGroup === name;
+            const groupDragSource = draggingGroup !== null && groupKey(draggingGroup) === groupKey(name);
+            const reorderBefore = groupDropTarget?.name === name && groupDropTarget.edge === "before";
+            const reorderAfter = groupDropTarget?.name === name && groupDropTarget.edge === "after";
             return (
               <div
                 key={name}
-                className={`group-nav-row ${active ? "active" : ""} ${dropReady ? "drop-ready" : ""} ${dropTarget ? "drop-target" : ""}`}
-                onDragEnter={(event) => dragSelectedAccountsOverGroup(event, name)}
-                onDragOver={(event) => dragSelectedAccountsOverGroup(event, name)}
-                onDragLeave={(event) => leaveSelectedAccountDropTarget(event, name)}
-                onDrop={(event) => dropSelectedAccountsOnGroup(event, name)}
+                className={`group-nav-row ${active ? "active" : ""} ${dropReady ? "drop-ready" : ""} ${dropTarget ? "drop-target" : ""} ${groupDragSource ? "group-drag-source" : ""} ${reorderBefore ? "reorder-before" : ""} ${reorderAfter ? "reorder-after" : ""}`}
+                onDragEnter={(event) => groupDragNameRef.current
+                  ? dragGroupOver(event, name)
+                  : dragSelectedAccountsOverGroup(event, name)}
+                onDragOver={(event) => groupDragNameRef.current
+                  ? dragGroupOver(event, name)
+                  : dragSelectedAccountsOverGroup(event, name)}
+                onDragLeave={(event) => groupDragNameRef.current
+                  ? leaveGroupDropTarget(event, name)
+                  : leaveSelectedAccountDropTarget(event, name)}
+                onDrop={(event) => groupDragNameRef.current
+                  ? dropGroupOnGroup(event, name)
+                  : dropSelectedAccountsOnGroup(event, name)}
               >
                 <button
                   type="button"
                   className="group-nav-main"
                   data-group-name={name}
+                  data-group-dragging={groupDragSource || undefined}
+                  draggable={!selectionMode && groups.length > 1}
                   aria-pressed={active}
                   title={selectionMoveReady
                     ? `Move selected accounts to ${name}`
-                    : `Open ${name}. Right-click or press F2 to customize.`}
-                  onClick={() => {
+                    : `Open ${name}. Drag to reorder; right-click or press F2 to customize.`}
+                  onDragStart={(event) => beginGroupReorder(event, name)}
+                  onDragEnd={clearGroupDrag}
+                  onClick={(event) => {
+                    if (suppressGroupClickRef.current) {
+                      event.preventDefault();
+                      return;
+                    }
                     if (selectionMoveReady) {
                       moveSelectedAccounts(name, false);
                       return;

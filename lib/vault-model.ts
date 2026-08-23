@@ -6,7 +6,8 @@ export const PREVIOUS_VAULT_PAYLOAD_VERSION = 2 as const;
 export const PRE_CUSTOMIZATION_VAULT_PAYLOAD_VERSION = 3 as const;
 export const PRE_GROUP_CUSTOMIZATION_VAULT_PAYLOAD_VERSION = 4 as const;
 export const PRE_ACCOUNT_ICON_VAULT_PAYLOAD_VERSION = 5 as const;
-export const VAULT_PAYLOAD_VERSION = 6 as const;
+export const PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION = 6 as const;
+export const VAULT_PAYLOAD_VERSION = 7 as const;
 export const MAX_VAULT_ACCOUNTS = 5_000;
 export const MAX_PROFILE_AVATAR_BYTES = 512 * 1024;
 export const ACCOUNT_ICON_SIZE = 128;
@@ -83,12 +84,14 @@ export type PersistedVault = {
   settings: VaultSettings;
   accounts: VaultAccount[];
   groupCustomizations: VaultGroupCustomization[];
+  groupOrder: string[];
   createdAt: string;
   updatedAt: string;
 };
 
 const LEGACY_ROOT_FIELDS = ["format", "version", "profile", "settings", "accounts", "createdAt", "updatedAt"] as const;
-const ROOT_FIELDS = [...LEGACY_ROOT_FIELDS, "groupCustomizations"] as const;
+const GROUP_CUSTOMIZATION_ROOT_FIELDS = [...LEGACY_ROOT_FIELDS, "groupCustomizations"] as const;
+const ROOT_FIELDS = [...GROUP_CUSTOMIZATION_ROOT_FIELDS, "groupOrder"] as const;
 const LEGACY_PROFILE_FIELDS = ["name", "email"] as const;
 const PROFILE_FIELDS = [...LEGACY_PROFILE_FIELDS, "avatarDataUrl"] as const;
 const VERSION_1_SETTINGS_FIELDS = ["autoLockMinutes", "lockWhenHidden", "clearClipboard", "interfaceScale"] as const;
@@ -118,6 +121,8 @@ const GROUP_ICONS = [
 ] as const satisfies readonly VaultGroupIcon[];
 const GROUP_COLORS = ["rose", "amber", "lime", "emerald", "sky", "blue", "violet", "slate"] as const satisfies readonly VaultGroupColor[];
 export const MAX_GROUP_CUSTOMIZATIONS = 256;
+export const MAX_GROUP_ORDER_ENTRIES = MAX_VAULT_ACCOUNTS + MAX_GROUP_CUSTOMIZATIONS;
+export const MAX_VAULT_GROUP_NAME_LENGTH = 80;
 
 const CANONICAL_BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 const LOCAL_ICON_BRAND = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
@@ -259,6 +264,7 @@ function parseProfile(value: unknown, version: SupportedVaultPayloadVersion): Va
   const supportsCustomization =
     version === PRE_GROUP_CUSTOMIZATION_VAULT_PAYLOAD_VERSION ||
     version === PRE_ACCOUNT_ICON_VAULT_PAYLOAD_VERSION ||
+    version === PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION ||
     version === VAULT_PAYLOAD_VERSION;
   requireExactFields(value, supportsCustomization ? PROFILE_FIELDS : LEGACY_PROFILE_FIELDS, "profile");
   const name = requireText(value.name, "profile.name", 80);
@@ -277,6 +283,7 @@ type SupportedVaultPayloadVersion =
   | typeof PRE_CUSTOMIZATION_VAULT_PAYLOAD_VERSION
   | typeof PRE_GROUP_CUSTOMIZATION_VAULT_PAYLOAD_VERSION
   | typeof PRE_ACCOUNT_ICON_VAULT_PAYLOAD_VERSION
+  | typeof PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION
   | typeof VAULT_PAYLOAD_VERSION;
 
 function parseSettings(value: unknown, version: SupportedVaultPayloadVersion): VaultSettings {
@@ -313,10 +320,14 @@ function parseAccount(value: unknown, index: number, version: SupportedVaultPayl
   const supportsBrandCustomization =
     version === PRE_GROUP_CUSTOMIZATION_VAULT_PAYLOAD_VERSION ||
     version === PRE_ACCOUNT_ICON_VAULT_PAYLOAD_VERSION ||
+    version === PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION ||
+    version === VAULT_PAYLOAD_VERSION;
+  const supportsAccountIcons =
+    version === PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION ||
     version === VAULT_PAYLOAD_VERSION;
   requireExactFields(
     value,
-    version === VAULT_PAYLOAD_VERSION
+    supportsAccountIcons
       ? ACCOUNT_FIELDS
       : supportsBrandCustomization
         ? BRAND_ACCOUNT_FIELDS
@@ -335,7 +346,7 @@ function parseAccount(value: unknown, index: number, version: SupportedVaultPayl
   if (typeof lastUsed !== "number" || !Number.isSafeInteger(lastUsed) || lastUsed < 0) throw new Error(`${path}.lastUsed is invalid`);
   if (typeof value.favorite !== "boolean" || typeof value.archived !== "boolean") throw new Error(`${path} flags are invalid`);
   const iconBrand = supportsBrandCustomization ? parseLocalIconBrand(value.iconBrand, `${path}.iconBrand`) : null;
-  const iconDataUrl = version === VAULT_PAYLOAD_VERSION
+  const iconDataUrl = supportsAccountIcons
     ? parseAccountIconDataUrl(value.iconDataUrl, `${path}.iconDataUrl`)
     : null;
   if (iconBrand && iconDataUrl) throw new Error(`${path} cannot use both iconBrand and iconDataUrl`);
@@ -344,7 +355,7 @@ function parseAccount(value: unknown, index: number, version: SupportedVaultPayl
     service: requireText(value.service, `${path}.service`, 256).trim(),
     identity: requireText(value.identity, `${path}.identity`, 256).trim(),
     secret: parseBase32Secret(requireText(value.secret, `${path}.secret`, 1_024)),
-    group: requireText(value.group, `${path}.group`, 80).trim(),
+    group: requireText(value.group, `${path}.group`, MAX_VAULT_GROUP_NAME_LENGTH).trim(),
     color,
     letter: requireText(value.letter, `${path}.letter`, 3).toUpperCase(),
     favorite: value.favorite,
@@ -360,6 +371,10 @@ function parseAccount(value: unknown, index: number, version: SupportedVaultPayl
 
 function normalizedGroupName(value: string) {
   return value.normalize("NFKC").toLowerCase();
+}
+
+function orderedGroupKey(value: string) {
+  return value.trim().replace(/\s+/gu, " ").normalize("NFKC").toLocaleLowerCase("en");
 }
 
 function parseGroupCustomizations(value: unknown): VaultGroupCustomization[] {
@@ -391,6 +406,66 @@ function parseGroupCustomizations(value: unknown): VaultGroupCustomization[] {
   });
 }
 
+function parseGroupOrder(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > MAX_GROUP_ORDER_ENTRIES) {
+    throw new Error("groupOrder is invalid");
+  }
+
+  const normalizedNames = new Set<string>();
+  return value.map((entry, index) => {
+    const path = `groupOrder[${index}]`;
+    const name = requireText(entry, path, MAX_VAULT_GROUP_NAME_LENGTH).trim();
+    const normalizedName = orderedGroupKey(name);
+    if (normalizedNames.has(normalizedName)) throw new Error("groupOrder contains duplicate names");
+    normalizedNames.add(normalizedName);
+    return name;
+  });
+}
+
+function availableGroupNames(
+  accounts: readonly VaultAccount[],
+  groupCustomizations: readonly VaultGroupCustomization[],
+): string[] {
+  const names = new Map<string, string>();
+  for (const account of accounts) {
+    if (!account.archived) names.set(orderedGroupKey(account.group), account.group);
+  }
+  for (const customization of groupCustomizations) {
+    names.set(orderedGroupKey(customization.name), customization.name);
+  }
+  for (const account of accounts) {
+    const key = orderedGroupKey(account.group);
+    if (!names.has(key)) names.set(key, account.group);
+  }
+  return [...names.values()];
+}
+
+function reconcileGroupOrder(
+  requestedOrder: readonly string[],
+  accounts: readonly VaultAccount[],
+  groupCustomizations: readonly VaultGroupCustomization[],
+): string[] {
+  const availableNames = availableGroupNames(accounts, groupCustomizations);
+  const availableByKey = new Map(availableNames.map((name) => [orderedGroupKey(name), name]));
+  const usedKeys = new Set<string>();
+  const order: string[] = [];
+
+  for (const requestedName of requestedOrder) {
+    const key = orderedGroupKey(requestedName);
+    const availableName = availableByKey.get(key);
+    if (!availableName || usedKeys.has(key)) continue;
+    usedKeys.add(key);
+    order.push(availableName);
+  }
+  for (const availableName of availableNames) {
+    const key = orderedGroupKey(availableName);
+    if (usedKeys.has(key)) continue;
+    usedKeys.add(key);
+    order.push(availableName);
+  }
+  return order;
+}
+
 export function createEmptyVault(profile: NewVaultProfile, now = new Date()): PersistedVault {
   const timestamp = now.toISOString();
   return parsePersistedVault({
@@ -405,6 +480,7 @@ export function createEmptyVault(profile: NewVaultProfile, now = new Date()): Pe
     },
     accounts: [],
     groupCustomizations: [],
+    groupOrder: [],
     createdAt: timestamp,
     updatedAt: timestamp,
   });
@@ -420,6 +496,7 @@ export function parsePersistedVault(value: unknown): PersistedVault {
       value.version !== PRE_CUSTOMIZATION_VAULT_PAYLOAD_VERSION &&
       value.version !== PRE_GROUP_CUSTOMIZATION_VAULT_PAYLOAD_VERSION &&
       value.version !== PRE_ACCOUNT_ICON_VAULT_PAYLOAD_VERSION &&
+      value.version !== PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION &&
       value.version !== VAULT_PAYLOAD_VERSION
     )
   ) {
@@ -428,8 +505,18 @@ export function parsePersistedVault(value: unknown): PersistedVault {
   const sourceVersion = value.version;
   const supportsGroupCustomizations =
     sourceVersion === PRE_ACCOUNT_ICON_VAULT_PAYLOAD_VERSION ||
+    sourceVersion === PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION ||
     sourceVersion === VAULT_PAYLOAD_VERSION;
-  requireExactFields(value, supportsGroupCustomizations ? ROOT_FIELDS : LEGACY_ROOT_FIELDS, "vault");
+  const supportsGroupOrder = sourceVersion === VAULT_PAYLOAD_VERSION;
+  requireExactFields(
+    value,
+    supportsGroupOrder
+      ? ROOT_FIELDS
+      : supportsGroupCustomizations
+        ? GROUP_CUSTOMIZATION_ROOT_FIELDS
+        : LEGACY_ROOT_FIELDS,
+    "vault",
+  );
   if (!Array.isArray(value.accounts) || value.accounts.length > MAX_VAULT_ACCOUNTS) throw new Error("Vault account list is invalid");
   const createdAt = requireTimestamp(value.createdAt, "createdAt");
   const updatedAt = requireTimestamp(value.updatedAt, "updatedAt");
@@ -444,18 +531,25 @@ export function parsePersistedVault(value: unknown): PersistedVault {
   if (accountIconBytes > MAX_VAULT_ACCOUNT_ICON_BYTES) {
     throw new Error(`Vault account icons must total at most ${MAX_VAULT_ACCOUNT_ICON_BYTES} bytes`);
   }
+  const groupCustomizations = supportsGroupCustomizations
+    ? parseGroupCustomizations(value.groupCustomizations)
+    : [];
+  const requestedGroupOrder = supportsGroupOrder
+    ? parseGroupOrder(value.groupOrder)
+    : availableGroupNames(accounts, groupCustomizations);
   return {
     format: VAULT_PAYLOAD_FORMAT,
     version: VAULT_PAYLOAD_VERSION,
     profile: parseProfile(value.profile, sourceVersion),
     settings: parseSettings(value.settings, sourceVersion),
     accounts,
-    groupCustomizations: supportsGroupCustomizations ? parseGroupCustomizations(value.groupCustomizations) : [],
+    groupCustomizations,
+    groupOrder: reconcileGroupOrder(requestedGroupOrder, accounts, groupCustomizations),
     createdAt,
     updatedAt,
   };
 }
 
-export function withVaultUpdate(vault: PersistedVault, patch: Partial<Pick<PersistedVault, "profile" | "settings" | "accounts" | "groupCustomizations">>, now = new Date()) {
+export function withVaultUpdate(vault: PersistedVault, patch: Partial<Pick<PersistedVault, "profile" | "settings" | "accounts" | "groupCustomizations" | "groupOrder">>, now = new Date()) {
   return parsePersistedVault({ ...vault, ...patch, updatedAt: now.toISOString() });
 }

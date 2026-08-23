@@ -26,6 +26,15 @@ import {
   type VaultGroupCustomization,
   type VaultGroupIcon,
 } from "../../lib/vault-model";
+import {
+  appendGroupToOrder,
+  mergeVisibleGroupOrder,
+  moveGroupName,
+  orderedVisibleGroupNames,
+  removeGroupFromOrder,
+  renameGroupInOrder,
+  type GroupDropEdge,
+} from "../../lib/group-order";
 import BulkGroupActions, {
   AccountSelectionIndicator,
   ArchiveBulkActions,
@@ -46,6 +55,7 @@ import DemoAddAccountDialog, { type DemoNewAccount } from "./DemoAddAccountDialo
 import DemoBulkLogoPicker from "./DemoBulkLogoPicker";
 import DemoSidebarFooter from "./DemoSidebarFooter";
 import DemoSettingsCenter from "./DemoSettingsCenter";
+import DemoSignInScreen from "./DemoSignInScreen";
 import DemoTransferCenter from "./DemoTransferCenter";
 
 type DemoView = "all" | "favorites" | "archive" | "transfer" | "settings";
@@ -55,6 +65,7 @@ type GeneratedCodePair = Readonly<{
   current: string;
   next: string;
 }>;
+type GroupDropTarget = { name: string; edge: GroupDropEdge };
 
 const SAFE_SAMPLE_SECRET = "JBSWY3DPEHPK3PXP";
 const NEW_GROUP_CUSTOMIZATION: VaultGroupCustomization = { name: "", icon: "folder", color: "rose" };
@@ -66,6 +77,7 @@ const COMMON_GROUP_STYLES: Readonly<Record<string, Pick<VaultGroupCustomization,
   finance: { icon: "shield", color: "lime" },
 };
 const SELECTED_ACCOUNT_DRAG_TYPE = "application/x-coffer-demo-selected-accounts";
+const GROUP_REORDER_DRAG_TYPE = "application/x-coffer-demo-group-order";
 const DEMO_ACCOUNT_COLORS: readonly VaultAccount["color"][] = ["violet", "green", "blue", "orange", "ink"];
 const DEMO_SESSION_DURATION_MS = 60 * 60 * 1_000;
 
@@ -140,6 +152,7 @@ function accountInitials(service: string) {
 
 export default function DemoVaultApp() {
   const [vault, setVault] = useState<PersistedVault>(() => createDemoVault());
+  const [demoAuthenticated, setDemoAuthenticated] = useState(false);
   const [demoSessionKey, setDemoSessionKey] = useState(0);
   const [demoLocked, setDemoLocked] = useState(false);
   const [view, setView] = useState<DemoView>("all");
@@ -153,6 +166,8 @@ export default function DemoVaultApp() {
   const [draggingSelectedAccounts, setDraggingSelectedAccounts] = useState(false);
   const [draggedAccountIds, setDraggedAccountIds] = useState<Set<string>>(() => new Set());
   const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
+  const [draggingGroup, setDraggingGroup] = useState<string | null>(null);
+  const [groupDropTarget, setGroupDropTarget] = useState<GroupDropTarget | null>(null);
   const [customizingGroup, setCustomizingGroup] = useState<string | null>(null);
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [groupCustomizationReturnFocusTo, setGroupCustomizationReturnFocusTo] = useState<HTMLElement | null>(null);
@@ -177,6 +192,9 @@ export default function DemoVaultApp() {
   const draggedAccountIdsRef = useRef<Set<string>>(new Set());
   const suppressSelectedAccountClickRef = useRef(false);
   const selectedAccountClickResetFrameRef = useRef<number | null>(null);
+  const groupDragNameRef = useRef<string | null>(null);
+  const suppressGroupClickRef = useRef(false);
+  const groupClickResetFrameRef = useRef<number | null>(null);
   const demoSessionDeadlineRef = useRef<number | null>(null);
   const accounts = vault.accounts;
   const editingAccount = editingAccountId ? accounts.find((account) => account.id === editingAccountId) ?? null : null;
@@ -198,6 +216,21 @@ export default function DemoVaultApp() {
       selectedAccountClickResetFrameRef.current = window.requestAnimationFrame(() => {
         suppressSelectedAccountClickRef.current = false;
         selectedAccountClickResetFrameRef.current = null;
+      });
+    }
+  }, []);
+
+  const clearGroupDrag = useCallback(() => {
+    groupDragNameRef.current = null;
+    setDraggingGroup(null);
+    setGroupDropTarget(null);
+    if (suppressGroupClickRef.current) {
+      if (groupClickResetFrameRef.current !== null) {
+        window.cancelAnimationFrame(groupClickResetFrameRef.current);
+      }
+      groupClickResetFrameRef.current = window.requestAnimationFrame(() => {
+        suppressGroupClickRef.current = false;
+        groupClickResetFrameRef.current = null;
       });
     }
   }, []);
@@ -235,11 +268,18 @@ export default function DemoVaultApp() {
       window.cancelAnimationFrame(selectedAccountClickResetFrameRef.current);
       selectedAccountClickResetFrameRef.current = null;
     }
+    groupDragNameRef.current = null;
+    suppressGroupClickRef.current = false;
+    if (groupClickResetFrameRef.current !== null) {
+      window.cancelAnimationFrame(groupClickResetFrameRef.current);
+      groupClickResetFrameRef.current = null;
+    }
     for (const timer of clipboardClearTimersRef.current) window.clearTimeout(timer);
     clipboardClearTimersRef.current.clear();
-    demoSessionDeadlineRef.current = Date.now() + DEMO_SESSION_DURATION_MS;
+    demoSessionDeadlineRef.current = null;
     vaultRef.current = freshVault;
     setVault(freshVault);
+    setDemoAuthenticated(false);
     setDemoLocked(false);
     setView("all");
     setGroup("All");
@@ -251,6 +291,8 @@ export default function DemoVaultApp() {
     setSelectedAccountIds(new Set());
     setDraggingSelectedAccounts(false);
     setDragOverGroup(null);
+    setDraggingGroup(null);
+    setGroupDropTarget(null);
     setCustomizingGroup(null);
     setCreatingGroup(false);
     setGroupCustomizationReturnFocusTo(null);
@@ -263,7 +305,17 @@ export default function DemoVaultApp() {
     setCodePairs({});
     setTick(Date.now());
     setDemoSessionKey((current) => current + 1);
-    setToast("The one-hour demo session reset to its original sample data.");
+    setToast(null);
+  }, []);
+
+  const beginDemoSession = useCallback(() => {
+    demoGenerationRef.current += 1;
+    demoSessionDeadlineRef.current = Date.now() + DEMO_SESSION_DURATION_MS;
+    setCodePairs({});
+    setTick(Date.now());
+    setToast(null);
+    setDemoSessionKey((current) => current + 1);
+    setDemoAuthenticated(true);
   }, []);
 
   useEffect(() => {
@@ -271,23 +323,23 @@ export default function DemoVaultApp() {
   }, [vault]);
 
   useEffect(() => {
+    if (!demoAuthenticated) return;
     const initialFrame = window.requestAnimationFrame(() => setTick(Date.now()));
     const timer = window.setInterval(() => setTick(Date.now()), 1_000);
     return () => {
       window.cancelAnimationFrame(initialFrame);
       window.clearInterval(timer);
     };
-  }, []);
+  }, [demoAuthenticated]);
 
   useEffect(() => {
-    if (demoSessionDeadlineRef.current === null) {
-      demoSessionDeadlineRef.current = Date.now() + DEMO_SESSION_DURATION_MS;
-    }
+    if (!demoAuthenticated) return;
     const resetIfExpired = () => {
       const deadline = demoSessionDeadlineRef.current;
       if (deadline !== null && Date.now() >= deadline) resetDemoSession();
     };
     const deadline = demoSessionDeadlineRef.current;
+    if (deadline === null) return;
     const timer = window.setTimeout(
       resetIfExpired,
       Math.max(0, deadline - Date.now()),
@@ -302,12 +354,15 @@ export default function DemoVaultApp() {
       window.removeEventListener("focus", resetIfExpired);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [demoSessionKey, resetDemoSession]);
+  }, [demoAuthenticated, demoSessionKey, resetDemoSession]);
 
   useEffect(() => () => {
     demoGenerationRef.current += 1;
     if (selectedAccountClickResetFrameRef.current !== null) {
       window.cancelAnimationFrame(selectedAccountClickResetFrameRef.current);
+    }
+    if (groupClickResetFrameRef.current !== null) {
+      window.cancelAnimationFrame(groupClickResetFrameRef.current);
     }
     for (const timer of clipboardClearTimersRef.current) window.clearTimeout(timer);
     clipboardClearTimersRef.current.clear();
@@ -329,6 +384,7 @@ export default function DemoVaultApp() {
   }, [demoLocked]);
 
   useEffect(() => {
+    if (!demoAuthenticated) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
       const typing = target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT";
@@ -344,7 +400,7 @@ export default function DemoVaultApp() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [demoAuthenticated]);
 
   const setAccounts = useCallback((update: (current: VaultAccount[]) => VaultAccount[]) => {
     setVault((current) => {
@@ -358,16 +414,11 @@ export default function DemoVaultApp() {
     });
   }, []);
 
-  const groups = useMemo(() => {
-    const names = new Map<string, string>();
-    for (const account of accounts) {
-      if (!account.archived) names.set(groupKey(account.group), account.group);
-    }
-    for (const customization of vault.groupCustomizations) {
-      names.set(groupKey(customization.name), customization.name);
-    }
-    return [...names.values()].sort((left, right) => left.localeCompare(right, "en"));
-  }, [accounts, vault.groupCustomizations]);
+  const groups = useMemo(() => orderedVisibleGroupNames(
+    accounts,
+    vault.groupCustomizations,
+    vault.groupOrder,
+  ), [accounts, vault.groupCustomizations, vault.groupOrder]);
 
   const groupCustomizationMap = useMemo(() => new Map(
     vault.groupCustomizations.map((customization) => [groupKey(customization.name), customization]),
@@ -430,6 +481,7 @@ export default function DemoVaultApp() {
     .join("|");
 
   useEffect(() => {
+    if (!demoAuthenticated) return;
     let active = true;
     const generation = demoGenerationRef.current;
     const generatedAt = Date.now();
@@ -462,7 +514,7 @@ export default function DemoVaultApp() {
     return () => {
       active = false;
     };
-  }, [accountConfigurationSetKey, accounts, codeWindowKey]);
+  }, [accountConfigurationSetKey, accounts, codeWindowKey, demoAuthenticated]);
 
   const exitSelectionMode = () => {
     setSelectionMode(false);
@@ -568,6 +620,7 @@ export default function DemoVaultApp() {
           icon: nextCustomization.icon,
           color: nextCustomization.color,
         }],
+        groupOrder: appendGroupToOrder(current.groupOrder, normalizedName),
         updatedAt: new Date().toISOString(),
       }));
       closeGroupCustomization();
@@ -589,6 +642,7 @@ export default function DemoVaultApp() {
         )),
         { name: normalizedName, icon: nextCustomization.icon, color: nextCustomization.color },
       ],
+      groupOrder: renameGroupInOrder(current.groupOrder, previousName, normalizedName),
       updatedAt: new Date().toISOString(),
     }));
     if (groupKey(group) === previousKey) setGroup(normalizedName);
@@ -616,6 +670,7 @@ export default function DemoVaultApp() {
       groupCustomizations: current.groupCustomizations.filter(
         (customization) => groupKey(customization.name) !== deletedKey,
       ),
+      groupOrder: removeGroupFromOrder(current.groupOrder, deletedName),
       updatedAt: new Date().toISOString(),
     }));
     if (groupKey(group) === deletedKey) setGroup("All");
@@ -672,6 +727,9 @@ export default function DemoVaultApp() {
       groupCustomizations: createGroup
         ? [...current.groupCustomizations, defaultGroupCustomization(targetGroup)]
         : current.groupCustomizations,
+      groupOrder: createGroup
+        ? appendGroupToOrder(current.groupOrder, targetGroup)
+        : current.groupOrder,
       updatedAt: new Date().toISOString(),
     }));
     if (openTargetGroup) {
@@ -717,6 +775,7 @@ export default function DemoVaultApp() {
       clearSelectedAccountDrag();
       return;
     }
+    clearGroupDrag();
     const draggedAccountIds = selectionMode && selectedVisibleAccountIds.has(accountId)
       ? new Set(selectedVisibleAccountIds)
       : new Set([accountId]);
@@ -775,6 +834,77 @@ export default function DemoVaultApp() {
     const draggedAccountIds = new Set(draggedAccountIdsRef.current);
     clearSelectedAccountDrag();
     moveSelectedAccounts(groupName, false, draggedAccountIds, false);
+  };
+
+  const beginGroupReorder = (event: ReactDragEvent<HTMLButtonElement>, groupName: string) => {
+    if (demoLocked || selectionMode || selectedAccountDragRef.current || groups.length < 2) {
+      event.preventDefault();
+      return;
+    }
+
+    clearSelectedAccountDrag();
+    if (groupClickResetFrameRef.current !== null) {
+      window.cancelAnimationFrame(groupClickResetFrameRef.current);
+      groupClickResetFrameRef.current = null;
+    }
+    suppressGroupClickRef.current = true;
+    groupDragNameRef.current = groupName;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData(GROUP_REORDER_DRAG_TYPE, "1");
+    event.dataTransfer.setData("text/plain", "coffer-demo-group-order");
+    const row = event.currentTarget.closest(".group-nav-row");
+    if (row instanceof HTMLElement) {
+      const bounds = row.getBoundingClientRect();
+      event.dataTransfer.setDragImage(
+        row,
+        Math.max(0, Math.min(bounds.width, event.clientX - bounds.left)),
+        Math.max(0, Math.min(bounds.height, event.clientY - bounds.top)),
+      );
+    }
+    setDraggingGroup(groupName);
+    setGroupDropTarget(null);
+  };
+
+  const dragGroupOver = (event: ReactDragEvent<HTMLDivElement>, targetName: string) => {
+    const sourceName = groupDragNameRef.current;
+    if (!sourceName || groupKey(sourceName) === groupKey(targetName)) {
+      setGroupDropTarget(null);
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const edge: GroupDropEdge = event.clientY < bounds.top + (bounds.height / 2) ? "before" : "after";
+    setGroupDropTarget((current) => (
+      current?.name === targetName && current.edge === edge ? current : { name: targetName, edge }
+    ));
+  };
+
+  const leaveGroupDropTarget = (event: ReactDragEvent<HTMLDivElement>, targetName: string) => {
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    setGroupDropTarget((current) => current?.name === targetName ? null : current);
+  };
+
+  const dropGroupOnGroup = (event: ReactDragEvent<HTMLDivElement>, targetName: string) => {
+    const sourceName = groupDragNameRef.current;
+    if (!sourceName || groupKey(sourceName) === groupKey(targetName)) return;
+
+    event.preventDefault();
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const fallbackEdge: GroupDropEdge = event.clientY < bounds.top + (bounds.height / 2) ? "before" : "after";
+    const edge = groupDropTarget?.name === targetName ? groupDropTarget.edge : fallbackEdge;
+    const nextGroups = moveGroupName(groups, sourceName, targetName, edge);
+    const changed = nextGroups.some((name, index) => name !== groups[index]);
+    clearGroupDrag();
+    if (!changed) return;
+
+    setVault((current) => ({
+      ...current,
+      groupOrder: mergeVisibleGroupOrder(current.groupOrder, nextGroups),
+      updatedAt: new Date().toISOString(),
+    }));
+    setToast(`${sourceName} sample group moved.`);
   };
 
   const setSelectedAccountsFavorite = (favorite: boolean) => {
@@ -1007,6 +1137,10 @@ export default function DemoVaultApp() {
   const favoriteAccountCount = accounts.filter((account) => account.favorite && !account.archived).length;
   const archivedAccountCount = accounts.filter((account) => account.archived).length;
 
+  if (!demoAuthenticated) {
+    return <DemoSignInScreen onSignIn={beginDemoSession} />;
+  }
+
   if (demoLocked) {
     return (
       <main className={`transfer-center auth-screen demo-lock-screen theme-${vault.settings.theme}`} aria-labelledby="demo-lock-title">
@@ -1137,24 +1271,43 @@ export default function DemoVaultApp() {
             const dragMoveReady = draggingSelectedAccounts && canMoveAccountIdsToGroup(draggedAccountIds, name);
             const dropReady = selectionMoveReady || dragMoveReady;
             const dropTarget = dragMoveReady && dragOverGroup === name;
+            const groupDragSource = draggingGroup !== null && groupKey(draggingGroup) === groupKey(name);
+            const reorderBefore = groupDropTarget?.name === name && groupDropTarget.edge === "before";
+            const reorderAfter = groupDropTarget?.name === name && groupDropTarget.edge === "after";
             return (
               <div
                 key={name}
-                className={`group-nav-row ${active ? "active" : ""} ${dropReady ? "drop-ready" : ""} ${dropTarget ? "drop-target" : ""}`}
-                onDragEnter={(event) => dragSelectedAccountsOverGroup(event, name)}
-                onDragOver={(event) => dragSelectedAccountsOverGroup(event, name)}
-                onDragLeave={(event) => leaveSelectedAccountDropTarget(event, name)}
-                onDrop={(event) => dropSelectedAccountsOnGroup(event, name)}
+                className={`group-nav-row ${active ? "active" : ""} ${dropReady ? "drop-ready" : ""} ${dropTarget ? "drop-target" : ""} ${groupDragSource ? "group-drag-source" : ""} ${reorderBefore ? "reorder-before" : ""} ${reorderAfter ? "reorder-after" : ""}`}
+                onDragEnter={(event) => groupDragNameRef.current
+                  ? dragGroupOver(event, name)
+                  : dragSelectedAccountsOverGroup(event, name)}
+                onDragOver={(event) => groupDragNameRef.current
+                  ? dragGroupOver(event, name)
+                  : dragSelectedAccountsOverGroup(event, name)}
+                onDragLeave={(event) => groupDragNameRef.current
+                  ? leaveGroupDropTarget(event, name)
+                  : leaveSelectedAccountDropTarget(event, name)}
+                onDrop={(event) => groupDragNameRef.current
+                  ? dropGroupOnGroup(event, name)
+                  : dropSelectedAccountsOnGroup(event, name)}
               >
                 <button
                   type="button"
                   className="group-nav-main"
                   data-group-name={name}
+                  data-group-dragging={groupDragSource || undefined}
+                  draggable={!demoLocked && !selectionMode && groups.length > 1}
                   aria-pressed={active}
                   title={selectionMoveReady
                     ? `Move selected sample accounts to ${name}`
-                    : `Open ${name}. Right-click or press F2 to customize.`}
-                  onClick={() => {
+                    : `Open ${name}. Drag to reorder; right-click or press F2 to customize.`}
+                  onDragStart={(event) => beginGroupReorder(event, name)}
+                  onDragEnd={clearGroupDrag}
+                  onClick={(event) => {
+                    if (suppressGroupClickRef.current) {
+                      event.preventDefault();
+                      return;
+                    }
                     if (selectionMoveReady) {
                       moveSelectedAccounts(name, false);
                       return;
@@ -1217,6 +1370,7 @@ export default function DemoVaultApp() {
               className="icon-button lock-button"
               onClick={() => {
                 clearSelectedAccountDrag();
+                clearGroupDrag();
                 setAccountMenuId(null);
                 setDemoLocked(true);
               }}

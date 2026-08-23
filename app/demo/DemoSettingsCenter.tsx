@@ -163,7 +163,7 @@ export default function DemoSettingsCenter({
               <div>
                 <h2 id="demo-session-title">Demo session</h2>
                 <p>This previews the full app&apos;s vault session controls. Demo data stays in memory and resets on refresh or automatically after one hour.</p>
-                <small className="demo-feature-disabled-note" id="demo-sign-out-disabled">There is no authenticated user or encrypted server session to sign out from in this demo.</small>
+                <small className="demo-feature-disabled-note" id="demo-sign-out-disabled">The public demo sign-in is local to this tab; there is no encrypted server session to sign out from.</small>
               </div>
             </div>
             <button

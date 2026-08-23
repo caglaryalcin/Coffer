@@ -180,6 +180,7 @@ export function createDemoVault(now = new Date()): PersistedVault {
       { name: "Personal", icon: "person", color: "rose" },
       { name: "Finance", icon: "finance", color: "emerald" },
     ],
+    groupOrder: ["Finance", "Personal", "Work"],
     createdAt: new Date(Math.max(0, nowMilliseconds - 30 * DAY_MS)).toISOString(),
     updatedAt,
   });

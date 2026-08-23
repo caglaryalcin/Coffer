@@ -202,6 +202,7 @@ export default function SignInScreen({
             <span className="brand-mark" aria-hidden="true">C</span>
             <span>Coffer</span>
           </div>
+          <p className="auth-tagline">Your codes. Yours alone.</p>
         </div>
       </header>
 
