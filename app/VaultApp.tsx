@@ -18,7 +18,7 @@ import TransferCenter, { type ImportDecision } from "./TransferCenter";
 import { formatCode, generateTotp, isTotpExpiring, isValidBase32, normalizeSecret, parseOtpAuthUri, totpWindow, type TotpAlgorithm } from "../lib/totp";
 import { changeVaultPassword, claimLegacyVault, deleteVaultAccount, getVaultBootstrap, identifyVault, loginVault, logoutVault, saveVault, setupVault, VAULT_API_TIMEOUT_MS, VaultApiError } from "../lib/vault-api";
 import { createAuthProof, createEncryptedVault, decryptVaultPayload, encryptVaultPayload, rotateVaultPassword, unlockVaultHeader, VaultCryptoError, type EncryptedVaultHeader, type VaultPayloadCipher, type VaultRuntime } from "../lib/vault-crypto";
-import { createEmptyVault, MAX_GROUP_CUSTOMIZATIONS, parsePersistedVault, withVaultUpdate, type PersistedVault, type VaultAccount, type VaultGroupColor, type VaultGroupCustomization, type VaultGroupIcon, type VaultTheme } from "../lib/vault-model";
+import { createEmptyVault, MAX_GROUP_CUSTOMIZATIONS, parsePersistedVault, withVaultUpdate, type PersistedVault, type VaultAccount, type VaultGroupColor, type VaultGroupCustomization, type VaultGroupIcon, type VaultMainScreen, type VaultTheme } from "../lib/vault-model";
 import { classifyVaultOutbox, clearVaultOutbox, createVaultOutboxRecord, readVaultOutbox, writeVaultOutbox, type VaultOutboxRecord } from "../lib/vault-outbox";
 import { clearVaultResumeSession, readVaultResumeSession, saveVaultResumeSession, touchVaultResumeSession } from "../lib/vault-resume";
 import { remainingAutoLockMs } from "../lib/auto-lock";
@@ -77,6 +77,8 @@ type ReadyVaultSessionPublication = {
 };
 type GroupDropTarget = { name: string; edge: GroupDropEdge };
 type AccountDropTarget = { id: string; edge: AccountDropEdge; axis: "horizontal" | "vertical" };
+type SidebarMenuTarget = { kind: "all" } | { kind: "group"; name: string };
+type SidebarMenuPosition = { top: number; left: number };
 const EMPTY_ACCOUNTS: Account[] = [];
 const ADD_ACCOUNT_PALETTE: Account["color"][] = ["violet", "green", "blue", "orange"];
 const CATALOG_ACCOUNT_ICON_OPTIONS = serviceBrandIds.flatMap((id) => {
@@ -199,6 +201,33 @@ function groupKey(value: string) {
   return normalizeGroupName(value).normalize("NFKC").toLocaleLowerCase("en");
 }
 
+function defaultMainScreenGroup(vault: PersistedVault): "All" | Group {
+  if (vault.settings.mainScreen.kind === "all") return "All";
+  const groups = orderedVisibleGroupNames(
+    vault.accounts,
+    vault.groupCustomizations,
+    vault.groupOrder,
+  );
+  return groups.find((name) => groupKey(name) === groupKey(vault.settings.mainScreen.group)) ?? "All";
+}
+
+function sidebarMenuTargetKey(target: SidebarMenuTarget) {
+  return target.kind === "all" ? "all" : `group:${groupKey(target.name)}`;
+}
+
+function sidebarMenuPositionFromTrigger(trigger: HTMLElement): SidebarMenuPosition {
+  const anchor = trigger
+    .closest(".primary-nav-row, .group-nav-row")
+    ?.querySelector<HTMLElement>(".primary-options-button, .group-options-button") ?? trigger;
+  const rect = anchor.getBoundingClientRect();
+  const margin = 8;
+  const menuLeft = rect.left + (rect.width / 2) - 4;
+  return {
+    top: Math.round(rect.bottom + 6),
+    left: Math.round(Math.max(margin, menuLeft)),
+  };
+}
+
 function defaultGroupCustomization(name: string): VaultGroupCustomization {
   const normalizedName = normalizeGroupName(name);
   const key = groupKey(normalizedName);
@@ -272,6 +301,8 @@ export default function VaultApp() {
   const [addOpen, setAddOpen] = useState(false);
   const [addMode, setAddMode] = useState<"qr" | "link" | "manual">("qr");
   const [accountMenuId, setAccountMenuId] = useState<string | null>(null);
+  const [sidebarMenuTarget, setSidebarMenuTarget] = useState<SidebarMenuTarget | null>(null);
+  const [sidebarMenuPosition, setSidebarMenuPosition] = useState<SidebarMenuPosition | null>(null);
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
   const [accountEditorReturnFocusTo, setAccountEditorReturnFocusTo] = useState<HTMLButtonElement | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
@@ -417,6 +448,7 @@ export default function VaultApp() {
   const lockWhenHidden = vault?.settings.lockWhenHidden ?? false;
   const clearClipboard = vault?.settings.clearClipboard ?? true;
   const theme: VaultTheme = vault?.settings.theme ?? "dark";
+  const mainScreen: VaultMainScreen = vault?.settings.mainScreen ?? { kind: "all" };
   const accountIconOptions = useMemo<readonly AccountIconOption[]>(() => {
     if (!editingAccountId && !bulkLogoOpen) return ACCOUNT_ICON_OPTIONS;
     return [
@@ -625,6 +657,9 @@ export default function VaultApp() {
 
     setRuntime(publication.runtime);
     setVault(publication.vault);
+    setView("all");
+    setGroup(defaultMainScreenGroup(publication.vault));
+    setSidebarMenuTarget(null);
     setSaveConflict(publication.conflict);
     setConflictBusy(false);
     setSaveStatus(publication.saveStatus);
@@ -1450,6 +1485,7 @@ export default function VaultApp() {
     setAddOpen(false);
     setAddMode("qr");
     setAccountMenuId(null);
+    setSidebarMenuTarget(null);
     setEditingAccountId(null);
     setAccountEditorReturnFocusTo(null);
     setSelectionMode(false);
@@ -1673,6 +1709,7 @@ export default function VaultApp() {
     setFormError("");
     setAddOpen(false);
     setAccountMenuId(null);
+    setSidebarMenuTarget(null);
     setEditingAccountId(null);
     setAccountEditorReturnFocusTo(null);
     setCustomizingGroup(null);
@@ -2474,11 +2511,27 @@ export default function VaultApp() {
       } else if (event.key === "Escape") {
         setAddOpen(false);
         setAccountMenuId(null);
+        setSidebarMenuTarget(null);
+        setSidebarMenuPosition(null);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  useEffect(() => {
+    if (!sidebarMenuTarget) return;
+    const closeSidebarMenu = () => {
+      setSidebarMenuTarget(null);
+      setSidebarMenuPosition(null);
+    };
+    window.addEventListener("resize", closeSidebarMenu);
+    window.addEventListener("scroll", closeSidebarMenu, true);
+    return () => {
+      window.removeEventListener("resize", closeSidebarMenu);
+      window.removeEventListener("scroll", closeSidebarMenu, true);
+    };
+  }, [sidebarMenuTarget]);
 
   useEffect(() => {
     const restorePreference = window.setTimeout(() => setCardView(readCardViewPreference()), 0);
@@ -2583,11 +2636,13 @@ export default function VaultApp() {
     clearSelectedAccountDrag();
     setBulkLogoOpen(false);
     setBulkLogoReturnFocusTo(null);
+    setSidebarMenuTarget(null);
   };
 
   const openSettingsSection = (sectionId: string) => {
     exitSelectionMode();
     setAccountMenuId(null);
+    setSidebarMenuTarget(null);
     setView("settings");
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
@@ -2609,6 +2664,53 @@ export default function VaultApp() {
     });
   };
 
+  const isDefaultMainScreen = (target: SidebarMenuTarget) => (
+    target.kind === "all"
+      ? mainScreen.kind === "all"
+      : mainScreen.kind === "group" && groupKey(mainScreen.group) === groupKey(target.name)
+  );
+
+  const sidebarMenuIsOpen = (target: SidebarMenuTarget) => (
+    sidebarMenuTarget !== null && sidebarMenuTargetKey(sidebarMenuTarget) === sidebarMenuTargetKey(target)
+  );
+
+  const toggleSidebarMenu = (target: SidebarMenuTarget, trigger: HTMLElement) => {
+    setAccountMenuId(null);
+    const menuIsOpen = sidebarMenuTarget !== null && sidebarMenuTargetKey(sidebarMenuTarget) === sidebarMenuTargetKey(target);
+    if (menuIsOpen) {
+      setSidebarMenuTarget(null);
+      setSidebarMenuPosition(null);
+      return;
+    }
+    setSidebarMenuPosition(sidebarMenuPositionFromTrigger(trigger));
+    setSidebarMenuTarget(target);
+  };
+
+  const setDefaultMainScreen = (target: SidebarMenuTarget) => {
+    if (target.kind === "group" && !groups.some((name) => groupKey(name) === groupKey(target.name))) {
+      setSidebarMenuTarget(null);
+      setToast("This group is no longer available.");
+      return false;
+    }
+    if (isDefaultMainScreen(target)) {
+      setSidebarMenuTarget(null);
+      return true;
+    }
+
+    const nextMainScreen: VaultMainScreen = target.kind === "all"
+      ? { kind: "all" }
+      : { kind: "group", group: target.name };
+    const saved = commitVault((current) => withVaultUpdate(current, {
+      settings: { ...current.settings, mainScreen: nextMainScreen },
+    }));
+    if (!saved) return false;
+    setSidebarMenuTarget(null);
+    setToast(target.kind === "all"
+      ? "All codes is now the default main screen."
+      : `${target.name} is now the default main screen.`);
+    return true;
+  };
+
   const beginGroupCustomization = (name: string, trigger: HTMLElement) => {
     const blockReason = mutationBlockReason();
     if (blockReason === "conflict" || blockReason === "conflict-pending") {
@@ -2623,7 +2725,10 @@ export default function VaultApp() {
       setToast("This group is no longer available.");
       return;
     }
-    setGroupCustomizationReturnFocusTo(trigger);
+    const row = trigger.closest(".group-nav-row");
+    const returnTarget = row?.querySelector<HTMLElement>(".group-options-button") ?? trigger;
+    setSidebarMenuTarget(null);
+    setGroupCustomizationReturnFocusTo(returnTarget);
     setCreatingGroup(false);
     setCustomizingGroup(name);
   };
@@ -2643,6 +2748,7 @@ export default function VaultApp() {
       return;
     }
     setAccountMenuId(null);
+    setSidebarMenuTarget(null);
     setGroupCustomizationReturnFocusTo(trigger);
     setCustomizingGroup(null);
     setCreatingGroup(true);
@@ -2733,10 +2839,17 @@ export default function VaultApp() {
       const nextGroupCustomizations = current.groupCustomizations.filter((customization) => (
         groupKey(customization.name) !== previousKey && groupKey(customization.name) !== normalizedKey
       ));
+      const mainScreen = current.settings.mainScreen;
       return withVaultUpdate(current, {
         accounts: current.accounts.map((account) => (
           groupKey(account.group) === previousKey ? { ...account, group: normalized } : account
         )),
+        settings: {
+          ...current.settings,
+          mainScreen: mainScreen.kind === "group" && groupKey(mainScreen.group) === previousKey
+            ? { kind: "group", group: normalized }
+            : mainScreen,
+        },
         groupCustomizations: [...nextGroupCustomizations, {
           name: normalized,
           icon: nextCustomization.icon,
@@ -2788,6 +2901,13 @@ export default function VaultApp() {
     }
 
     const saved = commitVault((current) => withVaultUpdate(current, {
+      settings: {
+        ...current.settings,
+        mainScreen: current.settings.mainScreen.kind === "group" &&
+          groupKey(current.settings.mainScreen.group) === deletedKey
+          ? { kind: "all" }
+          : current.settings.mainScreen,
+      },
       groupCustomizations: current.groupCustomizations.filter(
         (customization) => groupKey(customization.name) !== deletedKey,
       ),
@@ -3530,6 +3650,7 @@ export default function VaultApp() {
     }
     addTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     addOriginViewRef.current = view;
+    setSidebarMenuTarget(null);
     resetForm();
     if (view === "all" && group !== "All") setNewGroup(group);
     setAddOpen(true);
@@ -3643,9 +3764,25 @@ export default function VaultApp() {
   const showAllAccounts = () => {
     exitSelectionMode();
     setAccountMenuId(null);
+    setSidebarMenuTarget(null);
     setView("all");
     setGroup("All");
   };
+
+  const showMainScreen = () => {
+    exitSelectionMode();
+    setAccountMenuId(null);
+    setSidebarMenuTarget(null);
+    setView("all");
+    setGroup(vault ? defaultMainScreenGroup(vault) : "All");
+  };
+  const allCodesTarget: SidebarMenuTarget = { kind: "all" };
+  const allCodesActive = view === "all" && group === "All";
+  const allCodesDefault = isDefaultMainScreen(allCodesTarget);
+  const allCodesMenuOpen = sidebarMenuIsOpen(allCodesTarget);
+  const sidebarMenuStyle = sidebarMenuPosition
+    ? { top: sidebarMenuPosition.top, left: sidebarMenuPosition.left }
+    : undefined;
 
   return (
     <main className={`app-shell theme-${theme} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
@@ -3663,14 +3800,46 @@ export default function VaultApp() {
         </button>
 
         <div className="brand">
-          <button type="button" className="brand-home" onClick={showAllAccounts} aria-label="Go to All codes" title="All codes">
+          <button type="button" className="brand-home" onClick={showMainScreen} aria-label="Go to default main screen" title="Default main screen">
             <span className="brand-mark" aria-hidden="true">C</span>
             <span className="brand-name">Coffer</span>
           </button>
         </div>
 
         <nav className="primary-nav" aria-label="Primary navigation">
-          <button title="All codes" className={`nav-item ${view === "all" ? "active" : ""}`} onClick={showAllAccounts}><span className="nav-icon grid-icon" aria-hidden="true" />All codes<span className="nav-count">{accounts.filter((account) => !account.archived).length}</span></button>
+          <div
+            className={`primary-nav-row ${allCodesActive ? "active" : ""} ${allCodesDefault ? "main-screen-default" : ""} ${allCodesMenuOpen ? "menu-open" : ""}`}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) setSidebarMenuTarget(null);
+            }}
+          >
+            <button title="All codes" className="nav-item primary-nav-main" onClick={showAllAccounts}><span className="nav-icon grid-icon" aria-hidden="true" />All codes<span className="nav-count">{accounts.filter((account) => !account.archived).length}</span></button>
+            <button
+              type="button"
+              className="primary-options-button more-button"
+              onClick={(event) => toggleSidebarMenu(allCodesTarget, event.currentTarget)}
+              aria-haspopup="menu"
+              aria-expanded={allCodesMenuOpen}
+              aria-label="Open All codes options"
+              title="All codes options"
+            >
+              <span aria-hidden="true">•••</span>
+            </button>
+            {allCodesMenuOpen && (
+              <div className="sidebar-options-menu primary-options-menu" role="menu" style={sidebarMenuStyle}>
+                <button
+                  type="button"
+                  role="menuitemcheckbox"
+                  className={allCodesDefault ? "sidebar-default-option" : undefined}
+                  aria-checked={allCodesDefault}
+                  disabled={allCodesDefault}
+                  onClick={() => setDefaultMainScreen(allCodesTarget)}
+                >
+                  {allCodesDefault ? "Default main screen" : "Set default main screen"}
+                </button>
+              </div>
+            )}
+          </div>
           <button title="Favorites" className={`nav-item ${view === "favorites" ? "active" : ""}`} onClick={() => { setView("favorites"); setGroup("All"); }}><span className="nav-icon star-icon" aria-hidden="true">✦</span>Favorites<span className="nav-count">{accounts.filter((account) => account.favorite && !account.archived).length}</span></button>
           <button title="Archive" className={`nav-item ${view === "archive" ? "active" : ""}`} onClick={() => { exitSelectionMode(); setView("archive"); setGroup("All"); }}><span className="nav-icon trash-icon" aria-hidden="true" />Archive<span className="nav-count">{accounts.filter((account) => account.archived).length}</span></button>
           <button title="Data and backup" className={`nav-item ${view === "transfer" ? "active" : ""}`} onClick={() => { exitSelectionMode(); setView("transfer"); }}><span className="nav-icon transfer-icon" aria-hidden="true" />Data &amp; backup</button>
@@ -3696,6 +3865,9 @@ export default function VaultApp() {
           {groups.map((name) => {
             const customization = customizationForGroup(name);
             const active = view === "all" && groupKey(group) === groupKey(name);
+            const groupTarget: SidebarMenuTarget = { kind: "group", name };
+            const groupDefault = isDefaultMainScreen(groupTarget);
+            const groupMenuOpen = sidebarMenuIsOpen(groupTarget);
             const selectionMoveReady = selectionMode && view === "all" && selectedVisibleAccountIds.size > 0 && canMoveSelectedAccountsToGroup(name);
             const dragMoveReady = draggingSelectedAccounts && canMoveAccountIdsToGroup(draggedAccountIds, name);
             const dropReady = selectionMoveReady || dragMoveReady;
@@ -3706,7 +3878,10 @@ export default function VaultApp() {
             return (
               <div
                 key={name}
-                className={`group-nav-row ${active ? "active" : ""} ${dropReady ? "drop-ready" : ""} ${dropTarget ? "drop-target" : ""} ${groupDragSource ? "group-drag-source" : ""} ${reorderBefore ? "reorder-before" : ""} ${reorderAfter ? "reorder-after" : ""}`}
+                className={`group-nav-row ${active ? "active" : ""} ${groupDefault ? "main-screen-default" : ""} ${groupMenuOpen ? "menu-open" : ""} ${dropReady ? "drop-ready" : ""} ${dropTarget ? "drop-target" : ""} ${groupDragSource ? "group-drag-source" : ""} ${reorderBefore ? "reorder-before" : ""} ${reorderAfter ? "reorder-after" : ""}`}
+                onBlur={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget)) setSidebarMenuTarget(null);
+                }}
                 onDragEnter={(event) => groupDragNameRef.current
                   ? dragGroupOver(event, name)
                   : dragSelectedAccountsOverGroup(event, name)}
@@ -3729,7 +3904,7 @@ export default function VaultApp() {
                   aria-pressed={active}
                   title={selectionMoveReady
                     ? `Move selected accounts to ${name}`
-                    : `Open ${name}. Drag to reorder; right-click or press F2 to customize.`}
+                    : `Open ${name}. Drag to reorder; right-click for options or press F2 to edit.`}
                   onDragStart={(event) => beginGroupReorder(event, name)}
                   onDragEnd={clearGroupDrag}
                   onClick={(event) => {
@@ -3741,17 +3916,21 @@ export default function VaultApp() {
                       moveSelectedAccounts(name, false);
                       return;
                     }
+                    setSidebarMenuTarget(null);
                     setGroup(name);
                     setView("all");
                   }}
                   onContextMenu={(event) => {
                     event.preventDefault();
-                    beginGroupCustomization(name, event.currentTarget);
+                    toggleSidebarMenu(groupTarget, event.currentTarget);
                   }}
                   onKeyDown={(event) => {
-                    if (event.key === "F2" || (event.shiftKey && event.key === "F10")) {
+                    if (event.key === "F2") {
                       event.preventDefault();
                       beginGroupCustomization(name, event.currentTarget);
+                    } else if (event.shiftKey && event.key === "F10") {
+                      event.preventDefault();
+                      toggleSidebarMenu(groupTarget, event.currentTarget);
                     }
                   }}
                 >
@@ -3767,13 +3946,35 @@ export default function VaultApp() {
                 <button
                   type="button"
                   className="group-options-button more-button"
-                  onClick={(event) => beginGroupCustomization(name, event.currentTarget)}
-                  aria-haspopup="dialog"
-                  aria-label={`Customize ${name} group`}
-                  title={`Customize ${name} group`}
+                  onClick={(event) => toggleSidebarMenu(groupTarget, event.currentTarget)}
+                  aria-haspopup="menu"
+                  aria-expanded={groupMenuOpen}
+                  aria-label={`Open ${name} group options`}
+                  title={`${name} group options`}
                 >
                   <span aria-hidden="true">•••</span>
                 </button>
+                {groupMenuOpen && (
+                  <div className="sidebar-options-menu group-options-menu" role="menu" style={sidebarMenuStyle}>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={(event) => beginGroupCustomization(name, event.currentTarget)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitemcheckbox"
+                      className={groupDefault ? "sidebar-default-option" : undefined}
+                      aria-checked={groupDefault}
+                      disabled={groupDefault}
+                      onClick={() => setDefaultMainScreen(groupTarget)}
+                    >
+                      {groupDefault ? "Default main screen" : "Set default main screen"}
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -3870,7 +4071,10 @@ export default function VaultApp() {
                     setCardView(nextView);
                     writeCardViewPreference(nextView);
                   }}
-                  onOpen={() => setAccountMenuId(null)}
+                  onOpen={() => {
+                    setAccountMenuId(null);
+                    setSidebarMenuTarget(null);
+                  }}
                 />
                 <button type="button" className="add-button" onClick={openAdd}><span>+</span> Add account</button>
                 {selectableVisibleIds.length > 0 && bulkGroupActions}
@@ -3983,7 +4187,7 @@ export default function VaultApp() {
                             setAccountMenuId(null);
                           }
                         }}>
-                          <button className="more-button" aria-haspopup="menu" aria-expanded={accountMenuId === account.id} onClick={() => setAccountMenuId((current) => current === account.id ? null : account.id)} aria-label={`Open ${account.service} options`}>•••</button>
+                          <button className="more-button" aria-haspopup="menu" aria-expanded={accountMenuId === account.id} onClick={() => { setSidebarMenuTarget(null); setAccountMenuId((current) => current === account.id ? null : account.id); }} aria-label={`Open ${account.service} options`}>•••</button>
                           {accountMenuId === account.id && (
                             <div className="account-menu" role="menu">
                               <button role="menuitem" onClick={(event) => openAccountEditor(account.id, event.currentTarget)}>Edit account</button>

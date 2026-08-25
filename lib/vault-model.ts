@@ -7,7 +7,8 @@ export const PRE_CUSTOMIZATION_VAULT_PAYLOAD_VERSION = 3 as const;
 export const PRE_GROUP_CUSTOMIZATION_VAULT_PAYLOAD_VERSION = 4 as const;
 export const PRE_ACCOUNT_ICON_VAULT_PAYLOAD_VERSION = 5 as const;
 export const PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION = 6 as const;
-export const VAULT_PAYLOAD_VERSION = 7 as const;
+export const PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION = 7 as const;
+export const VAULT_PAYLOAD_VERSION = 8 as const;
 export const MAX_VAULT_ACCOUNTS = 5_000;
 export const MAX_PROFILE_AVATAR_BYTES = 512 * 1024;
 export const ACCOUNT_ICON_SIZE = 128;
@@ -40,6 +41,10 @@ export type VaultGroupCustomization = {
   icon: VaultGroupIcon;
   color: VaultGroupColor;
 };
+
+export type VaultMainScreen =
+  | { kind: "all" }
+  | { kind: "group"; group: string };
 
 export type VaultAccount = {
   id: string;
@@ -75,6 +80,7 @@ export type VaultSettings = {
   lockWhenHidden: boolean;
   clearClipboard: boolean;
   theme: VaultTheme;
+  mainScreen: VaultMainScreen;
 };
 
 export type PersistedVault = {
@@ -96,7 +102,8 @@ const LEGACY_PROFILE_FIELDS = ["name", "email"] as const;
 const PROFILE_FIELDS = [...LEGACY_PROFILE_FIELDS, "avatarDataUrl"] as const;
 const VERSION_1_SETTINGS_FIELDS = ["autoLockMinutes", "lockWhenHidden", "clearClipboard", "interfaceScale"] as const;
 const VERSION_2_SETTINGS_FIELDS = [...VERSION_1_SETTINGS_FIELDS, "theme"] as const;
-const SETTINGS_FIELDS = ["autoLockMinutes", "lockWhenHidden", "clearClipboard", "theme"] as const;
+const PRE_MAIN_SCREEN_SETTINGS_FIELDS = ["autoLockMinutes", "lockWhenHidden", "clearClipboard", "theme"] as const;
+const SETTINGS_FIELDS = [...PRE_MAIN_SCREEN_SETTINGS_FIELDS, "mainScreen"] as const;
 const LEGACY_ACCOUNT_FIELDS = ["id", "service", "identity", "secret", "group", "color", "letter", "favorite", "lastUsed", "algorithm", "digits", "period", "archived"] as const;
 const BRAND_ACCOUNT_FIELDS = [...LEGACY_ACCOUNT_FIELDS, "iconBrand"] as const;
 const ACCOUNT_FIELDS = [...BRAND_ACCOUNT_FIELDS, "iconDataUrl"] as const;
@@ -265,6 +272,7 @@ function parseProfile(value: unknown, version: SupportedVaultPayloadVersion): Va
     version === PRE_GROUP_CUSTOMIZATION_VAULT_PAYLOAD_VERSION ||
     version === PRE_ACCOUNT_ICON_VAULT_PAYLOAD_VERSION ||
     version === PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION ||
+    version === PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION ||
     version === VAULT_PAYLOAD_VERSION;
   requireExactFields(value, supportsCustomization ? PROFILE_FIELDS : LEGACY_PROFILE_FIELDS, "profile");
   const name = requireText(value.name, "profile.name", 80);
@@ -284,7 +292,23 @@ type SupportedVaultPayloadVersion =
   | typeof PRE_GROUP_CUSTOMIZATION_VAULT_PAYLOAD_VERSION
   | typeof PRE_ACCOUNT_ICON_VAULT_PAYLOAD_VERSION
   | typeof PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION
+  | typeof PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION
   | typeof VAULT_PAYLOAD_VERSION;
+
+function parseMainScreen(value: unknown): VaultMainScreen {
+  if (!isRecord(value)) throw new Error("settings.mainScreen is invalid");
+  if (value.kind === "all") {
+    requireExactFields(value, ["kind"], "settings.mainScreen");
+    return { kind: "all" };
+  }
+  if (value.kind === "group") {
+    requireExactFields(value, ["kind", "group"], "settings.mainScreen");
+    const group = requireText(value.group, "settings.mainScreen.group", 48).trim().replace(/\s+/gu, " ");
+    if (orderedGroupKey(group) === "all") throw new Error("settings.mainScreen.group is reserved");
+    return { kind: "group", group };
+  }
+  throw new Error("settings.mainScreen is invalid");
+}
 
 function parseSettings(value: unknown, version: SupportedVaultPayloadVersion): VaultSettings {
   if (!isRecord(value)) throw new Error("settings is invalid");
@@ -292,7 +316,9 @@ function parseSettings(value: unknown, version: SupportedVaultPayloadVersion): V
     ? VERSION_1_SETTINGS_FIELDS
     : version === PREVIOUS_VAULT_PAYLOAD_VERSION
       ? VERSION_2_SETTINGS_FIELDS
-      : SETTINGS_FIELDS;
+      : version === VAULT_PAYLOAD_VERSION
+        ? SETTINGS_FIELDS
+        : PRE_MAIN_SCREEN_SETTINGS_FIELDS;
   requireExactFields(value, fields, "settings");
   const autoLockMinutes = value.autoLockMinutes;
   if (![0, 1, 5, 15, 30].includes(autoLockMinutes as number)) throw new Error("settings.autoLockMinutes is invalid");
@@ -304,6 +330,9 @@ function parseSettings(value: unknown, version: SupportedVaultPayloadVersion): V
   ) throw new Error("settings.interfaceScale is invalid");
   if (version !== LEGACY_VAULT_PAYLOAD_VERSION && value.theme !== "dark" && value.theme !== "light") throw new Error("settings.theme is invalid");
   const theme: VaultTheme = version === LEGACY_VAULT_PAYLOAD_VERSION ? "dark" : value.theme as VaultTheme;
+  const mainScreen = version === VAULT_PAYLOAD_VERSION
+    ? parseMainScreen(value.mainScreen)
+    : { kind: "all" } as const;
   return {
     autoLockMinutes: autoLockMinutes as number,
     // Version 1 enabled this by default, which made tab switches look like
@@ -311,6 +340,7 @@ function parseSettings(value: unknown, version: SupportedVaultPayloadVersion): V
     lockWhenHidden: version === LEGACY_VAULT_PAYLOAD_VERSION ? false : value.lockWhenHidden,
     clearClipboard: value.clearClipboard,
     theme,
+    mainScreen,
   };
 }
 
@@ -321,9 +351,11 @@ function parseAccount(value: unknown, index: number, version: SupportedVaultPayl
     version === PRE_GROUP_CUSTOMIZATION_VAULT_PAYLOAD_VERSION ||
     version === PRE_ACCOUNT_ICON_VAULT_PAYLOAD_VERSION ||
     version === PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION ||
+    version === PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION ||
     version === VAULT_PAYLOAD_VERSION;
   const supportsAccountIcons =
     version === PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION ||
+    version === PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION ||
     version === VAULT_PAYLOAD_VERSION;
   requireExactFields(
     value,
@@ -440,6 +472,32 @@ function availableGroupNames(
   return [...names.values()];
 }
 
+function visibleMainScreenGroupNames(
+  accounts: readonly VaultAccount[],
+  groupCustomizations: readonly VaultGroupCustomization[],
+): string[] {
+  const names = new Map<string, string>();
+  for (const account of accounts) {
+    if (!account.archived) names.set(orderedGroupKey(account.group), account.group);
+  }
+  for (const customization of groupCustomizations) {
+    names.set(orderedGroupKey(customization.name), customization.name);
+  }
+  return [...names.values()];
+}
+
+function reconcileMainScreen(
+  mainScreen: VaultMainScreen,
+  accounts: readonly VaultAccount[],
+  groupCustomizations: readonly VaultGroupCustomization[],
+): VaultMainScreen {
+  if (mainScreen.kind === "all") return mainScreen;
+  const visibleGroups = visibleMainScreenGroupNames(accounts, groupCustomizations);
+  const visibleByKey = new Map(visibleGroups.map((name) => [orderedGroupKey(name), name]));
+  const group = visibleByKey.get(orderedGroupKey(mainScreen.group));
+  return group ? { kind: "group", group } : { kind: "all" };
+}
+
 function reconcileGroupOrder(
   requestedOrder: readonly string[],
   accounts: readonly VaultAccount[],
@@ -477,6 +535,7 @@ export function createEmptyVault(profile: NewVaultProfile, now = new Date()): Pe
       lockWhenHidden: false,
       clearClipboard: true,
       theme: "dark",
+      mainScreen: { kind: "all" },
     },
     accounts: [],
     groupCustomizations: [],
@@ -497,6 +556,7 @@ export function parsePersistedVault(value: unknown): PersistedVault {
       value.version !== PRE_GROUP_CUSTOMIZATION_VAULT_PAYLOAD_VERSION &&
       value.version !== PRE_ACCOUNT_ICON_VAULT_PAYLOAD_VERSION &&
       value.version !== PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION &&
+      value.version !== PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION &&
       value.version !== VAULT_PAYLOAD_VERSION
     )
   ) {
@@ -506,8 +566,11 @@ export function parsePersistedVault(value: unknown): PersistedVault {
   const supportsGroupCustomizations =
     sourceVersion === PRE_ACCOUNT_ICON_VAULT_PAYLOAD_VERSION ||
     sourceVersion === PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION ||
+    sourceVersion === PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION ||
     sourceVersion === VAULT_PAYLOAD_VERSION;
-  const supportsGroupOrder = sourceVersion === VAULT_PAYLOAD_VERSION;
+  const supportsGroupOrder =
+    sourceVersion === PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION ||
+    sourceVersion === VAULT_PAYLOAD_VERSION;
   requireExactFields(
     value,
     supportsGroupOrder
@@ -537,11 +600,15 @@ export function parsePersistedVault(value: unknown): PersistedVault {
   const requestedGroupOrder = supportsGroupOrder
     ? parseGroupOrder(value.groupOrder)
     : availableGroupNames(accounts, groupCustomizations);
+  const settings = parseSettings(value.settings, sourceVersion);
   return {
     format: VAULT_PAYLOAD_FORMAT,
     version: VAULT_PAYLOAD_VERSION,
     profile: parseProfile(value.profile, sourceVersion),
-    settings: parseSettings(value.settings, sourceVersion),
+    settings: {
+      ...settings,
+      mainScreen: reconcileMainScreen(settings.mainScreen, accounts, groupCustomizations),
+    },
     accounts,
     groupCustomizations,
     groupOrder: reconcileGroupOrder(requestedGroupOrder, accounts, groupCustomizations),
