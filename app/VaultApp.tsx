@@ -3813,7 +3813,7 @@ export default function VaultApp() {
               if (!event.currentTarget.contains(event.relatedTarget)) setSidebarMenuTarget(null);
             }}
           >
-            <button title="All codes" className="nav-item primary-nav-main" onClick={showAllAccounts}><span className="nav-icon grid-icon" aria-hidden="true" />All codes<span className="nav-count">{accounts.filter((account) => !account.archived).length}</span></button>
+            <button title="All codes" className="primary-nav-main" onClick={showAllAccounts}><span className="nav-icon grid-icon" aria-hidden="true" />All codes<span className="nav-count">{accounts.filter((account) => !account.archived).length}</span></button>
             <button
               type="button"
               className="primary-options-button more-button"

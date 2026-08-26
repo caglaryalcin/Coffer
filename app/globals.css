@@ -48,20 +48,19 @@ button { color: inherit; }
 .sidebar-collapsed .brand-name { display: none; }
 .primary-nav, .group-nav { display: grid; gap: 6px; }
 .group-nav { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
-.primary-nav-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: center; min-height: 44px; border-radius: 12px; color: #aeb1a9; }
+.primary-nav-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: center; min-height: 44px; border-radius: 10px; color: #aeb1a9; }
 .primary-nav-row:hover, .primary-nav-row.active, .primary-nav-row.menu-open { background: var(--accent-soft, #30332d); color: white; }
 .primary-nav-row.active .nav-icon { color: var(--lime); }
-.primary-nav-row .nav-item { min-width: 0; background: transparent; color: inherit; }
-.primary-nav-row .primary-nav-main:hover,
-.primary-nav-row .primary-nav-main:focus-visible { background: transparent; }
-.primary-nav-main { border-radius: 12px 0 0 12px; }
-.primary-options-button { border-radius: 0 12px 12px 0; }
+.primary-nav-main { width: 100%; min-width: 0; min-height: 44px; display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 0 5px 0 10px; border: 0; border-radius: 10px; background: transparent; color: inherit; font-size: 15px; font-weight: 620; text-align: left; cursor: pointer; }
+.primary-nav-main:is(:hover, :focus-visible, :active) { background: transparent; color: inherit; }
+.primary-options-button { border-radius: 10px; }
 .nav-item { width: 100%; min-height: 44px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border: 0; border-radius: 12px; background: transparent; color: #aeb1a9; font-size: 14px; font-weight: 590; text-align: left; cursor: pointer; }
 .nav-item:hover { background: var(--accent-soft); color: white; }
 .nav-item.active { background: var(--accent-soft, #30332d); color: white; }
 .nav-item.active .nav-icon { color: var(--lime); }
 .nav-count { margin-left: auto; color: #82877d; font-size: 12px; }
-.sidebar-collapsed .nav-item { width: 48px; justify-content: center; gap: 0; margin-inline: auto; padding: 0; font-size: 0; }
+.sidebar-collapsed .nav-item,
+.sidebar-collapsed .primary-nav-main { width: 48px; justify-content: center; gap: 0; margin-inline: auto; padding: 0; font-size: 0; }
 .sidebar-collapsed .primary-nav-row { width: 48px; grid-template-columns: 48px; justify-self: center; }
 .sidebar-collapsed .primary-nav-main { border-radius: 12px; }
 .sidebar-collapsed .primary-options-button,
@@ -123,6 +122,11 @@ button { color: inherit; }
 .group-nav-row.main-screen-default .more-button:is(:hover, :focus-visible, [aria-expanded="true"]) {
   background: rgba(77, 214, 108, .14);
   color: #5be879;
+}
+.primary-nav-row:not(.main-screen-default):is(:hover, .active, .menu-open) .primary-options-button:is(:hover, :focus-visible, [aria-expanded="true"]),
+.group-nav-row:not(.main-screen-default):is(:hover, .active, .menu-open) .group-options-button:is(:hover, :focus-visible, [aria-expanded="true"]) {
+  background: rgba(202, 115, 115, .22);
+  color: #f4b5b5;
 }
 .group-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .group-count { color: #676b63; }
@@ -1073,6 +1077,10 @@ h1 { margin: 0; font-size: clamp(34px, 4vw, 53px); line-height: .98; letter-spac
 .theme-light .sidebar-options-menu button:not(:disabled):hover,
 .theme-light .sidebar-options-menu button:not(:disabled):focus-visible { background: var(--accent-soft); color: var(--theme-accent-text); }
 .theme-light .sidebar-options-menu .sidebar-default-option { color: #08a928; }
+.theme-light .primary-nav-row .primary-nav-main:is(:hover, :focus-visible, :active) {
+  background: transparent;
+  color: inherit;
+}
 .theme-light .favorite.selected { color: var(--theme-accent); }
 .theme-light .countdown { background: conic-gradient(var(--theme-accent) var(--progress), #ecece5 0); }
 
@@ -1231,6 +1239,10 @@ body.theme-dark { background: #181a1b; color-scheme: dark; }
 .theme-dark .group-nav-row:hover,
 .theme-dark .group-nav-row.active,
 .theme-dark .group-nav-row.menu-open { background: var(--accent-soft); color: #fff; }
+.theme-dark .primary-nav-row .primary-nav-main:is(:hover, :focus-visible, :active) {
+  background: transparent;
+  color: inherit;
+}
 .theme-dark .group-nav-row { color: var(--muted); }
 .theme-dark .primary-nav-row.main-screen-default,
 .theme-dark .group-nav-row.main-screen-default {
@@ -1340,6 +1352,15 @@ body.theme-dark { background: #181a1b; color-scheme: dark; }
 .theme-dark .favorite:hover { background: var(--accent-soft); color: var(--theme-accent); }
 .theme-dark .more-button:hover,
 .theme-dark .more-button[aria-expanded="true"] { background: var(--accent-soft); color: var(--theme-accent); }
+.group-nav-row .group-options-button.more-button:is(:hover, :focus-visible, [aria-expanded="true"]) {
+  background: rgba(202, 115, 115, .24);
+  color: #f4b5b5;
+}
+.primary-nav-row:not(.main-screen-default) .primary-nav-main,
+.primary-nav-row:not(.main-screen-default) .primary-nav-main:is(:hover, :focus-visible, :active),
+.primary-nav-row:not(.main-screen-default) .primary-options-button:not(:hover):not(:focus-visible):not([aria-expanded="true"]) {
+  background: transparent;
+}
 .theme-dark .countdown { background: conic-gradient(var(--theme-accent) var(--progress), var(--line) 0); }
 .theme-dark .countdown.urgent { background: conic-gradient(var(--expiry-code) var(--progress), var(--line) 0); }
 .theme-dark .countdown::after { background: var(--surface); }
@@ -1792,7 +1813,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .sidebar-toggle { display: none; }
   .brand, .sidebar-label, .sidebar-groups-heading, .group-nav, .profile-row, .sidebar-footer { display: none; }
   .primary-nav { width: 100%; display: flex; justify-content: space-around; }
-  .nav-item, .nav-item.active, .nav-item:not(.active) { display: flex; width: 48px; height: 48px; font-size: 0; justify-content: center; }
+  .nav-item, .nav-item.active, .nav-item:not(.active), .primary-nav-main { display: flex; width: 48px; height: 48px; font-size: 0; justify-content: center; }
   .workspace { grid-column: auto; }
   .topbar { height: 66px; gap: 8px; padding: 0 12px; }
   .top-actions { flex: 0 0 auto; gap: 6px; }
