@@ -8,11 +8,16 @@ export type SignInScreenProps = {
   status: "loading" | "access" | "locking";
   busy: boolean;
   error: string | null;
-  onSignIn: (details: { email: string; password: string }) => Promise<void> | void;
+  onSignIn: (details: {
+    email: string;
+    password: string;
+    rememberLogin: boolean;
+  }) => Promise<void> | void;
   onCreateAccount: (details: {
     name: string;
     email: string;
     password: string;
+    rememberLogin: boolean;
   }) => Promise<void> | void;
 };
 
@@ -84,6 +89,7 @@ export default function SignInScreen({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
+  const [rememberLogin, setRememberLogin] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<AccessFieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
@@ -111,6 +117,8 @@ export default function SignInScreen({
     confirmation: `${id}-confirmation`,
     confirmationHint: `${id}-confirmation-hint`,
     confirmationError: `${id}-confirmation-error`,
+    rememberLogin: `${id}-remember-login`,
+    rememberLoginHint: `${id}-remember-login-hint`,
   };
 
   const clearFieldError = (field: AccessField) => {
@@ -151,9 +159,14 @@ export default function SignInScreen({
 
     try {
       if (isCreateAccount) {
-        await onCreateAccount({ name: name.trim(), email: email.trim(), password });
+        await onCreateAccount({
+          name: name.trim(),
+          email: email.trim(),
+          password,
+          rememberLogin,
+        });
       } else {
-        await onSignIn({ email: email.trim(), password });
+        await onSignIn({ email: email.trim(), password, rememberLogin });
       }
       setPassword("");
       setConfirmation("");
@@ -348,6 +361,22 @@ export default function SignInScreen({
                 )}
               </label>
             )}
+
+            <div className="auth-remember-login">
+              <input
+                id={ids.rememberLogin}
+                name="remember-login"
+                type="checkbox"
+                checked={rememberLogin}
+                disabled={isBusy}
+                aria-describedby={ids.rememberLoginHint}
+                onChange={(event) => setRememberLogin(event.target.checked)}
+              />
+              <div>
+                <label htmlFor={ids.rememberLogin}>Remember this browser</label>
+                <small id={ids.rememberLoginHint}>Do not ask for login information on this browser for 30 days.</small>
+              </div>
+            </div>
 
             <div className="auth-recovery-warning" role="note">
               <span className="mini-lock" aria-hidden="true" />

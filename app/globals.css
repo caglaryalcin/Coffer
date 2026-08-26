@@ -842,6 +842,15 @@ h1 { margin: 0; font-size: clamp(34px, 4vw, 53px); line-height: .98; letter-spac
 .auth-form-heading > div { min-width: 0; flex: 1 1 auto; }
 .auth-submit-footer { justify-content: space-between; }
 .auth-submit-footer .local-only-note { flex: 0 1 auto; }
+.auth-remember-login { display: flex; align-items: flex-start; gap: 11px; padding: 13px 14px; border: 1px solid #dfe4d4; border-radius: 12px; background: rgba(237, 242, 223, 0.72); color: #4f554b; }
+.auth-remember-login input { width: 18px; height: 18px; flex: 0 0 auto; margin: 2px 0 0; accent-color: #667b35; }
+.auth-remember-login > div,
+.auth-remember-login label,
+.auth-remember-login small { display: block; min-width: 0; }
+.auth-remember-login label { font-size: var(--type-ui); font-weight: 700; cursor: pointer; }
+.auth-remember-login small { margin-top: 3px; color: #666b62; font-size: var(--type-caption); line-height: 1.45; }
+.auth-remember-login:has(input:disabled) { opacity: 0.58; }
+.auth-remember-login:has(input:disabled) label { cursor: not-allowed; }
 
 .transfer-center.auth-loading-screen { align-items: center; padding-block: 0; }
 .auth-loading { min-height: 360px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 42px; text-align: center; }
@@ -1641,6 +1650,9 @@ body.theme-dark { background: #181a1b; color-scheme: dark; }
 .theme-dark .auth-mode-tabs button { color: var(--muted); }
 .theme-dark .auth-mode-tabs button[aria-pressed="true"] { background: var(--surface-hover); color: #d8d3d0; box-shadow: 0 3px 14px rgba(0,0,0,.24); }
 .theme-dark .auth-loading-indicator { border-color: var(--line); border-top-color: var(--theme-accent); }
+.theme-dark .auth-remember-login { border-color: var(--line); background: var(--surface-hover); color: #d8d3d0; }
+.theme-dark .auth-remember-login input { accent-color: var(--theme-accent); }
+.theme-dark .auth-remember-login small { color: var(--muted); }
 .theme-dark .auth-recovery-warning { border-color: #66552b; background: #312a18; color: #f0dca7; }
 .theme-dark .auth-recovery-warning p { color: #d1bd8b; }
 .theme-dark .vault-conflict-panel { border-color: #78493e; background: #321e19; }

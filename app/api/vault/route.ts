@@ -2,6 +2,7 @@ import {
   decodeFixedAuthProof,
   isEncryptedVaultPayload,
   isVaultCryptoHeader,
+  MAX_SESSION_TTL_MS,
   VaultStore,
   VaultStoreError,
 } from "@/lib/server/vault-store";
@@ -13,6 +14,7 @@ export const dynamic = "force-dynamic";
 const MAX_REQUEST_BYTES = 24 * 1024 * 1024;
 const SESSION_COOKIE = "coffer_session";
 const SESSION_MAX_AGE_SECONDS = 12 * 60 * 60;
+const REMEMBERED_SESSION_MAX_AGE_SECONDS = MAX_SESSION_TTL_MS / 1_000;
 const store = new VaultStore();
 
 type JsonObject = Record<string, unknown>;
@@ -79,10 +81,15 @@ async function identify(request: Request, body: JsonObject): Promise<Response> {
 
 async function setup(request: Request, body: JsonObject): Promise<Response> {
   requireSameOrigin(request);
-  if (!hasExactKeys(body, ["action", "identifier", "authProof", "header", "payload"])) {
+  if (!hasExactKeysWithOptional(
+    body,
+    ["action", "identifier", "authProof", "header", "payload"],
+    ["rememberLogin"],
+  )) {
     throw invalidSchema();
   }
   const authProof = decodeFixedAuthProof(body.authProof);
+  const rememberLogin = readRememberLogin(body);
   if (
     body.action !== "setup" ||
     typeof body.identifier !== "string" ||
@@ -98,22 +105,39 @@ async function setup(request: Request, body: JsonObject): Promise<Response> {
     authProof,
     header: body.header,
     payload: body.payload,
-  }, clientRateKey(request));
+  }, clientRateKey(request), {
+    sessionTtlMs: sessionTtlMs(rememberLogin),
+  });
   return json(
     { configured: true, revision: result.revision },
     {
       status: 201,
-      headers: { "Set-Cookie": sessionCookie(request, result.sessionToken) },
+      headers: {
+        "Set-Cookie": sessionCookie(
+          request,
+          result.sessionToken,
+          sessionMaxAgeSeconds(rememberLogin),
+        ),
+      },
     },
   );
 }
 
 async function login(request: Request, body: JsonObject): Promise<Response> {
   requireSameOrigin(request);
-  const hasIdentifier = hasExactKeys(body, ["action", "identifier", "authProof"]);
-  const hasSessionOnly = hasExactKeys(body, ["action", "authProof"]);
+  const hasIdentifier = hasExactKeysWithOptional(
+    body,
+    ["action", "identifier", "authProof"],
+    ["rememberLogin"],
+  );
+  const hasSessionOnly = hasExactKeysWithOptional(
+    body,
+    ["action", "authProof"],
+    ["rememberLogin"],
+  );
   if (!hasIdentifier && !hasSessionOnly) throw invalidSchema();
   const authProof = decodeFixedAuthProof(body.authProof);
+  const rememberLogin = readRememberLogin(body);
   if (
     body.action !== "login" ||
     !authProof ||
@@ -121,15 +145,26 @@ async function login(request: Request, body: JsonObject): Promise<Response> {
   ) throw invalidSchema();
 
   const result = hasIdentifier
-    ? await store.login(body.identifier as string, authProof, clientRateKey(request))
+    ? await store.login(body.identifier as string, authProof, clientRateKey(request), {
+        sessionTtlMs: sessionTtlMs(rememberLogin),
+      })
     : await store.loginWithSession(
         sessionToken(request),
         authProof,
         clientRateKey(request),
+        { sessionTtlMs: sessionTtlMs(rememberLogin) },
       );
   return json(
     { revision: result.revision, payload: result.payload, legacy: result.legacy },
-    { headers: { "Set-Cookie": sessionCookie(request, result.sessionToken) } },
+    {
+      headers: {
+        "Set-Cookie": sessionCookie(
+          request,
+          result.sessionToken,
+          sessionMaxAgeSeconds(rememberLogin),
+        ),
+      },
+    },
   );
 }
 
@@ -329,13 +364,25 @@ function sessionToken(request: Request): string {
   return "";
 }
 
-function sessionCookie(request: Request, token: string): string {
+function sessionMaxAgeSeconds(rememberLogin: boolean): number {
+  return rememberLogin ? REMEMBERED_SESSION_MAX_AGE_SECONDS : SESSION_MAX_AGE_SECONDS;
+}
+
+function sessionTtlMs(rememberLogin: boolean): number {
+  return sessionMaxAgeSeconds(rememberLogin) * 1_000;
+}
+
+function sessionCookie(
+  request: Request,
+  token: string,
+  maxAgeSeconds = SESSION_MAX_AGE_SECONDS,
+): string {
   return [
     `${SESSION_COOKIE}=${token}`,
     "Path=/",
     "HttpOnly",
     "SameSite=Strict",
-    `Max-Age=${SESSION_MAX_AGE_SECONDS}`,
+    `Max-Age=${maxAgeSeconds}`,
     requestIsSecure(request) ? "Secure" : "",
   ]
     .filter(Boolean)
@@ -457,6 +504,24 @@ function isJsonObject(value: unknown): value is JsonObject {
 function hasExactKeys(value: JsonObject, keys: readonly string[]): boolean {
   const actual = Object.keys(value);
   return actual.length === keys.length && actual.every((key) => keys.includes(key));
+}
+
+function hasExactKeysWithOptional(
+  value: JsonObject,
+  keys: readonly string[],
+  optionalKeys: readonly string[],
+): boolean {
+  const actual = Object.keys(value);
+  return (
+    keys.every((key) => actual.includes(key)) &&
+    actual.every((key) => keys.includes(key) || optionalKeys.includes(key))
+  );
+}
+
+function readRememberLogin(body: JsonObject): boolean {
+  if (body.rememberLogin === undefined) return false;
+  if (typeof body.rememberLogin !== "boolean") throw invalidSchema();
+  return body.rememberLogin;
 }
 
 function isRevision(value: unknown): value is number {

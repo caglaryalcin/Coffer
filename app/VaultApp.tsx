@@ -17,10 +17,10 @@ import ThemeToggle from "./ThemeToggle";
 import TransferCenter, { type ImportDecision } from "./TransferCenter";
 import { formatCode, generateTotp, isTotpExpiring, isValidBase32, normalizeSecret, parseOtpAuthUri, totpWindow, type TotpAlgorithm } from "../lib/totp";
 import { changeVaultPassword, claimLegacyVault, deleteVaultAccount, getVaultBootstrap, identifyVault, loginVault, logoutVault, saveVault, setupVault, VAULT_API_TIMEOUT_MS, VaultApiError } from "../lib/vault-api";
-import { createAuthProof, createEncryptedVault, decryptVaultPayload, encryptVaultPayload, rotateVaultPassword, unlockVaultHeader, VaultCryptoError, type EncryptedVaultHeader, type VaultPayloadCipher, type VaultRuntime } from "../lib/vault-crypto";
+import { createAuthProof, createEncryptedVault, DEFAULT_VAULT_RESUME_AGE_MS, decryptVaultPayload, encryptVaultPayload, REMEMBERED_VAULT_RESUME_AGE_MS, rotateVaultPassword, unlockVaultHeader, VaultCryptoError, type EncryptedVaultHeader, type VaultPayloadCipher, type VaultRuntime } from "../lib/vault-crypto";
 import { createEmptyVault, MAX_GROUP_CUSTOMIZATIONS, parsePersistedVault, withVaultUpdate, type PersistedVault, type VaultAccount, type VaultGroupColor, type VaultGroupCustomization, type VaultGroupIcon, type VaultMainScreen, type VaultTheme } from "../lib/vault-model";
 import { classifyVaultOutbox, clearVaultOutbox, createVaultOutboxRecord, readVaultOutbox, writeVaultOutbox, type VaultOutboxRecord } from "../lib/vault-outbox";
-import { clearVaultResumeSession, readVaultResumeSession, saveVaultResumeSession, touchVaultResumeSession } from "../lib/vault-resume";
+import { clearVaultResumeSession, readRememberedVaultResumeHint, readVaultResumeSession, saveVaultResumeSession, touchVaultResumeSession, type VaultResumePersistence } from "../lib/vault-resume";
 import { remainingAutoLockMs } from "../lib/auto-lock";
 import type { EditableAccountPatch } from "../lib/account-editor";
 import { reorderVisibleAccounts, type AccountDropEdge } from "../lib/account-order";
@@ -53,6 +53,8 @@ type SaveDrain = { generation: number; promise: Promise<void> };
 type SaveAttempt =
   | { kind: "saved"; revision: number }
   | { kind: "conflict"; revision: number; payload: VaultPayloadCipher };
+type VaultAccessDetails = { email: string; password: string; rememberLogin: boolean };
+type VaultCreateAccountDetails = VaultAccessDetails & { name: string };
 type VaultConflict = {
   localVault: PersistedVault | null;
   localPayload: VaultPayloadCipher;
@@ -78,6 +80,16 @@ type ReadyVaultSessionPublication = {
 type GroupDropTarget = { name: string; edge: GroupDropEdge };
 type AccountDropTarget = { id: string; edge: AccountDropEdge; axis: "horizontal" | "vertical" };
 type SidebarMenuTarget = { kind: "all" } | { kind: "group"; name: string };
+
+function resumePersistenceForRememberLogin(rememberLogin: boolean): VaultResumePersistence {
+  return rememberLogin ? "remembered" : "session";
+}
+
+function resumeTtlForPersistence(persistence: VaultResumePersistence): number {
+  return persistence === "remembered"
+    ? REMEMBERED_VAULT_RESUME_AGE_MS
+    : DEFAULT_VAULT_RESUME_AGE_MS;
+}
 type SidebarMenuPosition = { top: number; left: number };
 const EMPTY_ACCOUNTS: Account[] = [];
 const ADD_ACCOUNT_PALETTE: Account["color"][] = ["violet", "green", "blue", "orange"];
@@ -370,6 +382,7 @@ export default function VaultApp() {
   const hiddenLockArmedRef = useRef(false);
   const resumeAvailableRef = useRef(false);
   const resumeAbsoluteExpiresAtRef = useRef(0);
+  const resumePersistenceRef = useRef<VaultResumePersistence>("session");
   const resumeSavePromiseRef = useRef<Promise<void> | null>(null);
   const lastResumeRetryAtRef = useRef(0);
   const lastResumeTouchAtRef = useRef(0);
@@ -510,11 +523,18 @@ export default function VaultApp() {
   const saveResumeSession = useCallback((
     activeRuntime: VaultRuntime,
     activeHeader: EncryptedVaultHeader,
+    persistence: VaultResumePersistence = resumePersistenceRef.current,
+    loginIdentifier = vaultRef.current?.profile.email,
     notifyOnFailure = true,
   ): Promise<void> => {
     if (resumeSavePromiseRef.current) return resumeSavePromiseRef.current;
     const transitionEpoch = sessionTransitionRef.current.epoch;
-    const task = saveVaultResumeSession(activeHeader.vaultId, activeRuntime)
+    const task = saveVaultResumeSession(
+      activeHeader.vaultId,
+      activeRuntime,
+      persistence,
+      loginIdentifier,
+    )
       .then((metadata) => {
         if (
           transitionEpoch !== sessionTransitionRef.current.epoch ||
@@ -524,6 +544,7 @@ export default function VaultApp() {
         }
         resumeAvailableRef.current = true;
         resumeAbsoluteExpiresAtRef.current = metadata.absoluteExpiresAt;
+        resumePersistenceRef.current = metadata.persistence;
       })
       .catch(() => {
         if (transitionEpoch !== sessionTransitionRef.current.epoch) return;
@@ -573,7 +594,13 @@ export default function VaultApp() {
       return;
     }
     lastResumeRetryAtRef.current = now;
-    void saveResumeSession(activeRuntime, activeHeader, false);
+    void saveResumeSession(
+      activeRuntime,
+      activeHeader,
+      resumePersistenceRef.current,
+      vaultRef.current?.profile.email,
+      false,
+    );
   }, [saveResumeSession]);
 
   const beginOpeningSession = useCallback(async (): Promise<number> => {
@@ -750,7 +777,11 @@ export default function VaultApp() {
       if (!identifier) {
         throw new Error("The vault account identifier is unavailable.");
       }
-      const current = await loginVault(proof, identifier);
+      const current = await loginVault(
+        proof,
+        identifier,
+        resumePersistenceRef.current === "remembered",
+      );
       if (generation !== sessionGenerationRef.current) {
         throw new Error("The vault session changed while saving.");
       }
@@ -1068,11 +1099,12 @@ export default function VaultApp() {
     }));
   }, [commitVault]);
 
-  const handleCreateAccount = useCallback(async (details: { name: string; email: string; password: string }) => {
+  const handleCreateAccount = useCallback(async (details: VaultCreateAccountDetails) => {
     let transitionEpoch: number | null = null;
     setAuthBusy(true);
     setAuthError(null);
     try {
+      const resumePersistence = resumePersistenceForRememberLogin(details.rememberLogin);
       const activeTransitionEpoch = await beginOpeningSession();
       transitionEpoch = activeTransitionEpoch;
       const ensureSetupActive = () => {
@@ -1088,7 +1120,9 @@ export default function VaultApp() {
       };
       await prepareOpeningSession(activeTransitionEpoch);
       const initialVault = createEmptyVault({ name: details.name, email: details.email });
-      const created = await createEncryptedVault(details.password, initialVault);
+      const created = await createEncryptedVault(details.password, initialVault, {
+        resumeTtlMs: resumeTtlForPersistence(resumePersistence),
+      });
       ensureSetupActive();
       const authProof = await createAuthProof(created.runtime.authKey);
       ensureSetupActive();
@@ -1097,9 +1131,15 @@ export default function VaultApp() {
         authProof,
         header: created.header,
         payload: created.payloadCipher,
+        rememberLogin: details.rememberLogin,
       });
       ensureSetupActive();
-      await saveResumeSession(created.runtime, created.header);
+      await saveResumeSession(
+        created.runtime,
+        created.header,
+        resumePersistence,
+        details.email,
+      );
       ensureSetupActive();
       await clearVaultOutbox(created.header.vaultId).catch(() => false);
       ensureSetupActive();
@@ -1150,6 +1190,7 @@ export default function VaultApp() {
     resumeLastActivityAt?: number,
     isAttemptActive?: () => boolean,
     loginIdentifier?: string,
+    resumePersistence: VaultResumePersistence = "session",
   ): Promise<PersistedVault> => {
     await prepareOpeningSession(transitionEpoch);
 
@@ -1172,7 +1213,8 @@ export default function VaultApp() {
     let authenticated = false;
     try {
       const authProof = await createAuthProof(nextRuntime.authKey);
-      let result = await loginVault(authProof, loginIdentifier);
+      const rememberLogin = resumePersistence === "remembered";
+      let result = await loginVault(authProof, loginIdentifier, rememberLogin);
       authenticated = true;
       ensureTransitionActive();
       let serverVault = parsePersistedVault(
@@ -1231,7 +1273,7 @@ export default function VaultApp() {
             } catch (error) {
               if (error instanceof VaultApiError && error.code === "revision_conflict") {
                 ensureTransitionActive();
-                result = await loginVault(authProof);
+                result = await loginVault(authProof, undefined, rememberLogin);
                 ensureTransitionActive();
                 serverVault = parsePersistedVault(
                   await decryptVaultPayload<unknown>(result.payload, nextRuntime.vaultKey),
@@ -1302,7 +1344,7 @@ export default function VaultApp() {
         }
       }
 
-      if (resumeLastActivityAt !== undefined) {
+      if (resumeLastActivityAt !== undefined && resumePersistence !== "remembered") {
         const now = Date.now();
         const inactivityLimit = nextVault.settings.autoLockMinutes * 60_000;
         if (
@@ -1317,7 +1359,12 @@ export default function VaultApp() {
 
       if (persistResumeBeforeReady) {
         ensureTransitionActive();
-        await saveResumeSession(nextRuntime, activeHeader);
+        await saveResumeSession(
+          nextRuntime,
+          activeHeader,
+          resumePersistence,
+          loginIdentifier,
+        );
       }
 
       ensureTransitionActive();
@@ -1336,6 +1383,7 @@ export default function VaultApp() {
         saveStatus: nextStatus,
         saveError: nextError,
       });
+      resumePersistenceRef.current = resumePersistence;
       return nextVault;
     } catch (error) {
       const stillOwnsTransition = isVaultSessionTransition(
@@ -1365,11 +1413,12 @@ export default function VaultApp() {
     }
   }, [prepareOpeningSession, publishReadySession, saveResumeSession]);
 
-  const handleSignIn = useCallback(async (details: { email: string; password: string }) => {
+  const handleSignIn = useCallback(async (details: VaultAccessDetails) => {
     setAuthBusy(true);
     setAuthError(null);
     let transitionEpoch: number | null = null;
     try {
+      const resumePersistence = resumePersistenceForRememberLogin(details.rememberLogin);
       transitionEpoch = await beginOpeningSession();
       const identified = await identifyVault(details.email);
       if (!isVaultSessionTransition(sessionTransitionRef.current, transitionEpoch, "opening")) {
@@ -1378,7 +1427,9 @@ export default function VaultApp() {
       if (!identified.configured) {
         throw new VaultApiError("Invalid email or password.", "invalid_credentials", 401);
       }
-      const nextRuntime = await unlockVaultHeader(details.password, identified.header);
+      const nextRuntime = await unlockVaultHeader(details.password, identified.header, {
+        resumeTtlMs: resumeTtlForPersistence(resumePersistence),
+      });
       await openVaultRuntime(
         nextRuntime,
         identified.header,
@@ -1387,6 +1438,7 @@ export default function VaultApp() {
         undefined,
         undefined,
         details.email,
+        resumePersistence,
       );
     } catch (error) {
       const attemptStillCurrent =
@@ -1455,6 +1507,7 @@ export default function VaultApp() {
     savedVersionRef.current = 0;
     resumeAvailableRef.current = false;
     resumeAbsoluteExpiresAtRef.current = 0;
+    resumePersistenceRef.current = "session";
     lastResumeRetryAtRef.current = 0;
     lastResumeTouchAtRef.current = 0;
     lastActivityAtRef.current = null;
@@ -1679,6 +1732,7 @@ export default function VaultApp() {
     );
     resumeAvailableRef.current = false;
     resumeAbsoluteExpiresAtRef.current = 0;
+    resumePersistenceRef.current = "session";
     lastResumeRetryAtRef.current = 0;
     lastResumeTouchAtRef.current = 0;
     setAuthStatus("locking");
@@ -1906,7 +1960,9 @@ export default function VaultApp() {
 
       let rotation: Awaited<ReturnType<typeof rotateVaultPassword>>;
       try {
-        rotation = await rotateVaultPassword(currentPassword, nextPassword, header);
+        rotation = await rotateVaultPassword(currentPassword, nextPassword, header, {
+          resumeTtlMs: resumeTtlForPersistence(resumePersistenceRef.current),
+        });
       } catch (error) {
         if (error instanceof VaultCryptoError && error.code === "AUTHENTICATION_FAILED") {
           throw new Error("The current password is incorrect.");
@@ -2214,6 +2270,58 @@ export default function VaultApp() {
         const bootstrap = await getVaultBootstrap();
         if (!active) return;
         if (!bootstrap.authenticated) {
+          const rememberedHint = readRememberedVaultResumeHint();
+          if (rememberedHint) {
+            try {
+              const identified = await identifyVault(rememberedHint.loginIdentifier);
+              if (!active) return;
+              if (
+                !identified.configured ||
+                identified.header.vaultId !== rememberedHint.vaultId
+              ) {
+                throw new Error("The remembered vault no longer matches this account.");
+              }
+              revisionRef.current = identified.revision;
+              bootstrapHeaderRef.current = identified.header;
+              const resumed = await readVaultResumeSession(identified.header.vaultId);
+              if (!resumed || resumed.persistence !== "remembered") {
+                throw new Error("The remembered browser session is unavailable.");
+              }
+              const transitionEpoch = await beginOpeningSession();
+              ownedTransitionEpoch = transitionEpoch;
+              if (!active) {
+                const closedTransition = completeVaultSessionTransition(
+                  sessionTransitionRef.current,
+                  transitionEpoch,
+                  "opening",
+                  "closed",
+                );
+                if (closedTransition) sessionTransitionRef.current = closedTransition;
+                return;
+              }
+              await openVaultRuntime(
+                resumed.runtime,
+                identified.header,
+                transitionEpoch,
+                false,
+                resumed.lastActivityAt,
+                () => active,
+                rememberedHint.loginIdentifier,
+                "remembered",
+              );
+              if (!active) return;
+              resumeAvailableRef.current = true;
+              resumeAbsoluteExpiresAtRef.current = resumed.absoluteExpiresAt;
+              touchVaultResumeSession(identified.header.vaultId);
+              return;
+            } catch {
+              void clearVaultResumeSession().catch(() => undefined);
+              runtimeRef.current = null;
+              vaultRef.current = null;
+              setRuntime(null);
+              setVault(null);
+            }
+          }
           bootstrapHeaderRef.current = null;
           revisionRef.current = 0;
           void clearVaultResumeSession().catch(() => undefined);
@@ -2254,6 +2362,8 @@ export default function VaultApp() {
               false,
               resumed.lastActivityAt,
               () => active,
+              resumed.loginIdentifier,
+              resumed.persistence,
             );
             if (!active) return;
             resumeAvailableRef.current = true;

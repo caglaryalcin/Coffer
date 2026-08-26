@@ -176,6 +176,7 @@ export async function setupVault(input: {
   authProof: string;
   header: EncryptedVaultHeader;
   payload: VaultPayloadCipher;
+  rememberLogin?: boolean;
 }): Promise<{ revision: number }> {
   const { body, status } = await postVault({ action: "setup", ...input });
   if (!isRecord(body) || body.configured !== true || !isRevision(body.revision)) {
@@ -191,10 +192,11 @@ export async function setupVault(input: {
 export async function loginVault(
   authProof: string,
   identifier?: string,
+  rememberLogin = false,
 ): Promise<VaultLoginResult> {
   const request = identifier === undefined
-    ? { action: "login", authProof }
-    : { action: "login", identifier, authProof };
+    ? { action: "login", authProof, ...(rememberLogin ? { rememberLogin } : {}) }
+    : { action: "login", identifier, authProof, ...(rememberLogin ? { rememberLogin } : {}) };
   const { body, status } = await postVault(request);
   if (
     !isRecord(body) ||

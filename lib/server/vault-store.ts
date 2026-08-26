@@ -29,6 +29,7 @@ export const VAULT_FILE_VERSION = 1 as const;
 export const LEGACY_CLAIM_FORMAT = "coffer-legacy-claim" as const;
 
 const DEFAULT_SESSION_TTL_MS = 12 * 60 * 60 * 1_000;
+export const MAX_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 const DEFAULT_FAILURE_WINDOW_MS = 5 * 60 * 1_000;
 const DEFAULT_LOCKOUT_MS = 15 * 60 * 1_000;
 const DEFAULT_MAX_FAILURES = 5;
@@ -70,6 +71,7 @@ type VaultSessionPrincipal =
   | { kind: "user"; accountKey: string; vaultId: string }
   | { kind: "legacy"; vaultId: string };
 type VaultSession = { principal: VaultSessionPrincipal; expiresAt: number };
+type VaultSessionOptions = { sessionTtlMs?: number };
 
 export type VaultStoreOptions = {
   dataDir?: string;
@@ -84,6 +86,12 @@ export type VaultStoreOptions = {
   setupWindowMs?: number;
   maxSetupRequests?: number;
 };
+
+function normalizeSessionTtlMs(value: number | undefined, fallback: number): number {
+  const candidate = value ?? fallback;
+  if (!Number.isSafeInteger(candidate) || candidate <= 0) return fallback;
+  return Math.min(candidate, MAX_SESSION_TTL_MS);
+}
 
 export type SetupVaultInput = {
   identifier: string;
@@ -216,7 +224,7 @@ export class VaultStore {
     this.legacyClaimPath = resolve(this.dataDir, "legacy-claim.json");
     this.now = options.now ?? Date.now;
     this.random = options.random ?? ((size) => randomBytes(size));
-    this.sessionTtlMs = options.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS;
+    this.sessionTtlMs = normalizeSessionTtlMs(options.sessionTtlMs, DEFAULT_SESSION_TTL_MS);
     this.failureWindowMs = options.failureWindowMs ?? DEFAULT_FAILURE_WINDOW_MS;
     this.lockoutMs = options.lockoutMs ?? DEFAULT_LOCKOUT_MS;
     this.maxFailures = options.maxFailures ?? DEFAULT_MAX_FAILURES;
@@ -258,7 +266,11 @@ export class VaultStore {
     };
   }
 
-  async setup(input: SetupVaultInput, rateKey = "local"): Promise<SetupResult> {
+  async setup(
+    input: SetupVaultInput,
+    rateKey = "local",
+    options: VaultSessionOptions = {},
+  ): Promise<SetupResult> {
     this.recordSetupRequest(rateKey);
     const accountKey = accountKeyForIdentifier(input.identifier);
     if (
@@ -299,7 +311,7 @@ export class VaultStore {
         kind: "user",
         accountKey,
         vaultId: stored.header.vaultId,
-      });
+      }, options.sessionTtlMs);
       return { revision: stored.revision, ...session };
     });
   }
@@ -308,6 +320,7 @@ export class VaultStore {
     identifier: string,
     authProof: Uint8Array,
     rateKey: string,
+    options: VaultSessionOptions = {},
   ): Promise<LoginResult> {
     const accountKey = accountKeyForIdentifier(identifier);
     if (authProof.byteLength !== 32) {
@@ -339,7 +352,7 @@ export class VaultStore {
       const principal: VaultSessionPrincipal = legacy
         ? { kind: "legacy", vaultId: stored.header.vaultId }
         : { kind: "user", accountKey, vaultId: stored.header.vaultId };
-      const session = this.issueSession(principal);
+      const session = this.issueSession(principal, options.sessionTtlMs);
       return {
         revision: stored.revision,
         payload: structuredClone(stored.payload),
@@ -353,6 +366,7 @@ export class VaultStore {
     sessionToken: string,
     authProof: Uint8Array,
     rateKey: string,
+    options: VaultSessionOptions = {},
   ): Promise<LoginResult> {
     if (authProof.byteLength !== 32) {
       throw new VaultStoreError("invalid_input", "The vault proof is invalid.");
@@ -394,7 +408,7 @@ export class VaultStore {
         kind: "user",
         accountKey,
         vaultId: stored.header.vaultId,
-      });
+      }, options.sessionTtlMs);
       return {
         revision: stored.revision,
         payload: structuredClone(stored.payload),
@@ -819,13 +833,16 @@ export class VaultStore {
     }
   }
 
-  private issueSession(principal: VaultSessionPrincipal): {
+  private issueSession(
+    principal: VaultSessionPrincipal,
+    sessionTtlMs?: number,
+  ): {
     sessionToken: string;
     sessionExpiresAt: string;
   } {
     this.pruneExpiredSessions();
     const sessionToken = Buffer.from(this.random(32)).toString("base64url");
-    const expiresAt = this.now() + this.sessionTtlMs;
+    const expiresAt = this.now() + normalizeSessionTtlMs(sessionTtlMs, this.sessionTtlMs);
     this.sessions.set(hashSessionToken(sessionToken), {
       principal: structuredClone(principal),
       expiresAt,

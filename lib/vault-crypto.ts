@@ -25,7 +25,9 @@ const RESUME_ENVELOPE_AAD_CONTEXT = "coffer:vault-resume-key-envelope:v1";
 const MAX_PASSWORD_BYTES = 1_024;
 const MIN_PASSWORD_CHARACTERS = 12;
 export const MAX_VAULT_PAYLOAD_BYTES = 16 * 1024 * 1024;
-export const MAX_VAULT_RESUME_AGE_MS = 12 * 60 * 60 * 1_000;
+export const DEFAULT_VAULT_RESUME_AGE_MS = 12 * 60 * 60 * 1_000;
+export const REMEMBERED_VAULT_RESUME_AGE_MS = 30 * 24 * 60 * 60 * 1_000;
+export const MAX_VAULT_RESUME_AGE_MS = REMEMBERED_VAULT_RESUME_AGE_MS;
 
 const KDF_LIMITS = {
   minimumMemoryKiB: 19 * 1024,
@@ -137,6 +139,7 @@ const VAULT_RESUME_MATERIALS = new WeakMap<VaultRuntime, VaultResumeSealingMater
 export interface CreateEncryptedVaultOptions {
   /** Overrides are primarily useful for constrained clients and fast tests. */
   kdf?: Partial<VaultKdfOptions>;
+  resumeTtlMs?: number;
 }
 
 export interface CreatedEncryptedVault {
@@ -289,6 +292,14 @@ function hasExactObjectKeys(
   return keys.length === expected.length && keys.every((key) => expected.includes(key));
 }
 
+function resolveVaultResumeAgeMs(value: number | undefined): number {
+  if (value === undefined) return DEFAULT_VAULT_RESUME_AGE_MS;
+  if (!Number.isSafeInteger(value) || value <= 0 || value > MAX_VAULT_RESUME_AGE_MS) {
+    throw new VaultCryptoError("INVALID_INPUT", "Vault resume duration is invalid.");
+  }
+  return value;
+}
+
 const RESUME_ENVELOPE_KEYS = [
   "format",
   "version",
@@ -315,8 +326,8 @@ function validateVaultResumeKeyEnvelope(
     !Number.isSafeInteger(value.createdAt) ||
     (value.createdAt as number) < 0 ||
     !Number.isSafeInteger(value.absoluteExpiresAt) ||
-    (value.absoluteExpiresAt as number) !==
-      (value.createdAt as number) + MAX_VAULT_RESUME_AGE_MS
+    (value.absoluteExpiresAt as number) - (value.createdAt as number) <= 0 ||
+    (value.absoluteExpiresAt as number) - (value.createdAt as number) > MAX_VAULT_RESUME_AGE_MS
   ) {
     throw new VaultCryptoError("INVALID_INPUT", "Vault resume envelope metadata is invalid.");
   }
@@ -511,6 +522,7 @@ async function attachVaultResumeSealingMaterial(
   vaultId: string,
   rawVaultKey: Uint8Array,
   rawAuthKey: Uint8Array,
+  resumeTtlMs?: number,
 ): Promise<void> {
   decodeExactBase64(vaultId, "resumeEnvelope.vaultId", VAULT_ID_BYTES).fill(0);
   if (
@@ -530,13 +542,14 @@ async function attachVaultResumeSealingMaterial(
 
   try {
     const createdAt = Date.now();
+    const resumeAgeMs = resolveVaultResumeAgeMs(resumeTtlMs);
     const metadata = {
       format: "coffer-vault-resume-key-envelope",
       version: 1,
       vaultId,
       tabToken: bytesToBase64Url(tabTokenBytes),
       createdAt,
-      absoluteExpiresAt: createdAt + MAX_VAULT_RESUME_AGE_MS,
+      absoluteExpiresAt: createdAt + resumeAgeMs,
       algorithm: "AES-256-GCM",
       tagLength: 128,
     } as const;
@@ -1001,6 +1014,7 @@ export async function createEncryptedVault<T>(
       header.vaultId,
       rawVaultKey,
       authKeyBytes,
+      options.resumeTtlMs,
     );
     const payloadCipher = await encryptVaultPayload(payload, vaultKey);
     return { header, payloadCipher, runtime };
@@ -1124,6 +1138,7 @@ async function unwrapVaultKeyMaterial(
 export async function unlockVaultHeader(
   password: string,
   header: EncryptedVaultHeader,
+  options: { resumeTtlMs?: number } = {},
 ): Promise<VaultRuntime> {
   const material = await unwrapVaultKeyMaterial(password, header);
   try {
@@ -1134,6 +1149,7 @@ export async function unlockVaultHeader(
       header.vaultId,
       material.rawVaultKey,
       material.rawAuthKey,
+      options.resumeTtlMs,
     );
     return runtime;
   } finally {
@@ -1151,6 +1167,7 @@ export async function rotateVaultPassword(
   currentPassword: string,
   nextPassword: string,
   header: EncryptedVaultHeader,
+  options: { resumeTtlMs?: number } = {},
 ): Promise<RotatedVaultPassword> {
   validatePassword(nextPassword);
   if (currentPassword === nextPassword) {
@@ -1234,6 +1251,7 @@ export async function rotateVaultPassword(
       nextHeader.vaultId,
       current.rawVaultKey,
       nextAuthKeyBytes,
+      options.resumeTtlMs,
     );
     const [currentAuthProof, nextAuthProof] = await Promise.all([
       createAuthProof(current.authKey),

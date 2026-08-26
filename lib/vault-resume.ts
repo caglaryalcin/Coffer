@@ -1,4 +1,5 @@
 import {
+  DEFAULT_VAULT_RESUME_AGE_MS,
   getVaultResumeSealingMaterial,
   isVaultResumeKeyEnvelope,
   MAX_VAULT_RESUME_AGE_MS,
@@ -14,6 +15,8 @@ const DATABASE_NAME = "coffer-vault-resume";
 const DATABASE_VERSION = 2;
 const STORE_NAME = "runtime-sessions";
 const SESSION_CAPABILITY_KEY = "coffer:vault-resume:capability:v2";
+const REMEMBERED_CAPABILITY_KEY = "coffer:vault-resume:remembered-capability:v1";
+const REMEMBERED_HINT_KEY = "coffer:vault-resume:remembered-hint:v1";
 const LEGACY_SESSION_TOKEN_KEY = "coffer:vault-resume:tab-token:v1";
 const OPERATION_TIMEOUT_MS = 5_000;
 const MAX_SWEEP_RECORDS = 128;
@@ -21,7 +24,12 @@ const TAB_TOKEN_BYTES = 32;
 const WRAPPING_SECRET_BYTES = 32;
 const VAULT_ID_BYTES = 16;
 
+export type VaultResumePersistence = "session" | "remembered";
+
+export const DEFAULT_VAULT_RESUME_TTL_MS = DEFAULT_VAULT_RESUME_AGE_MS;
 export const MAX_VAULT_RESUME_TTL_MS = MAX_VAULT_RESUME_AGE_MS;
+
+const RESUME_PERSISTENCE_ORDER = ["session", "remembered"] as const satisfies readonly VaultResumePersistence[];
 
 const CAPABILITY_KEYS = [
   "format",
@@ -31,6 +39,14 @@ const CAPABILITY_KEYS = [
   "wrappingSecret",
   "createdAt",
   "lastActivityAt",
+  "absoluteExpiresAt",
+] as const;
+
+const REMEMBERED_HINT_KEYS = [
+  "format",
+  "version",
+  "vaultId",
+  "loginIdentifier",
   "absoluteExpiresAt",
 ] as const;
 
@@ -54,10 +70,18 @@ export interface VaultResumeMetadata {
   /** Compatibility alias for the hard absolute deadline. */
   readonly expiresAt: number;
   readonly absoluteExpiresAt: number;
+  readonly persistence: VaultResumePersistence;
+  readonly loginIdentifier?: string;
 }
 
 export interface VaultResumeSession extends VaultResumeMetadata {
   readonly runtime: VaultRuntime;
+}
+
+export interface RememberedVaultResumeHint {
+  readonly vaultId: string;
+  readonly loginIdentifier: string;
+  readonly absoluteExpiresAt: number;
 }
 
 export type VaultResumeRecordStatus =
@@ -73,6 +97,14 @@ export class VaultResumeError extends Error {
     this.name = "VaultResumeError";
   }
 }
+
+type RememberedVaultResumeHintRecord = {
+  readonly format: "coffer-vault-resume-remembered-hint";
+  readonly version: 1;
+  readonly vaultId: string;
+  readonly loginIdentifier: string;
+  readonly absoluteExpiresAt: number;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -155,6 +187,28 @@ export function isVaultResumeVaultId(value: unknown): value is string {
   return hasCanonicalDecodedLength(value, "base64", VAULT_ID_BYTES);
 }
 
+function normalizeLoginIdentifier(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed || trimmed.length > 254) return null;
+  return trimmed;
+}
+
+function isRememberedVaultResumeHintRecord(
+  value: unknown,
+): value is RememberedVaultResumeHintRecord {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, REMEMBERED_HINT_KEYS) &&
+    value.format === "coffer-vault-resume-remembered-hint" &&
+    value.version === 1 &&
+    isVaultResumeVaultId(value.vaultId) &&
+    normalizeLoginIdentifier(
+      typeof value.loginIdentifier === "string" ? value.loginIdentifier : undefined,
+    ) === value.loginIdentifier &&
+    isSafeTimestamp(value.absoluteExpiresAt)
+  );
+}
+
 export function createVaultResumeTabToken(): string {
   const cryptoApi = globalThis.crypto;
   if (!cryptoApi || typeof cryptoApi.getRandomValues !== "function") {
@@ -210,6 +264,7 @@ export function isVaultResumeCapabilityRecord(
   value: unknown,
 ): value is VaultResumeCapabilityRecord {
   if (!isRecord(value) || !hasExactKeys(value, CAPABILITY_KEYS)) return false;
+  const resumeAgeMs = Number(value.absoluteExpiresAt) - Number(value.createdAt);
   return (
     value.format === "coffer-vault-resume-capability" &&
     value.version === 2 &&
@@ -221,7 +276,8 @@ export function isVaultResumeCapabilityRecord(
     isSafeTimestamp(value.absoluteExpiresAt) &&
     value.createdAt <= value.lastActivityAt &&
     value.lastActivityAt < value.absoluteExpiresAt &&
-    value.absoluteExpiresAt === value.createdAt + MAX_VAULT_RESUME_TTL_MS
+    resumeAgeMs > 0 &&
+    resumeAgeMs <= MAX_VAULT_RESUME_TTL_MS
   );
 }
 
@@ -281,30 +337,59 @@ function capabilityMatchesRecord(
   );
 }
 
-function toMetadata(capability: VaultResumeCapabilityRecord): VaultResumeMetadata {
+type StoredVaultResumeCapability = {
+  readonly capability: VaultResumeCapabilityRecord;
+  readonly persistence: VaultResumePersistence;
+};
+
+function toMetadata(
+  capability: VaultResumeCapabilityRecord,
+  persistence: VaultResumePersistence,
+): VaultResumeMetadata {
   return {
     vaultId: capability.vaultId,
     createdAt: capability.createdAt,
     lastActivityAt: capability.lastActivityAt,
     expiresAt: capability.absoluteExpiresAt,
     absoluteExpiresAt: capability.absoluteExpiresAt,
+    persistence,
   };
 }
 
-function sessionStorageApi(): Storage {
+function capabilityKey(persistence: VaultResumePersistence): string {
+  return persistence === "remembered" ? REMEMBERED_CAPABILITY_KEY : SESSION_CAPABILITY_KEY;
+}
+
+function storageApi(persistence: VaultResumePersistence): Storage {
   try {
-    const storage = globalThis.sessionStorage;
-    if (!storage) throw new Error("sessionStorage is unavailable");
+    const storage = persistence === "remembered"
+      ? globalThis.localStorage
+      : globalThis.sessionStorage;
+    if (!storage) throw new Error(`${persistence} storage is unavailable`);
     return storage;
   } catch (error) {
-    throw new VaultResumeError("Same-tab session storage is unavailable.", {
+    throw new VaultResumeError(
+      persistence === "remembered"
+        ? "Persistent browser storage is unavailable."
+        : "Same-tab session storage is unavailable.",
+      {
       cause: error,
-    });
+      },
+    );
   }
 }
 
-function removeCapability(storage: Storage): void {
-  storage.removeItem(SESSION_CAPABILITY_KEY);
+function optionalStorageApi(persistence: VaultResumePersistence): Storage | null {
+  try {
+    return storageApi(persistence);
+  } catch {
+    return null;
+  }
+}
+
+function removeCapability(storage: Storage, persistence: VaultResumePersistence): void {
+  storage.removeItem(capabilityKey(persistence));
+  if (persistence === "remembered") storage.removeItem(REMEMBERED_HINT_KEY);
 }
 
 function parseCapability(value: string | null): unknown {
@@ -319,56 +404,140 @@ function parseCapability(value: string | null): unknown {
 function readCapability(
   expectedVaultId: string,
   now: number,
-): VaultResumeCapabilityRecord | null {
-  const storage = sessionStorageApi();
-  const parsed = parseCapability(storage.getItem(SESSION_CAPABILITY_KEY));
-  if (classifyVaultResumeCapability(parsed, expectedVaultId, now) !== "valid") {
-    removeCapability(storage);
-    return null;
+): StoredVaultResumeCapability | null {
+  for (const persistence of RESUME_PERSISTENCE_ORDER) {
+    const storage = optionalStorageApi(persistence);
+    if (!storage) continue;
+    const parsed = parseCapability(storage.getItem(capabilityKey(persistence)));
+    if (classifyVaultResumeCapability(parsed, expectedVaultId, now) !== "valid") {
+      removeCapability(storage, persistence);
+      continue;
+    }
+    if (!isVaultResumeCapabilityRecord(parsed)) {
+      removeCapability(storage, persistence);
+      continue;
+    }
+    return { capability: parsed, persistence };
   }
-  if (!isVaultResumeCapabilityRecord(parsed)) {
-    removeCapability(storage);
-    return null;
-  }
-  return parsed;
+  return null;
 }
 
-function writeCapability(capability: VaultResumeCapabilityRecord): void {
+function writeCapability(
+  capability: VaultResumeCapabilityRecord,
+  persistence: VaultResumePersistence,
+): void {
   if (!isVaultResumeCapabilityRecord(capability)) {
     throw new VaultResumeError("Refusing to persist an invalid resume capability.");
   }
-  const storage = sessionStorageApi();
+  const storage = storageApi(persistence);
   const serialized = JSON.stringify(capability);
   try {
-    storage.setItem(SESSION_CAPABILITY_KEY, serialized);
-    if (storage.getItem(SESSION_CAPABILITY_KEY) !== serialized) {
-      throw new Error("sessionStorage did not retain the capability");
+    for (const existingPersistence of RESUME_PERSISTENCE_ORDER) {
+      if (existingPersistence === persistence) continue;
+      const storage = optionalStorageApi(existingPersistence);
+      if (!storage) continue;
+      removeCapability(storage, existingPersistence);
+    }
+    storage.setItem(capabilityKey(persistence), serialized);
+    if (storage.getItem(capabilityKey(persistence)) !== serialized) {
+      throw new Error(`${persistence} storage did not retain the capability`);
+    }
+    for (const existingPersistence of RESUME_PERSISTENCE_ORDER) {
+      if (existingPersistence === persistence) continue;
+      const existingStorage = optionalStorageApi(existingPersistence);
+      if (!existingStorage) continue;
+      removeCapability(existingStorage, existingPersistence);
     }
   } catch (error) {
     try {
-      removeCapability(storage);
+      removeCapability(storage, persistence);
     } catch {
       // The caller still receives no usable resume session.
     }
-    throw new VaultResumeError("Same-tab resume capability could not be saved.", {
-      cause: error,
-    });
+    throw new VaultResumeError(
+      persistence === "remembered"
+        ? "Persistent resume capability could not be saved."
+        : "Same-tab resume capability could not be saved.",
+      {
+        cause: error,
+      },
+    );
   }
 }
 
-function clearCapabilityAndReturnToken(expectedTabToken?: string): string | null {
-  const storage = sessionStorageApi();
-  const parsed = parseCapability(storage.getItem(SESSION_CAPABILITY_KEY));
-  const token = isRecord(parsed) && isVaultResumeTabToken(parsed.tabToken)
-    ? parsed.tabToken
-    : null;
-  if (expectedTabToken && token && token !== expectedTabToken) return null;
-  removeCapability(storage);
-  return token;
+function clearCapabilitiesAndReturnTokens(expectedTabToken?: string): string[] {
+  const tokens: string[] = [];
+  for (const persistence of RESUME_PERSISTENCE_ORDER) {
+    const storage = optionalStorageApi(persistence);
+    if (!storage) continue;
+    const parsed = parseCapability(storage.getItem(capabilityKey(persistence)));
+    const token = isRecord(parsed) && isVaultResumeTabToken(parsed.tabToken)
+      ? parsed.tabToken
+      : null;
+    if (expectedTabToken && token && token !== expectedTabToken) continue;
+    removeCapability(storage, persistence);
+    if (token) tokens.push(token);
+  }
+  return tokens;
+}
+
+function writeRememberedHint(
+  capability: VaultResumeCapabilityRecord,
+  loginIdentifier: string | undefined,
+): void {
+  const identifier = normalizeLoginIdentifier(loginIdentifier);
+  const storage = storageApi("remembered");
+  if (!identifier) {
+    storage.removeItem(REMEMBERED_HINT_KEY);
+    return;
+  }
+  const hint: RememberedVaultResumeHintRecord = {
+    format: "coffer-vault-resume-remembered-hint",
+    version: 1,
+    vaultId: capability.vaultId,
+    loginIdentifier: identifier,
+    absoluteExpiresAt: capability.absoluteExpiresAt,
+  };
+  storage.setItem(REMEMBERED_HINT_KEY, JSON.stringify(hint));
+}
+
+function clearRememberedHint(): void {
+  optionalStorageApi("remembered")?.removeItem(REMEMBERED_HINT_KEY);
+}
+
+export function readRememberedVaultResumeHint(
+  now = Date.now(),
+): RememberedVaultResumeHint | null {
+  const storage = optionalStorageApi("remembered");
+  if (!storage) return null;
+  const parsedHint = parseCapability(storage.getItem(REMEMBERED_HINT_KEY));
+  if (
+    !isRememberedVaultResumeHintRecord(parsedHint) ||
+    parsedHint.absoluteExpiresAt <= now
+  ) {
+    storage.removeItem(REMEMBERED_HINT_KEY);
+    return null;
+  }
+
+  const parsedCapability = parseCapability(storage.getItem(REMEMBERED_CAPABILITY_KEY));
+  if (
+    classifyVaultResumeCapability(parsedCapability, parsedHint.vaultId, now) !==
+      "valid" ||
+    !isVaultResumeCapabilityRecord(parsedCapability) ||
+    parsedCapability.absoluteExpiresAt !== parsedHint.absoluteExpiresAt
+  ) {
+    removeCapability(storage, "remembered");
+    return null;
+  }
+  return {
+    vaultId: parsedHint.vaultId,
+    loginIdentifier: parsedHint.loginIdentifier,
+    absoluteExpiresAt: parsedHint.absoluteExpiresAt,
+  };
 }
 
 function clearLegacyToken(): string | null {
-  const storage = sessionStorageApi();
+  const storage = storageApi("session");
   const value = storage.getItem(LEGACY_SESSION_TOKEN_KEY);
   const token = isVaultResumeTabToken(value) ? value : null;
   storage.removeItem(LEGACY_SESSION_TOKEN_KEY);
@@ -380,21 +549,21 @@ export function touchVaultResumeSession(
   now = Date.now(),
 ): boolean {
   try {
-    const capability = readCapability(expectedVaultId, now);
-    if (!capability) return false;
+    const stored = readCapability(expectedVaultId, now);
+    if (!stored) return false;
     const touched: VaultResumeCapabilityRecord = {
-      ...capability,
+      ...stored.capability,
       lastActivityAt: now,
     };
     if (!isVaultResumeCapabilityRecord(touched)) {
-      clearCapabilityAndReturnToken(capability.tabToken);
+      clearCapabilitiesAndReturnTokens(stored.capability.tabToken);
       return false;
     }
-    writeCapability(touched);
+    writeCapability(touched, stored.persistence);
     return true;
   } catch {
     try {
-      clearCapabilityAndReturnToken();
+      clearCapabilitiesAndReturnTokens();
     } catch {
       // Failing closed means no activity timestamp is accepted.
     }
@@ -637,6 +806,8 @@ async function readStoredRecord(
 export async function saveVaultResumeSession(
   vaultId: string,
   runtime: VaultRuntime,
+  persistence: VaultResumePersistence = "session",
+  loginIdentifier?: string,
 ): Promise<VaultResumeMetadata> {
   if (!isVaultResumeVaultId(vaultId)) {
     throw new VaultResumeError("The vault identifier is invalid.");
@@ -649,14 +820,26 @@ export async function saveVaultResumeSession(
   const now = Date.now();
   const record = createVaultResumeRecord(material.envelope);
   const capability = createVaultResumeCapabilityRecord(material, now);
-  clearLegacyToken();
-  writeCapability(capability);
+  const normalizedLoginIdentifier = normalizeLoginIdentifier(loginIdentifier);
   try {
+    clearLegacyToken();
+    writeCapability(capability, persistence);
+    if (persistence === "remembered") {
+      writeRememberedHint(capability, normalizedLoginIdentifier ?? undefined);
+    } else {
+      clearRememberedHint();
+    }
     await writeStoredRecord(record);
-    return toMetadata(capability);
+    return {
+      ...toMetadata(capability, persistence),
+      ...(persistence === "remembered" && normalizedLoginIdentifier
+        ? { loginIdentifier: normalizedLoginIdentifier }
+        : {}),
+    };
   } catch (error) {
     try {
-      clearCapabilityAndReturnToken(capability.tabToken);
+      clearCapabilitiesAndReturnTokens(capability.tabToken);
+      clearRememberedHint();
       await deleteStoredRecord(record.tabToken);
     } catch {
       // The missing session capability keeps any leftover ciphertext unusable.
@@ -675,16 +858,17 @@ export async function readVaultResumeSession(
   }
   const now = Date.now();
   const legacyToken = clearLegacyToken();
-  const capability = readCapability(expectedVaultId, now);
-  if (!capability) {
+  const stored = readCapability(expectedVaultId, now);
+  if (!stored) {
     if (legacyToken) await deleteStoredRecord(legacyToken).catch(() => undefined);
     return null;
   }
+  const { capability, persistence } = stored;
 
   try {
     const record = await readStoredRecord(capability.tabToken, expectedVaultId, now);
     if (!record || !capabilityMatchesRecord(capability, record)) {
-      clearCapabilityAndReturnToken(capability.tabToken);
+      clearCapabilitiesAndReturnTokens(capability.tabToken);
       if (record) await deleteStoredRecord(record.tabToken).catch(() => undefined);
       return null;
     }
@@ -692,10 +876,19 @@ export async function readVaultResumeSession(
       record,
       capability.wrappingSecret,
     );
-    return { runtime, ...toMetadata(capability) };
+    const hint = persistence === "remembered"
+      ? readRememberedVaultResumeHint(now)
+      : null;
+    return {
+      runtime,
+      ...toMetadata(capability, persistence),
+      ...(hint?.vaultId === capability.vaultId
+        ? { loginIdentifier: hint.loginIdentifier }
+        : {}),
+    };
   } catch (error) {
     try {
-      clearCapabilityAndReturnToken(capability.tabToken);
+      clearCapabilitiesAndReturnTokens(capability.tabToken);
       await deleteStoredRecord(capability.tabToken);
     } catch {
       // The caller receives no usable runtime even if ciphertext cleanup fails.
@@ -712,23 +905,23 @@ export async function refreshVaultResumeSession(
 ): Promise<VaultResumeMetadata | null> {
   const now = Date.now();
   if (!touchVaultResumeSession(expectedVaultId, now)) return null;
-  const capability = readCapability(expectedVaultId, now);
-  return capability ? toMetadata(capability) : null;
+  const stored = readCapability(expectedVaultId, now);
+  return stored ? toMetadata(stored.capability, stored.persistence) : null;
 }
 
 export async function clearVaultResumeSession(): Promise<void> {
-  let tabToken: string | null;
+  let tabTokens: string[];
   let legacyToken: string | null;
   try {
     // This synchronous removal happens before the function's first await.
-    tabToken = clearCapabilityAndReturnToken();
+    tabTokens = clearCapabilitiesAndReturnTokens();
     legacyToken = clearLegacyToken();
   } catch (error) {
     throw new VaultResumeError("The unlocked vault capability could not be cleared.", {
       cause: error,
     });
   }
-  const tokens = [...new Set([tabToken, legacyToken].filter(
+  const tokens = [...new Set([...tabTokens, legacyToken].filter(
     (token): token is string => token !== null,
   ))];
   if (tokens.length === 0) return;
