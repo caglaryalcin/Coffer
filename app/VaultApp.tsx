@@ -3940,7 +3940,7 @@ export default function VaultApp() {
                     data-color={customization.color}
                     aria-hidden="true"
                   />
-                  <span className="group-name">{name}</span>
+                  <span className="group-name" data-i18n-ignore>{name}</span>
                   <span className="group-count">{counts[name]}</span>
                 </button>
                 <button
@@ -4175,7 +4175,7 @@ export default function VaultApp() {
                       brandId={isServiceBrandId(account.iconBrand) ? account.iconBrand : null}
                       iconDataUrl={account.iconDataUrl}
                     />
-                    <div className="service-meta"><h2>{account.service}</h2><OverflowingIdentity text={account.identity} /></div>
+                    <div className="service-meta" data-i18n-ignore><h2>{account.service}</h2><OverflowingIdentity text={account.identity} /></div>
                     {selectionMode ? (
                       <AccountSelectionIndicator selected={selected} />
                     ) : (
@@ -4282,7 +4282,7 @@ export default function VaultApp() {
                       <input ref={manualServiceInputRef} className="service-entry-input" value={service} onChange={(event) => setService(event.target.value)} placeholder="e.g. GitHub" />
                     </div>
                   </label>
-                  <label><span>Group</span><select value={newGroup} onChange={(event) => setNewGroup(event.target.value as Group)}>{entryGroups.map((name) => <option key={name}>{name}</option>)}</select></label>
+                  <label><span>Group</span><select value={newGroup} onChange={(event) => setNewGroup(event.target.value as Group)}>{entryGroups.map((name) => <option key={name} data-i18n-ignore>{name}</option>)}</select></label>
                 </div>
                 <label><span>Account name</span><input value={identity} onChange={(event) => setIdentity(event.target.value)} placeholder="name@example.com" /></label>
                 <label><span>Base32 secret</span><input className="secret-input" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="JBSW Y3DP EHPK 3PXP" autoComplete="off" spellCheck={false} /><small>Encrypted in this browser before the vault is saved.</small></label>

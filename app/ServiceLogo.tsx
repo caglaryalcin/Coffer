@@ -547,7 +547,7 @@ export default function ServiceLogo({
   const localIconDataUrl = iconDataUrl?.startsWith("data:image/png;base64,") ? iconDataUrl : null;
   if (localIconDataUrl) {
     return (
-      <div className="service-logo custom-logo" data-custom-logo="true" aria-hidden="true">
+      <div className="service-logo custom-logo" data-custom-logo="true" data-i18n-ignore aria-hidden="true">
         {/* eslint-disable-next-line @next/next/no-img-element -- encrypted data URLs cannot use the image optimizer */}
         <img src={localIconDataUrl} alt="" />
       </div>
@@ -570,11 +570,12 @@ export default function ServiceLogo({
         className={`service-logo brand-${brand.id}`}
         data-brand-id={brand.id}
         data-brand-source={brand.source}
+        data-i18n-ignore
         style={style}
         aria-hidden="true"
       />
     );
   }
 
-  return <div className={`service-logo ${color}`} aria-hidden="true">{fallback}</div>;
+  return <div className={`service-logo ${color}`} data-i18n-ignore aria-hidden="true">{fallback}</div>;
 }

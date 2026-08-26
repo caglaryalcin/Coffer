@@ -437,7 +437,7 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
                   const logo = reviewLogoForService(service);
                   return (
                     <div className="review-item" role="listitem" key={item.key}>
-                      <div className="review-account"><ServiceLogo service={service} fallback={logo.fallback} color={logo.color} brandId={isServiceBrandId(item.account?.iconBrand) ? item.account.iconBrand : null} iconDataUrl={item.account?.iconDataUrl ?? null} /><div><strong>{service}</strong><small>{item.account?.identity ?? item.issue}</small></div></div>
+                      <div className="review-account"><ServiceLogo service={service} fallback={logo.fallback} color={logo.color} brandId={isServiceBrandId(item.account?.iconBrand) ? item.account.iconBrand : null} iconDataUrl={item.account?.iconDataUrl ?? null} /><div data-i18n-ignore><strong>{service}</strong><small>{item.account?.identity ?? item.issue}</small></div></div>
                       <span className={`review-status ${item.status}`}>{item.status === "new" ? "New" : item.status === "exact" ? "Exact duplicate" : item.status === "possible" ? "Possible duplicate" : "Invalid"}</span>
                       {item.status === "invalid" || item.status === "exact" ? <span className="review-skip">Skip</span> : (
                         <select aria-label={`Import action for ${item.label}`} value={item.action} onChange={(event) => updateAction(item.key, event.target.value as ReviewAction)}>
@@ -477,13 +477,13 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
                   <label><span>OTPAuth links</span><textarea value={otpLinks} onChange={(event) => handleOtpLinksChange(event.target.value)} placeholder="otpauth://totp/Example:user@example.com?secret=…" disabled={busy} /><small>Enter one link per line. Blank lines are ignored.</small></label>
                   <div className="form-divider"><span>or upload a text file</span></div>
                   <div className={`file-drop ${fileName ? "has-file" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
-                    <span className="file-icon" /><div><strong>{fileName || "Drop a file here"}</strong><small>{fileName ? "Ready to review" : "Plain UTF-8 text, up to 5 MiB"}</small></div><button onClick={() => fileInput.current?.click()} disabled={busy}>{fileName ? "Change file" : "Choose file"}</button>
+                    <span className="file-icon" /><div><strong data-i18n-ignore={fileName ? true : undefined}>{fileName || "Drop a file here"}</strong><small>{fileName ? "Ready to review" : "Plain UTF-8 text, up to 5 MiB"}</small></div><button onClick={() => fileInput.current?.click()} disabled={busy}>{fileName ? "Change file" : "Choose file"}</button>
                   </div>
                 </div>
               ) : (
                 <div className="transfer-form">
                   <div className={`file-drop ${fileName ? "has-file" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
-                    <span className="file-icon" /><div><strong>{fileName || "Drop a file here"}</strong><small>{fileName ? "Ready to review" : source === "coffer" ? ".coffer or JSON, up to 5 MiB" : source === "2fas" ? ".2fas or JSON, up to 5 MiB" : "2FAuth JSON, up to 5 MiB"}</small></div><button onClick={() => fileInput.current?.click()} disabled={busy}>{fileName ? "Change file" : "Choose file"}</button>
+                    <span className="file-icon" /><div><strong data-i18n-ignore={fileName ? true : undefined}>{fileName || "Drop a file here"}</strong><small>{fileName ? "Ready to review" : source === "coffer" ? ".coffer or JSON, up to 5 MiB" : source === "2fas" ? ".2fas or JSON, up to 5 MiB" : "2FAuth JSON, up to 5 MiB"}</small></div><button onClick={() => fileInput.current?.click()} disabled={busy}>{fileName ? "Change file" : "Choose file"}</button>
                   </div>
                   {source === "coffer" && <label><span>Backup passphrase (if used)</span><input type="password" value={importPassword} onChange={(event) => setImportPassword(event.target.value)} placeholder="Enter the passphrase if this backup is protected" autoComplete="new-password" disabled={busy} /></label>}
                   {source === "2fas" && <label><span>2FAS backup password</span><input type="password" value={importPassword} onChange={(event) => setImportPassword(event.target.value)} placeholder="Enter the password used for this backup" autoComplete="new-password" disabled={busy} /><small>Leave this blank only if the 2FAS backup was exported without a password.</small></label>}

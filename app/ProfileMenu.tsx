@@ -115,7 +115,7 @@ export default function ProfileMenu({
             ? <img src={profile.avatarDataUrl} alt="" /> // eslint-disable-line @next/next/no-img-element -- encrypted data URLs cannot use the image optimizer
             : profileInitials(profile.name)}
         </span>
-        <span className="profile-copy"><strong>{profile.name}</strong><small>{profile.email}</small></span>
+        <span className="profile-copy" data-i18n-ignore><strong>{profile.name}</strong><small>{profile.email}</small></span>
         <span aria-hidden="true">•••</span>
       </button>
 

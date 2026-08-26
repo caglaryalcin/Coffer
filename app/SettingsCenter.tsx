@@ -2,6 +2,7 @@
 
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import type { VaultProfile } from "../lib/vault-model";
+import { languages, useI18n, type CofferLanguage } from "./I18nProvider";
 import { PROFILE_IMAGE_ACCEPT, prepareProfileImage } from "./profile-image";
 
 export type UserProfile = VaultProfile;
@@ -71,6 +72,7 @@ export default function SettingsCenter({
   onChangePassword,
   onDeleteAccount,
 }: SettingsCenterProps) {
+  const { language, setLanguage } = useI18n();
   const [name, setName] = useState(profile.name);
   const [profileNameSource, setProfileNameSource] = useState(profile.name);
   const [error, setError] = useState("");
@@ -365,6 +367,25 @@ export default function SettingsCenter({
               {error && <p className="settings-error" role="alert">{error}</p>}
               <div className="settings-actions"><button type="submit" disabled={avatarBusy || profileBusy || passwordBusy}>{profileBusy ? "Saving…" : "Save profile"}</button></div>
             </form>
+          </section>
+
+          <section className="settings-card" id="language-settings" aria-labelledby="language-settings-title" tabIndex={-1}>
+            <div className="settings-card-copy"><span className="settings-glyph language-glyph" aria-hidden="true" /><div><h2 id="language-settings-title">Language</h2><p>Read and write Coffer in your preferred language. This setting stays in this browser and updates the interface immediately.</p></div></div>
+            <div className="settings-control-row">
+              <div><strong>Language</strong><span>Choose the interface language.</span></div>
+              <select
+                aria-label="Language"
+                value={language}
+                onChange={(event) => setLanguage(event.target.value as CofferLanguage)}
+                disabled={passwordBusy || avatarBusy || profileBusy || deleteBusy}
+              >
+                {languages.map((option) => (
+                  <option key={option.code} value={option.code} data-i18n-ignore>
+                    {`${option.flag} ${option.nativeLabel}`}
+                  </option>
+                ))}
+              </select>
+            </div>
           </section>
 
           <section className="settings-card" id="security-settings" aria-labelledby="security-settings-title" tabIndex={-1}>

@@ -338,7 +338,7 @@ export default function BulkGroupActions({
                   {existingGroups.length === 0 ? "No groups yet" : "Choose a group"}
                 </option>
                 {existingGroups.map((name) => (
-                  <option value={name} key={name}>{name}</option>
+                  <option value={name} key={name} data-i18n-ignore>{name}</option>
                 ))}
               </select>
               <button type="submit" disabled={moveDisabled || !existingGroup}>Move</button>

@@ -155,6 +155,7 @@ export default function OverflowingIdentity({
       ref={viewportRef}
       className={classes}
       data-overflowing={metrics.overflowing ? "true" : "false"}
+      data-i18n-ignore
       style={style}
       title={metrics.overflowing ? text : undefined}
     >

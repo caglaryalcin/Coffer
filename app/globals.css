@@ -917,6 +917,8 @@ h1 { margin: 0; font-size: clamp(34px, 4vw, 53px); line-height: .98; letter-spac
 .settings-card-copy p { margin: 5px 0 0; color: #666b62; font-size: var(--type-body); line-height: 1.5; }
 .settings-glyph { width: 42px; height: 42px; position: relative; display: block; border-radius: 13px; background: #e9eddf; }
 .settings-glyph::before { content: ""; position: absolute; inset: 12px; border: 1.5px solid #68764b; border-radius: 50%; }
+.language-glyph::before { inset: 8px; border-radius: 9px; }
+.language-glyph::after { content: "Aa"; position: absolute; inset: 0; display: grid; place-items: center; color: #68764b; font-size: 12px; font-weight: 850; line-height: 1; }
 .profile-glyph::after { content: ""; position: absolute; width: 20px; height: 9px; left: 11px; bottom: 7px; border: 1.5px solid #68764b; border-radius: 12px 12px 6px 6px; }
 .security-glyph { background: #e7f2cf; }
 .security-glyph::before { content: none; }
@@ -1664,6 +1666,7 @@ body.theme-dark { background: #181a1b; color-scheme: dark; }
 .theme-dark .danger-check input { accent-color: var(--theme-accent); }
 .theme-dark .settings-glyph::before,
 .theme-dark .profile-glyph::after { border-color: var(--theme-accent); }
+.theme-dark .language-glyph::after { color: var(--theme-accent); }
 .theme-dark .settings-glyph.session-glyph::before { border-color: #e2a795; }
 .theme-dark .session-glyph::after { border-color: #e2a795; }
 
