@@ -49,14 +49,16 @@ button { color: inherit; }
 .primary-nav, .group-nav { display: grid; gap: 6px; }
 .group-nav { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 .primary-nav-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: center; min-height: 44px; border-radius: 12px; color: #aeb1a9; }
-.primary-nav-row:hover, .primary-nav-row.active, .primary-nav-row.menu-open { background: #30332d; color: white; }
+.primary-nav-row:hover, .primary-nav-row.active, .primary-nav-row.menu-open { background: var(--accent-soft, #30332d); color: white; }
 .primary-nav-row.active .nav-icon { color: var(--lime); }
 .primary-nav-row .nav-item { min-width: 0; background: transparent; color: inherit; }
+.primary-nav-row .primary-nav-main:hover,
+.primary-nav-row .primary-nav-main:focus-visible { background: transparent; }
 .primary-nav-main { border-radius: 12px 0 0 12px; }
 .primary-options-button { border-radius: 0 12px 12px 0; }
 .nav-item { width: 100%; min-height: 44px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border: 0; border-radius: 12px; background: transparent; color: #aeb1a9; font-size: 14px; font-weight: 590; text-align: left; cursor: pointer; }
 .nav-item:hover { background: var(--accent-soft); color: white; }
-.nav-item.active { background: #30332d; color: white; }
+.nav-item.active { background: var(--accent-soft, #30332d); color: white; }
 .nav-item.active .nav-icon { color: var(--lime); }
 .nav-count { margin-left: auto; color: #82877d; font-size: 12px; }
 .sidebar-collapsed .nav-item { width: 48px; justify-content: center; gap: 0; margin-inline: auto; padding: 0; font-size: 0; }
@@ -1223,6 +1225,9 @@ body.theme-dark { background: #181a1b; color-scheme: dark; }
 .theme-dark .nav-item { color: var(--muted); }
 .theme-dark .nav-item:hover,
 .theme-dark .nav-item.active,
+.theme-dark .primary-nav-row:hover,
+.theme-dark .primary-nav-row.active,
+.theme-dark .primary-nav-row.menu-open,
 .theme-dark .group-nav-row:hover,
 .theme-dark .group-nav-row.active,
 .theme-dark .group-nav-row.menu-open { background: var(--accent-soft); color: #fff; }
