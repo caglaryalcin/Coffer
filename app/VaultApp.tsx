@@ -134,6 +134,7 @@ const LOCK_SAVE_GRACE_MS = VAULT_API_TIMEOUT_MS + 750;
 const RESUME_ACTIVITY_WRITE_INTERVAL_MS = 1_000;
 const ACCOUNT_EVENT_CHANNEL_NAME = "coffer-account-events-v1";
 const ACCOUNT_DELETION_CLEANUP_MS = VAULT_API_TIMEOUT_MS + 6_000;
+const FIREFOX_EXTENSION_URL = "https://github.com/caglaryalcin/coffer-extension/releases/latest";
 
 function accountDropPlacement(event: ReactDragEvent<HTMLElement>): Pick<AccountDropTarget, "edge" | "axis"> {
   const bounds = event.currentTarget.getBoundingClientRect();
@@ -4103,6 +4104,17 @@ export default function VaultApp() {
             <kbd>⌘ K</kbd>
           </label>
           <div className="top-actions">
+            <a
+              className="extension-link"
+              href={FIREFOX_EXTENSION_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Get the Firefox extension"
+              title="Get the Firefox extension"
+            >
+              <span className="extension-link-icon" aria-hidden="true" />
+              <span className="extension-link-copy">Firefox extension</span>
+            </a>
             <button
               type="button"
               className={`sync-state ${saveStatus}`}
