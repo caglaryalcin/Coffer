@@ -10,6 +10,7 @@ import {
 
 const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1_000;
 const RELEASE_PAGE_PREFIX = "https://github.com/caglaryalcin/Coffer/releases/tag/";
+const FIREFOX_EXTENSION_URL = "https://github.com/caglaryalcin/coffer-extension/releases/latest";
 
 type SidebarFooterProps = {
   onOpenAbout: () => void;
@@ -100,6 +101,14 @@ export default function SidebarFooter({ onOpenAbout }: SidebarFooterProps) {
         <span className="sidebar-footer-version" aria-label={`Coffer version ${COFFER_VERSION_NUMBER}`}>{COFFER_VERSION}</span>
       )}
       <nav className="sidebar-footer-links" aria-label="Coffer links">
+        <a
+          className="sidebar-footer-link"
+          href={FIREFOX_EXTENSION_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Get the Firefox extension in a new tab"
+          title="Firefox extension"
+        ><span className="sidebar-footer-firefox-icon" aria-hidden="true" /></a>
         <a
           className="sidebar-footer-link"
           href="https://github.com/caglaryalcin/Coffer"

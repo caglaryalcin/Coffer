@@ -15,6 +15,7 @@ const MAX_DURATION_SECONDS = 18;
 
 export type OverflowingIdentityProps = {
   text: string;
+  as?: "p" | "span";
   className?: string;
   pixelsPerSecond?: number;
 };
@@ -61,10 +62,11 @@ export function horizontalOverflowMetrics(
 
 export default function OverflowingIdentity({
   text,
+  as = "p",
   className,
   pixelsPerSecond = DEFAULT_SPEED_PX_PER_SECOND,
 }: OverflowingIdentityProps) {
-  const viewportRef = useRef<HTMLParagraphElement>(null);
+  const viewportRef = useRef<HTMLElement>(null);
   const trackRef = useRef<HTMLSpanElement>(null);
   const animationFrameRef = useRef<number | null>(null);
   const [metrics, setMetrics] = useState<HorizontalOverflowMetrics>({
@@ -149,6 +151,21 @@ export default function OverflowingIdentity({
     metrics.overflowing ? "is-overflowing" : "",
     className ?? "",
   ].filter(Boolean).join(" ");
+
+  if (as === "span") {
+    return (
+      <span
+        ref={viewportRef}
+        className={classes}
+        data-overflowing={metrics.overflowing ? "true" : "false"}
+        data-i18n-ignore
+        style={style}
+        title={metrics.overflowing ? text : undefined}
+      >
+        <span ref={trackRef} className="overflowing-identity-track">{text}</span>
+      </span>
+    );
+  }
 
   return (
     <p
