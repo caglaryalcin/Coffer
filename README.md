@@ -36,7 +36,9 @@ The Firefox extension lives in a separate repository:
 [caglaryalcin/coffer-extension](https://github.com/caglaryalcin/coffer-extension).
 
 It connects to Coffer through the extension-safe API flow and can fill TOTP
-codes from the popup without opening the Coffer tab.
+codes from the popup without opening the Coffer tab. Browser-extension API
+access is limited to unlock/read actions; vault changes still require the
+same-origin Coffer web app session.
 
 ## Docker Compose
 
@@ -64,8 +66,7 @@ keeps encrypted vault data across container restarts and replacements.
 | --- | --- | --- |
 | `COFFER_DATA_DIR` | `data` (`/app/data` in Docker) | Directory containing encrypted vault files. Mount persistent storage here. |
 | `COFFER_TRUST_PROXY` | `0` | Set to `1` only behind a trusted reverse proxy so Coffer accepts forwarded origin, protocol, and client IP headers. |
-| `COFFER_ALLOWED_EXTENSION_ORIGINS` | Empty | Comma-separated trusted `moz-extension://...` or `chrome-extension://...` origins allowed to call the read-only extension unlock API flow. |
-| `COFFER_ALLOWED_DEV_ORIGINS` | Empty | Comma-separated temporary extension UUIDs or extension origins allowed during local development. |
+| `COFFER_ALLOWED_DEV_ORIGINS` | Empty | Comma-separated temporary extension UUIDs or extension origins allowed by the local development server. Not needed for production extension access. |
 | `VINEXT_TRUSTED_HOSTS` | Empty | Comma-separated public `host[:port]` allowlist, such as `coffer.example.com`. Recommended for HTTPS reverse-proxy deployments. |
 | `HOST` | `0.0.0.0` in Docker | Address the application server listens on. |
 | `PORT` | `3000` | Application server port inside the container. |

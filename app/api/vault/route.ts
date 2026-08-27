@@ -6,7 +6,7 @@ import {
   VaultStore,
   VaultStoreError,
 } from "@/lib/server/vault-store";
-import { extensionCorsHeaders, isTrustedExtensionRequest } from "@/lib/server/extension-origin";
+import { extensionCorsHeaders, isExtensionRequest } from "@/lib/server/extension-origin";
 import { isIP } from "node:net";
 
 export const runtime = "nodejs";
@@ -379,8 +379,8 @@ function requireSameOrigin(request: Request): void {
 }
 
 function requireSameOrExtensionOrigin(request: Request): void {
-  if (!isSameOriginRequest(request) && !isTrustedExtensionRequest(request)) {
-    throw new RequestError(403, "invalid_origin", "A same-origin or trusted extension request is required.");
+  if (!isSameOriginRequest(request) && !isExtensionRequest(request)) {
+    throw new RequestError(403, "invalid_origin", "A same-origin or browser-extension request is required.");
   }
 }
 
