@@ -6,6 +6,7 @@ import {
   VaultStore,
   VaultStoreError,
 } from "@/lib/server/vault-store";
+import { extensionCorsHeaders, isTrustedExtensionRequest } from "@/lib/server/extension-origin";
 import { isIP } from "node:net";
 
 export const runtime = "nodejs";
@@ -38,40 +39,60 @@ export async function GET(request: Request): Promise<Response> {
   }
 }
 
+export function OPTIONS(request: Request): Response {
+  const corsHeaders = extensionCorsHeaders(request, "POST, OPTIONS");
+  if (!corsHeaders) {
+    return new Response(null, { status: 204, headers: responseHeaders() });
+  }
+  return new Response(null, { status: 204, headers: responseHeaders(corsHeaders) });
+}
+
 export async function POST(request: Request): Promise<Response> {
+  let action: string | null = null;
   try {
     const body = await readJsonBody(request);
     if (!isJsonObject(body) || typeof body.action !== "string") {
       throw new RequestError(400, "invalid_request", "A valid action is required.");
     }
+    action = body.action;
 
+    let response: Response;
     switch (body.action) {
       case "identify":
-        return await identify(request, body);
+        response = await identify(request, body);
+        break;
       case "setup":
-        return await setup(request, body);
+        response = await setup(request, body);
+        break;
       case "login":
-        return await login(request, body);
+        response = await login(request, body);
+        break;
       case "claim_legacy":
-        return await claimLegacy(request, body);
+        response = await claimLegacy(request, body);
+        break;
       case "save":
-        return await save(request, body);
+        response = await save(request, body);
+        break;
       case "change_password":
-        return await changePassword(request, body);
+        response = await changePassword(request, body);
+        break;
       case "delete_account":
-        return await deleteAccount(request, body);
+        response = await deleteAccount(request, body);
+        break;
       case "logout":
-        return logout(request, body);
+        response = logout(request, body);
+        break;
       default:
         throw new RequestError(400, "invalid_action", "The action is not supported.");
     }
+    return withExtensionCors(request, response, action);
   } catch (error) {
-    return errorResponse(error);
+    return withExtensionCors(request, errorResponse(error), action);
   }
 }
 
 async function identify(request: Request, body: JsonObject): Promise<Response> {
-  requireSameOrigin(request);
+  requireSameOrExtensionOrigin(request);
   if (!hasExactKeys(body, ["action", "identifier"])) throw invalidSchema();
   if (body.action !== "identify" || typeof body.identifier !== "string") {
     throw invalidSchema();
@@ -124,7 +145,7 @@ async function setup(request: Request, body: JsonObject): Promise<Response> {
 }
 
 async function login(request: Request, body: JsonObject): Promise<Response> {
-  requireSameOrigin(request);
+  requireSameOrExtensionOrigin(request);
   const hasIdentifier = hasExactKeysWithOptional(
     body,
     ["action", "identifier", "authProof"],
@@ -332,10 +353,10 @@ async function readJsonBody(request: Request): Promise<unknown> {
   }
 }
 
-function requireSameOrigin(request: Request): void {
+function isSameOriginRequest(request: Request): boolean {
   const origin = request.headers.get("origin");
   if (!origin) {
-    throw new RequestError(403, "invalid_origin", "A same-origin request is required.");
+    return false;
   }
 
   let suppliedOrigin: string;
@@ -344,13 +365,32 @@ function requireSameOrigin(request: Request): void {
     suppliedOrigin = parsedOrigin.origin;
     if (origin !== suppliedOrigin) throw new Error("Non-canonical origin");
   } catch {
-    throw new RequestError(403, "invalid_origin", "A same-origin request is required.");
+    return false;
   }
   const requestOrigin = new URL(request.url).origin;
   const forwardedOrigin = trustedForwardedOrigin(request);
-  if (suppliedOrigin !== requestOrigin && suppliedOrigin !== forwardedOrigin) {
+  return suppliedOrigin === requestOrigin || suppliedOrigin === forwardedOrigin;
+}
+
+function requireSameOrigin(request: Request): void {
+  if (!isSameOriginRequest(request)) {
     throw new RequestError(403, "invalid_origin", "A same-origin request is required.");
   }
+}
+
+function requireSameOrExtensionOrigin(request: Request): void {
+  if (!isSameOriginRequest(request) && !isTrustedExtensionRequest(request)) {
+    throw new RequestError(403, "invalid_origin", "A same-origin or trusted extension request is required.");
+  }
+}
+
+function withExtensionCors(request: Request, response: Response, action: string | null): Response {
+  if (action !== "identify" && action !== "login") return response;
+  const corsHeaders = extensionCorsHeaders(request, "POST, OPTIONS");
+  if (!corsHeaders) return response;
+  const headers = new Headers(corsHeaders);
+  headers.forEach((value, key) => response.headers.set(key, value));
+  return response;
 }
 
 function sessionToken(request: Request): string {
