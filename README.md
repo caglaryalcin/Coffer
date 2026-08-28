@@ -2,6 +2,10 @@
 
 ![Status](https://img.shields.io/badge/status-stable-ca7373) [![Latest Release](https://img.shields.io/github/v/release/caglaryalcin/Coffer?include_prereleases&color=blue)](https://github.com/caglaryalcin/Coffer/releases)
 
+![🌐 Chrome Extension](https://chromewebstore.google.com/detail/coffer/ajekhlpjkcohkdedhkdjkadilecboimd)
+
+🌐 Firefox Extension (***Waiting review***...)
+
 # Coffer
 
 Coffer is a self-hosted, multi-user authenticator vault. It generates TOTP
