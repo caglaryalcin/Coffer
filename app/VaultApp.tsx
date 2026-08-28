@@ -4090,9 +4090,7 @@ export default function VaultApp() {
           })}
         </nav>
 
-        <SidebarFooter
-          onOpenAbout={() => openSettingsSection("about-settings")}
-        />
+        <SidebarFooter />
       </aside>
 
       <section className="workspace" id="codes">

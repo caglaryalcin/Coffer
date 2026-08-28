@@ -219,11 +219,14 @@ button { color: inherit; }
 .sidebar-footer-update:hover { color: #ffad8e; text-decoration: underline; text-underline-offset: 2px; }
 .sidebar-footer-update:focus-visible { outline: 1px solid currentColor; outline-offset: 3px; border-radius: 2px; }
 .sidebar-footer-links { display: flex; flex: 0 0 auto; align-items: center; gap: 2px; }
-.sidebar-footer-link { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 8px; background: transparent; color: #8e938c; text-decoration: none; cursor: pointer; }
-.sidebar-footer-link:is(:hover, :focus-visible) { border-color: var(--theme-accent); background: var(--accent-soft); color: #f8f8f2; }
+.sidebar-footer-link { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 1px solid #353836; border-radius: 8px; background: transparent; color: #d8d3d0; text-decoration: none; cursor: pointer; }
+.sidebar-footer-link:is(:hover, :focus-visible) { border-color: var(--theme-accent); background: var(--accent-soft); color: var(--theme-accent); }
 .sidebar-footer-github-icon { width: 15px; height: 15px; display: block; background: currentColor; -webkit-mask: url("/brands/github.svg") center / contain no-repeat; mask: url("/brands/github.svg") center / contain no-repeat; }
-.sidebar-footer-firefox-icon { width: 16px; height: 16px; display: block; background: currentColor; -webkit-mask: url("/brands/firefox.svg") center / contain no-repeat; mask: url("/brands/firefox.svg") center / contain no-repeat; }
-.sidebar-footer-info-icon, .sidebar-footer-help-icon { width: 15px; height: 15px; display: grid; place-items: center; border: 1.4px solid currentColor; border-radius: 50%; font-size: 10px; font-weight: 800; line-height: 1; }
+.sidebar-footer-firefox-icon,
+.sidebar-footer-chrome-icon { width: 16px; height: 16px; display: block; background: currentColor; }
+.sidebar-footer-firefox-icon { -webkit-mask: url("/brands/firefoxbrowser.svg") center / contain no-repeat; mask: url("/brands/firefoxbrowser.svg") center / contain no-repeat; }
+.sidebar-footer-chrome-icon { -webkit-mask: url("/brands/googlechrome.svg") center / contain no-repeat; mask: url("/brands/googlechrome.svg") center / contain no-repeat; }
+.sidebar-footer-help-icon { width: 15px; height: 15px; display: grid; place-items: center; border: 1.4px solid currentColor; border-radius: 50%; font-size: 10px; font-weight: 800; line-height: 1; }
 .sidebar-footer-help-icon { font-size: 9px; }
 .sidebar-collapsed .sidebar-footer { display: none; }
 

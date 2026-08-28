@@ -10,18 +10,15 @@ import {
 
 const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1_000;
 const RELEASE_PAGE_PREFIX = "https://github.com/caglaryalcin/Coffer/releases/tag/";
-const FIREFOX_EXTENSION_URL = "https://github.com/caglaryalcin/coffer-extension/releases/latest";
-
-type SidebarFooterProps = {
-  onOpenAbout: () => void;
-};
+const FIREFOX_EXTENSION_URL = "https://addons.mozilla.org/en-US/firefox/addon/coffer/";
+const CHROME_EXTENSION_URL = "https://chromewebstore.google.com/detail/coffer/ajekhlpjkcohkdedhkdjkadilecboimd";
 
 type AvailableUpdate = {
   version: string;
   url: string;
 };
 
-export default function SidebarFooter({ onOpenAbout }: SidebarFooterProps) {
+export default function SidebarFooter() {
   const [availableUpdate, setAvailableUpdate] = useState<AvailableUpdate | null>(null);
   const lastCheckedAtRef = useRef(0);
 
@@ -111,19 +108,20 @@ export default function SidebarFooter({ onOpenAbout }: SidebarFooterProps) {
         ><span className="sidebar-footer-firefox-icon" aria-hidden="true" /></a>
         <a
           className="sidebar-footer-link"
+          href={CHROME_EXTENSION_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Get the Chrome extension in a new tab"
+          title="Chrome extension"
+        ><span className="sidebar-footer-chrome-icon" aria-hidden="true" /></a>
+        <a
+          className="sidebar-footer-link"
           href="https://github.com/caglaryalcin/Coffer"
           target="_blank"
           rel="noopener noreferrer"
           aria-label="Open the Coffer repository on GitHub in a new tab"
           title="GitHub repository"
         ><span className="sidebar-footer-github-icon" aria-hidden="true" /></a>
-        <button
-          type="button"
-          className="sidebar-footer-link"
-          aria-label="Open About settings"
-          title="About Coffer"
-          onClick={onOpenAbout}
-        ><span className="sidebar-footer-info-icon" aria-hidden="true">i</span></button>
         <a
           className="sidebar-footer-link"
           href="https://github.com/caglaryalcin/Coffer/issues/new"
