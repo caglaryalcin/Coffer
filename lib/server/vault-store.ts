@@ -3,11 +3,13 @@ import {
   chmod,
   mkdir,
   open,
+  readdir,
   readFile,
   rename,
   stat,
   unlink,
 } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import type {
@@ -27,6 +29,8 @@ export type {
 export const VAULT_FILE_FORMAT = "coffer-server-vault" as const;
 export const VAULT_FILE_VERSION = 1 as const;
 export const LEGACY_CLAIM_FORMAT = "coffer-legacy-claim" as const;
+export const INSTANCE_SETTINGS_FILE_FORMAT = "coffer-instance-settings" as const;
+export const INSTANCE_SETTINGS_FILE_VERSION = 1 as const;
 
 const DEFAULT_SESSION_TTL_MS = 12 * 60 * 60 * 1_000;
 export const MAX_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
@@ -72,6 +76,18 @@ type VaultSessionPrincipal =
   | { kind: "legacy"; vaultId: string };
 type VaultSession = { principal: VaultSessionPrincipal; expiresAt: number };
 type VaultSessionOptions = { sessionTtlMs?: number };
+export type InstanceSettings = { allowAccountCreation: boolean };
+export type AccountCreationState = {
+  instanceSettings: InstanceSettings;
+  accountCreationEnabled: boolean;
+};
+
+type InstanceSettingsFile = {
+  format: typeof INSTANCE_SETTINGS_FILE_FORMAT;
+  version: typeof INSTANCE_SETTINGS_FILE_VERSION;
+  updatedAt: string;
+  allowAccountCreation: boolean;
+};
 
 export type VaultStoreOptions = {
   dataDir?: string;
@@ -123,6 +139,10 @@ export type ChangePasswordInput = {
   header: VaultCryptoHeader;
   rateKey: string;
 };
+export type UpdateInstanceSettingsInput = {
+  sessionToken: string;
+  allowAccountCreation: boolean;
+};
 
 export type IdentifyResult =
   | { configured: false }
@@ -134,13 +154,13 @@ export type IdentifyResult =
     };
 
 export type AuthenticatedVaultBootstrap =
-  | { authenticated: false }
+  | ({ authenticated: false } & AccountCreationState)
   | {
       authenticated: true;
       revision: number;
       header: VaultCryptoHeader;
       legacy?: true;
-    };
+    } & AccountCreationState;
 
 export type LoginResult = {
   revision: number;
@@ -165,6 +185,7 @@ export type ClaimLegacyResult = { claimed: true; revision: number };
 export type VaultStoreErrorCode =
   | "already_configured"
   | "not_configured"
+  | "registration_disabled"
   | "invalid_credentials"
   | "rate_limited"
   | "unauthorized"
@@ -199,6 +220,7 @@ export class VaultStore {
   readonly usersDir: string;
   readonly legacyBackupPath: string;
   readonly legacyClaimPath: string;
+  readonly instanceSettingsPath: string;
 
   private readonly now: () => number;
   private readonly random: (size: number) => Uint8Array;
@@ -222,6 +244,7 @@ export class VaultStore {
     this.usersDir = resolve(this.dataDir, "users");
     this.legacyBackupPath = resolve(this.dataDir, "legacy-vault.backup.json");
     this.legacyClaimPath = resolve(this.dataDir, "legacy-claim.json");
+    this.instanceSettingsPath = resolve(this.dataDir, "instance-settings.json");
     this.now = options.now ?? Date.now;
     this.random = options.random ?? ((size) => randomBytes(size));
     this.sessionTtlMs = normalizeSessionTtlMs(options.sessionTtlMs, DEFAULT_SESSION_TTL_MS);
@@ -251,18 +274,20 @@ export class VaultStore {
     sessionToken: string,
   ): Promise<AuthenticatedVaultBootstrap> {
     await this.recoverLegacyClaim();
+    const accountCreationState = await this.getAccountCreationState();
     const session = this.validSession(sessionToken);
-    if (!session) return { authenticated: false };
+    if (!session) return { authenticated: false, ...accountCreationState };
     const stored = await this.readStoredVault(this.pathForPrincipal(session.principal));
     if (!stored || stored.header.vaultId !== session.principal.vaultId) {
       this.deleteSession(sessionToken);
-      return { authenticated: false };
+      return { authenticated: false, ...accountCreationState };
     }
     return {
       authenticated: true,
       revision: stored.revision,
       header: structuredClone(stored.header),
       ...(session.principal.kind === "legacy" ? { legacy: true as const } : {}),
+      ...accountCreationState,
     };
   }
 
@@ -286,6 +311,13 @@ export class VaultStore {
         throw new VaultStoreError(
           "legacy_claim_required",
           "Claim the existing legacy vault before creating another account.",
+        );
+      }
+      const accountCreationState = await this.getAccountCreationState();
+      if (!accountCreationState.accountCreationEnabled) {
+        throw new VaultStoreError(
+          "registration_disabled",
+          "Account creation is disabled for this Coffer instance.",
         );
       }
       const path = this.userVaultPath(accountKey);
@@ -775,6 +807,32 @@ export class VaultStore {
     });
   }
 
+  async getAccountCreationState(): Promise<AccountCreationState> {
+    const instanceSettings = await this.readInstanceSettings();
+    const accountCreationEnabled = instanceSettings.allowAccountCreation ||
+      !(await this.hasRegisteredVault());
+    return { instanceSettings, accountCreationEnabled };
+  }
+
+  async updateInstanceSettings(
+    input: UpdateInstanceSettingsInput,
+  ): Promise<AccountCreationState> {
+    if (typeof input.allowAccountCreation !== "boolean") {
+      throw new VaultStoreError("invalid_input", "The instance settings are invalid.");
+    }
+    this.requireUserSession(input.sessionToken);
+    return this.withMutationLock(async () => {
+      this.requireUserSession(input.sessionToken);
+      const next: InstanceSettings = {
+        allowAccountCreation: input.allowAccountCreation,
+      };
+      await this.writeInstanceSettings(next);
+      const accountCreationEnabled = next.allowAccountCreation ||
+        !(await this.hasRegisteredVault());
+      return { instanceSettings: next, accountCreationEnabled };
+    });
+  }
+
   hasValidSession(sessionToken: string): boolean {
     return Boolean(this.validSession(sessionToken));
   }
@@ -988,6 +1046,84 @@ export class VaultStore {
       );
     }
     return parsed;
+  }
+
+  private async readInstanceSettings(): Promise<InstanceSettings> {
+    let size: number;
+    try {
+      size = (await stat(this.instanceSettingsPath)).size;
+    } catch (error) {
+      if (isNodeError(error, "ENOENT")) {
+        return { allowAccountCreation: true };
+      }
+      throw error;
+    }
+    if (size > 4_096) {
+      throw new VaultStoreError("corrupt_store", "The instance settings file is too large.");
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await readFile(this.instanceSettingsPath, "utf8"));
+    } catch (error) {
+      if (isNodeError(error, "ENOENT")) return { allowAccountCreation: true };
+      throw new VaultStoreError(
+        "corrupt_store",
+        "The instance settings file could not be read.",
+      );
+    }
+    if (!isInstanceSettingsFile(parsed)) {
+      throw new VaultStoreError(
+        "corrupt_store",
+        "The instance settings file has an unsupported format.",
+      );
+    }
+    return { allowAccountCreation: parsed.allowAccountCreation };
+  }
+
+  private async writeInstanceSettings(settings: InstanceSettings): Promise<void> {
+    await this.atomicWriteJson(this.instanceSettingsPath, {
+      format: INSTANCE_SETTINGS_FILE_FORMAT,
+      version: INSTANCE_SETTINGS_FILE_VERSION,
+      updatedAt: new Date(this.now()).toISOString(),
+      allowAccountCreation: settings.allowAccountCreation,
+    } satisfies InstanceSettingsFile);
+  }
+
+  private async hasRegisteredVault(): Promise<boolean> {
+    try {
+      const legacy = await stat(this.vaultPath);
+      if (legacy.isFile()) return true;
+    } catch (error) {
+      if (!isNodeError(error, "ENOENT")) throw error;
+    }
+
+    let prefixes: Dirent[];
+    try {
+      prefixes = await readdir(this.usersDir, { withFileTypes: true });
+    } catch (error) {
+      if (isNodeError(error, "ENOENT")) return false;
+      throw error;
+    }
+
+    for (const prefix of prefixes) {
+      if (!prefix.isDirectory()) continue;
+      const prefixPath = resolve(this.usersDir, prefix.name);
+      let entries: Dirent[];
+      try {
+        entries = await readdir(prefixPath, { withFileTypes: true });
+      } catch (error) {
+        if (isNodeError(error, "ENOENT")) continue;
+        throw error;
+      }
+      for (const entry of entries) {
+        if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+        const accountKey = entry.name.slice(0, -".json".length);
+        if (ACCOUNT_KEY_PATTERN.test(accountKey)) return true;
+      }
+    }
+
+    return false;
   }
 
   private async ensureLegacyBackup(legacy: StoredVaultFile): Promise<void> {
@@ -1271,6 +1407,21 @@ function isLegacyClaimMarker(value: unknown): value is LegacyClaimMarker {
     (value.status === "pending"
       ? value.committedAt === null
       : isIsoTimestamp(value.committedAt))
+  );
+}
+
+function isInstanceSettingsFile(value: unknown): value is InstanceSettingsFile {
+  if (!isExactObject(value, [
+    "format",
+    "version",
+    "updatedAt",
+    "allowAccountCreation",
+  ])) return false;
+  return (
+    value.format === INSTANCE_SETTINGS_FILE_FORMAT &&
+    value.version === INSTANCE_SETTINGS_FILE_VERSION &&
+    isIsoTimestamp(value.updatedAt) &&
+    typeof value.allowAccountCreation === "boolean"
   );
 }
 

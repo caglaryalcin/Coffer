@@ -16,7 +16,7 @@ import SignInScreen from "./SignInScreen";
 import ThemeToggle from "./ThemeToggle";
 import TransferCenter, { type ImportDecision } from "./TransferCenter";
 import { formatCode, generateTotp, isTotpExpiring, isValidBase32, normalizeSecret, parseOtpAuthUri, totpWindow, type TotpAlgorithm } from "../lib/totp";
-import { changeVaultPassword, claimLegacyVault, deleteVaultAccount, getVaultBootstrap, identifyVault, loginVault, logoutVault, saveVault, setupVault, VAULT_API_TIMEOUT_MS, VaultApiError } from "../lib/vault-api";
+import { changeVaultPassword, claimLegacyVault, deleteVaultAccount, getVaultBootstrap, identifyVault, loginVault, logoutVault, saveVault, setupVault, updateInstanceSettings, VAULT_API_TIMEOUT_MS, VaultApiError, type VaultInstanceSettings } from "../lib/vault-api";
 import { createAuthProof, createEncryptedVault, DEFAULT_VAULT_RESUME_AGE_MS, decryptVaultPayload, encryptVaultPayload, REMEMBERED_VAULT_RESUME_AGE_MS, rotateVaultPassword, unlockVaultHeader, VaultCryptoError, type EncryptedVaultHeader, type VaultPayloadCipher, type VaultRuntime } from "../lib/vault-crypto";
 import { createEmptyVault, MAX_GROUP_CUSTOMIZATIONS, parsePersistedVault, withVaultUpdate, type PersistedVault, type VaultAccount, type VaultGroupColor, type VaultGroupCustomization, type VaultGroupIcon, type VaultMainScreen, type VaultTheme } from "../lib/vault-model";
 import { classifyVaultOutbox, clearVaultOutbox, createVaultOutboxRecord, readVaultOutbox, writeVaultOutbox, type VaultOutboxRecord } from "../lib/vault-outbox";
@@ -296,6 +296,10 @@ export default function VaultApp() {
   const [authStatus, setAuthStatus] = useState<AuthStatus>("loading");
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [instanceSettings, setInstanceSettings] = useState<VaultInstanceSettings>({
+    allowAccountCreation: true,
+  });
+  const [accountCreationEnabled, setAccountCreationEnabled] = useState(true);
   const [vault, setVault] = useState<PersistedVault | null>(null);
   const [runtime, setRuntime] = useState<VaultRuntime | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
@@ -1172,6 +1176,8 @@ export default function VaultApp() {
         error.code === "already_configured"
       )
         ? "An account already uses this email. Sign in instead."
+        : error instanceof VaultApiError && error.code === "registration_disabled"
+          ? "Account creation is disabled for this Coffer instance."
         : error instanceof VaultApiError && error.code === "legacy_claim_required"
           ? "Sign in to the existing encrypted vault before creating another account."
           : "The encrypted account could not be created. Check the server storage and try again.";
@@ -1217,6 +1223,8 @@ export default function VaultApp() {
       let result = await loginVault(authProof, loginIdentifier, rememberLogin);
       authenticated = true;
       ensureTransitionActive();
+      setInstanceSettings(result.instanceSettings);
+      setAccountCreationEnabled(result.accountCreationEnabled);
       let serverVault = parsePersistedVault(
         await decryptVaultPayload<unknown>(result.payload, nextRuntime.vaultKey),
       );
@@ -2269,6 +2277,8 @@ export default function VaultApp() {
       try {
         const bootstrap = await getVaultBootstrap();
         if (!active) return;
+        setInstanceSettings(bootstrap.instanceSettings);
+        setAccountCreationEnabled(bootstrap.accountCreationEnabled);
         if (!bootstrap.authenticated) {
           const rememberedHint = readRememberedVaultResumeHint();
           if (rememberedHint) {
@@ -2408,6 +2418,12 @@ export default function VaultApp() {
       }
     };
   }, [beginOpeningSession, openVaultRuntime]);
+
+  const setAccountCreationPreference = useCallback(async (allowAccountCreation: boolean) => {
+    const result = await updateInstanceSettings({ allowAccountCreation });
+    setInstanceSettings(result.instanceSettings);
+    setAccountCreationEnabled(result.accountCreationEnabled);
+  }, []);
 
   useEffect(() => {
     let channel: BroadcastChannel;
@@ -3820,6 +3836,7 @@ export default function VaultApp() {
         status={authStatus === "access" ? "access" : authStatus === "locking" ? "locking" : "loading"}
         busy={authBusy}
         error={authError}
+        accountCreationEnabled={accountCreationEnabled}
         onCreateAccount={handleCreateAccount}
         onSignIn={handleSignIn}
       />
@@ -4158,12 +4175,13 @@ export default function VaultApp() {
             autoLockMinutes={autoLockMinutes}
             lockWhenHidden={lockWhenHidden}
             clearClipboard={clearClipboard}
+            allowAccountCreation={instanceSettings.allowAccountCreation}
             onProfileChange={setProfile}
             onAutoLockMinutesChange={(minutes) => updateSettings({ autoLockMinutes: minutes })}
             onLockWhenHiddenChange={(enabled) => updateSettings({ lockWhenHidden: enabled })}
             onClearClipboardChange={(enabled) => updateSettings({ clearClipboard: enabled })}
+            onAllowAccountCreationChange={setAccountCreationPreference}
             onNotice={setToast}
-            onLockVault={() => void lockVault()}
             onSignOut={() => void lockVault()}
             onChangePassword={changeOwnPassword}
             onDeleteAccount={deleteOwnAccount}

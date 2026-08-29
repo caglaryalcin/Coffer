@@ -2,14 +2,23 @@ import type { EncryptedVaultHeader, VaultPayloadCipher } from "./vault-crypto";
 
 export const VAULT_API_TIMEOUT_MS = 10_000;
 
+export type VaultInstanceSettings = {
+  allowAccountCreation: boolean;
+};
+
+export type VaultAccountCreationState = {
+  instanceSettings: VaultInstanceSettings;
+  accountCreationEnabled: boolean;
+};
+
 export type VaultBootstrap =
-  | { authenticated: false }
+  | ({ authenticated: false } & VaultAccountCreationState)
   | {
       authenticated: true;
       revision: number;
       header: EncryptedVaultHeader;
       legacy: boolean;
-    };
+    } & VaultAccountCreationState;
 
 export type VaultIdentity =
   | { configured: false }
@@ -24,7 +33,7 @@ export type VaultLoginResult = {
   revision: number;
   payload: VaultPayloadCipher;
   legacy: boolean;
-};
+} & VaultAccountCreationState;
 
 export type VaultSaveResult = { revision: number; updatedAt: string };
 export type VaultChangePasswordResult = { revision: number; updatedAt: string };
@@ -127,6 +136,19 @@ function parseHeader(value: unknown): EncryptedVaultHeader | null {
   return isRecord(value) ? value as unknown as EncryptedVaultHeader : null;
 }
 
+function parseAccountCreationState(
+  body: Record<string, unknown>,
+): VaultAccountCreationState {
+  const instanceSettings = isRecord(body.instanceSettings) &&
+    typeof body.instanceSettings.allowAccountCreation === "boolean"
+    ? { allowAccountCreation: body.instanceSettings.allowAccountCreation }
+    : { allowAccountCreation: true };
+  const accountCreationEnabled = typeof body.accountCreationEnabled === "boolean"
+    ? body.accountCreationEnabled
+    : true;
+  return { instanceSettings, accountCreationEnabled };
+}
+
 export async function getVaultBootstrap(): Promise<VaultBootstrap> {
   const { body, status } = await requestVault("/api/vault", {
     credentials: "same-origin",
@@ -135,7 +157,8 @@ export async function getVaultBootstrap(): Promise<VaultBootstrap> {
   if (!isRecord(body) || typeof body.authenticated !== "boolean") {
     invalidResponse("The vault server returned invalid session data.", status);
   }
-  if (!body.authenticated) return { authenticated: false };
+  const accountCreationState = parseAccountCreationState(body);
+  if (!body.authenticated) return { authenticated: false, ...accountCreationState };
 
   const header = parseHeader(body.header);
   if (!isRevision(body.revision) || !header) {
@@ -149,6 +172,7 @@ export async function getVaultBootstrap(): Promise<VaultBootstrap> {
     revision: body.revision,
     header,
     legacy: body.legacy === true,
+    ...accountCreationState,
   };
 }
 
@@ -210,6 +234,27 @@ export async function loginVault(
     revision: body.revision,
     payload: body.payload as unknown as VaultPayloadCipher,
     legacy: body.legacy,
+    ...parseAccountCreationState(body),
+  };
+}
+
+export async function updateInstanceSettings(input: {
+  allowAccountCreation: boolean;
+}): Promise<VaultAccountCreationState> {
+  const { body, status } = await postVault({ action: "update_instance_settings", ...input });
+  if (
+    !isRecord(body) ||
+    !isRecord(body.instanceSettings) ||
+    typeof body.instanceSettings.allowAccountCreation !== "boolean" ||
+    typeof body.accountCreationEnabled !== "boolean"
+  ) {
+    invalidResponse("The vault server returned invalid instance settings.", status);
+  }
+  return {
+    instanceSettings: {
+      allowAccountCreation: body.instanceSettings.allowAccountCreation,
+    },
+    accountCreationEnabled: body.accountCreationEnabled,
   };
 }
 

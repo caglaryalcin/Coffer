@@ -8,6 +8,7 @@ export type SignInScreenProps = {
   status: "loading" | "access" | "locking";
   busy: boolean;
   error: string | null;
+  accountCreationEnabled: boolean;
   onSignIn: (details: {
     email: string;
     password: string;
@@ -80,6 +81,7 @@ export default function SignInScreen({
   status,
   busy,
   error,
+  accountCreationEnabled,
   onSignIn,
   onCreateAccount,
 }: SignInScreenProps) {
@@ -95,7 +97,8 @@ export default function SignInScreen({
   const [submissionError, setSubmissionError] = useState<string | null>(null);
 
   const isLocking = status === "locking";
-  const isCreateAccount = mode === "create-account";
+  const isCreateAccount = accountCreationEnabled && mode === "create-account";
+  const activeMode: AccessMode = isCreateAccount ? "create-account" : "sign-in";
   const isBusy = busy || submitting;
   const visibleError = error ?? submissionError;
 
@@ -138,6 +141,7 @@ export default function SignInScreen({
 
   const selectMode = (nextMode: AccessMode) => {
     if (isBusy || nextMode === mode) return;
+    if (nextMode === "create-account" && !accountCreationEnabled) return;
     setMode(nextMode);
     setPassword("");
     setConfirmation("");
@@ -150,7 +154,7 @@ export default function SignInScreen({
     if (isBusy || status !== "access") return;
 
     const fields = { name, email, password, confirmation };
-    const nextErrors = validateAccessFields(mode, fields);
+    const nextErrors = validateAccessFields(activeMode, fields);
     setFieldErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
@@ -227,24 +231,26 @@ export default function SignInScreen({
         aria-describedby={isCreateAccount ? ids.formDescription : undefined}
         aria-busy={isBusy}
       >
-        <div className="auth-mode-tabs" role="group" aria-label="Account access">
-          <button
-            type="button"
-            aria-pressed={!isCreateAccount}
-            disabled={isBusy}
-            onClick={() => selectMode("sign-in")}
-          >
-            Sign in
-          </button>
-          <button
-            type="button"
-            aria-pressed={isCreateAccount}
-            disabled={isBusy}
-            onClick={() => selectMode("create-account")}
-          >
-            Create account
-          </button>
-        </div>
+        {accountCreationEnabled && (
+          <div className="auth-mode-tabs" role="group" aria-label="Account access">
+            <button
+              type="button"
+              aria-pressed={!isCreateAccount}
+              disabled={isBusy}
+              onClick={() => selectMode("sign-in")}
+            >
+              Sign in
+            </button>
+            <button
+              type="button"
+              aria-pressed={isCreateAccount}
+              disabled={isBusy}
+              onClick={() => selectMode("create-account")}
+            >
+              Create account
+            </button>
+          </div>
+        )}
 
         <div id={ids.accessPanel}>
           {isCreateAccount && (

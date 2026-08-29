@@ -76,6 +76,9 @@ export async function POST(request: Request): Promise<Response> {
       case "change_password":
         response = await changePassword(request, body);
         break;
+      case "update_instance_settings":
+        response = await updateInstanceSettings(request, body);
+        break;
       case "delete_account":
         response = await deleteAccount(request, body);
         break;
@@ -176,7 +179,12 @@ async function login(request: Request, body: JsonObject): Promise<Response> {
         { sessionTtlMs: sessionTtlMs(rememberLogin) },
       );
   return json(
-    { revision: result.revision, payload: result.payload, legacy: result.legacy },
+    {
+      revision: result.revision,
+      payload: result.payload,
+      legacy: result.legacy,
+      ...await store.getAccountCreationState(),
+    },
     {
       headers: {
         "Set-Cookie": sessionCookie(
@@ -187,6 +195,24 @@ async function login(request: Request, body: JsonObject): Promise<Response> {
       },
     },
   );
+}
+
+async function updateInstanceSettings(request: Request, body: JsonObject): Promise<Response> {
+  requireSameOrigin(request);
+  if (!hasExactKeys(body, ["action", "allowAccountCreation"])) {
+    throw invalidSchema();
+  }
+  if (
+    body.action !== "update_instance_settings" ||
+    typeof body.allowAccountCreation !== "boolean"
+  ) {
+    throw invalidSchema();
+  }
+
+  return json(await store.updateInstanceSettings({
+    sessionToken: sessionToken(request),
+    allowAccountCreation: body.allowAccountCreation,
+  }));
 }
 
 async function claimLegacy(request: Request, body: JsonObject): Promise<Response> {
@@ -500,6 +526,7 @@ function errorResponse(error: unknown): Response {
     const statusByCode: Record<typeof error.code, number> = {
       already_configured: 409,
       not_configured: 409,
+      registration_disabled: 403,
       invalid_credentials: 401,
       rate_limited: 429,
       unauthorized: 401,

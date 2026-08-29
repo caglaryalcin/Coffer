@@ -39,14 +39,15 @@ export type SettingsCenterProps = {
   autoLockMinutes: number;
   lockWhenHidden: boolean;
   clearClipboard: boolean;
+  allowAccountCreation: boolean;
   onProfileChange: (
     patch: UserProfilePatch,
   ) => ProfileMutationResult | Promise<ProfileMutationResult>;
   onAutoLockMinutesChange: (minutes: number) => void;
   onLockWhenHiddenChange: (enabled: boolean) => void;
   onClearClipboardChange: (enabled: boolean) => void;
+  onAllowAccountCreationChange: (enabled: boolean) => void | Promise<void>;
   onNotice: (message: string) => void;
-  onLockVault: () => void;
   onSignOut: () => void;
   onChangePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   onDeleteAccount: (password: string) => Promise<void>;
@@ -62,12 +63,13 @@ export default function SettingsCenter({
   autoLockMinutes,
   lockWhenHidden,
   clearClipboard,
+  allowAccountCreation,
   onProfileChange,
   onAutoLockMinutesChange,
   onLockWhenHiddenChange,
   onClearClipboardChange,
+  onAllowAccountCreationChange,
   onNotice,
-  onLockVault,
   onSignOut,
   onChangePassword,
   onDeleteAccount,
@@ -86,6 +88,8 @@ export default function SettingsCenter({
   const [passwordBusy, setPasswordBusy] = useState(false);
   const [passwordError, setPasswordError] = useState("");
   const [passwordErrorField, setPasswordErrorField] = useState<PasswordErrorField>(null);
+  const [instanceSettingsBusy, setInstanceSettingsBusy] = useState(false);
+  const [instanceSettingsError, setInstanceSettingsError] = useState("");
   const [deleteExpanded, setDeleteExpanded] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
@@ -321,6 +325,21 @@ export default function SettingsCenter({
     }
   };
 
+  const changeAccountCreation = async (event: ChangeEvent<HTMLInputElement>) => {
+    const enabled = event.currentTarget.checked;
+    if (instanceSettingsBusy || passwordBusy || avatarBusy || profileBusy || deleteBusy) return;
+    setInstanceSettingsError("");
+    setInstanceSettingsBusy(true);
+    try {
+      await onAllowAccountCreationChange(enabled);
+      onNotice(enabled ? "Account creation enabled." : "Account creation disabled.");
+    } catch {
+      setInstanceSettingsError("Coffer could not update account creation. Please try again.");
+    } finally {
+      setInstanceSettingsBusy(false);
+    }
+  };
+
   return (
     <section className="settings-center" id="settings-root" aria-label="Settings" tabIndex={-1}>
       <div className="settings-layout">
@@ -511,7 +530,11 @@ export default function SettingsCenter({
               <span><label htmlFor="clear-copied-codes">Clear copied codes</label><small>Best-effort removal after 30 seconds if the clipboard still contains that code.</small></span>
               <input id="clear-copied-codes" type="checkbox" checked={clearClipboard} onChange={(event) => onClearClipboardChange(event.target.checked)} disabled={passwordBusy} />
             </div>
-            <div className="settings-inline-actions"><button type="button" onClick={onLockVault} disabled={passwordBusy}>Lock vault now</button></div>
+            <div className="settings-toggle-row">
+              <span><label htmlFor="allow-account-creation">Allow new account registration</label><small>Keep the Create account tab available and allow new users to register on this instance.</small></span>
+              <input id="allow-account-creation" type="checkbox" checked={allowAccountCreation} onChange={(event) => void changeAccountCreation(event)} disabled={passwordBusy || avatarBusy || profileBusy || deleteBusy || instanceSettingsBusy} />
+            </div>
+            {instanceSettingsError && <p className="settings-error" role="alert">{instanceSettingsError}</p>}
           </section>
 
           <section className="settings-about" id="about-settings" aria-labelledby="about-title" tabIndex={-1}>
