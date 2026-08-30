@@ -44,6 +44,9 @@ codes from the popup without opening the Coffer tab. Browser-extension API
 access is limited to unlock/read actions; vault changes still require the
 same-origin Coffer web app session.
 
+Firefox and Chrome extension origins are accepted directly in local
+development and deployed environments.
+
 ## Docker Compose
 
 ```bash
@@ -70,7 +73,6 @@ keeps encrypted vault data across container restarts and replacements.
 | --- | --- | --- |
 | `COFFER_DATA_DIR` | `data` (`/app/data` in Docker) | Directory containing encrypted vault files. Mount persistent storage here. |
 | `COFFER_TRUST_PROXY` | `0` | Set to `1` only behind a trusted reverse proxy so Coffer accepts forwarded origin, protocol, and client IP headers. |
-| `COFFER_ALLOWED_DEV_ORIGINS` | Empty | Comma-separated temporary extension UUIDs or extension origins allowed by the local development server. Not needed for production extension access. |
 | `VINEXT_TRUSTED_HOSTS` | Empty | Comma-separated public `host[:port]` allowlist, such as `coffer.example.com`. Recommended for HTTPS reverse-proxy deployments. |
 | `HOST` | `0.0.0.0` in Docker | Address the application server listens on. |
 | `PORT` | `3000` | Application server port inside the container. |
@@ -78,11 +80,11 @@ keeps encrypted vault data across container restarts and replacements.
 | `APP_HOST` | `127.0.0.1` | Docker Compose host address used for the published port. |
 | `APP_PORT` | `3000` | Docker Compose host port. |
 
-The `COFFER_*`, `VINEXT_TRUSTED_HOSTS`, `HOST`, `PORT`, and `NODE_ENV` entries
-are container environment variables. `APP_HOST` and `APP_PORT` are Docker
-Compose substitutions. When using Compose, add `VINEXT_TRUSTED_HOSTS` to
-`services.app.environment`; placing it only in `.env` does not pass it into
-the container.
+`COFFER_DATA_DIR`, `COFFER_TRUST_PROXY`, `VINEXT_TRUSTED_HOSTS`, `HOST`, `PORT`,
+and `NODE_ENV` are container environment variables. `APP_HOST` and `APP_PORT`
+are Docker Compose substitutions. When using Compose, add
+`VINEXT_TRUSTED_HOSTS` to `services.app.environment`; placing it only in `.env`
+does not pass it into the container.
 
 For HTTPS behind a reverse proxy, set both `COFFER_TRUST_PROXY=1` and
 `VINEXT_TRUSTED_HOSTS` to the public hostname. The proxy must overwrite and

@@ -12,6 +12,10 @@ const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1_000;
 const RELEASE_PAGE_PREFIX = "https://github.com/caglaryalcin/Coffer/releases/tag/";
 const FIREFOX_EXTENSION_URL = "https://addons.mozilla.org/en-US/firefox/addon/coffer/";
 const CHROME_EXTENSION_URL = "https://chromewebstore.google.com/detail/coffer/ajekhlpjkcohkdedhkdjkadilecboimd";
+const FIREFOX_EXTENSION_PREVIEW_GIF = "/firefox-extension-preview.gif";
+const FIREFOX_EXTENSION_PREVIEW_STILL = "/firefox-extension-preview.png";
+const CHROME_EXTENSION_PREVIEW_GIF = "/chrome-extension-preview.gif";
+const CHROME_EXTENSION_PREVIEW_STILL = "/chrome-extension-preview.png";
 
 type AvailableUpdate = {
   version: string;
@@ -98,22 +102,24 @@ export default function SidebarFooter() {
         <span className="sidebar-footer-version" aria-label={`Coffer version ${COFFER_VERSION_NUMBER}`}>{COFFER_VERSION}</span>
       )}
       <nav className="sidebar-footer-links" aria-label="Coffer links">
-        <a
-          className="sidebar-footer-link"
+        <ExtensionPreviewLink
+          browser="Firefox"
           href={FIREFOX_EXTENSION_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Get the Firefox extension in a new tab"
-          title="Firefox extension"
-        ><span className="sidebar-footer-firefox-icon" aria-hidden="true" /></a>
-        <a
-          className="sidebar-footer-link"
+          iconClassName="sidebar-footer-firefox-icon"
+          previewGif={FIREFOX_EXTENSION_PREVIEW_GIF}
+          previewStill={FIREFOX_EXTENSION_PREVIEW_STILL}
+          previewWidth={1281}
+          previewHeight={874}
+        />
+        <ExtensionPreviewLink
+          browser="Chrome"
           href={CHROME_EXTENSION_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Get the Chrome extension in a new tab"
-          title="Chrome extension"
-        ><span className="sidebar-footer-chrome-icon" aria-hidden="true" /></a>
+          iconClassName="sidebar-footer-chrome-icon"
+          previewGif={CHROME_EXTENSION_PREVIEW_GIF}
+          previewStill={CHROME_EXTENSION_PREVIEW_STILL}
+          previewWidth={1279}
+          previewHeight={877}
+        />
         <a
           className="sidebar-footer-link"
           href="https://github.com/caglaryalcin/Coffer"
@@ -132,6 +138,52 @@ export default function SidebarFooter() {
         ><span className="sidebar-footer-help-icon" aria-hidden="true">?</span></a>
       </nav>
     </footer>
+  );
+}
+
+function ExtensionPreviewLink({
+  browser,
+  href,
+  iconClassName,
+  previewGif,
+  previewStill,
+  previewWidth,
+  previewHeight,
+}: {
+  browser: "Firefox" | "Chrome";
+  href: string;
+  iconClassName: string;
+  previewGif: string;
+  previewStill: string;
+  previewWidth: number;
+  previewHeight: number;
+}) {
+  return (
+    <a
+      className="sidebar-footer-link sidebar-footer-extension-link"
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={`Get the ${browser} extension in a new tab`}
+    >
+      <span className={iconClassName} aria-hidden="true" />
+      <span className="sidebar-extension-preview" aria-hidden="true">
+        <span className="sidebar-extension-preview-bar">
+          <span className="sidebar-extension-preview-dots"><i /><i /><i /></span>
+          <span>{browser} extension</span>
+        </span>
+        <picture>
+          <source media="(prefers-reduced-motion: reduce)" srcSet={previewStill} />
+          <img
+            src={previewGif}
+            alt=""
+            width={previewWidth}
+            height={previewHeight}
+            loading="lazy"
+          />
+        </picture>
+      </span>
+    </a>
   );
 }
 
