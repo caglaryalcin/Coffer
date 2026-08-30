@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import type { VaultColor } from "../lib/vault-model";
+import { CURATED_SERVICE_BRAND_MATCH_RULES as curatedMatchRules } from "./service-brand-rules";
 import {
   GENERATED_CURATED_SERVICE_BRAND_IDS,
   GENERATED_SERVICE_BRAND_SOURCE,
@@ -46,15 +47,6 @@ type CatalogBrand = ResolvedServiceBrand & {
   pickerKeys: readonly string[];
 };
 
-type CuratedMatchRule = {
-  id: string;
-  aliases?: readonly string[];
-  color?: `#${string}`;
-  decorated?: boolean;
-  domains?: readonly string[];
-  title?: string;
-};
-
 const FONT_AWESOME_BRAND_IDS = new Set([
   "amazon",
   "aws",
@@ -75,87 +67,6 @@ const selfhstVariants = [
 ] as const;
 let selfhstFamiliesByReference: ReadonlyMap<string, GeneratedSelfhstServiceBrandFamily> | null = null;
 let cachedSelfhstBrandOptions: readonly ServiceBrandOption[] | null = null;
-
-const curatedMatchRules: readonly CuratedMatchRule[] = [
-  { id: "atomic", title: "Atomic Mail", aliases: ["atomic mail", "atomicmail"], decorated: true, domains: ["atomicmail.io"] },
-  { id: "github", aliases: ["github"], color: "#181717", decorated: true, domains: ["github.com"] },
-  { id: "google", aliases: ["google", "gmail", "google workspace"], color: "#4285f4", decorated: true, domains: ["google.com", "gmail.com", "googlemail.com"] },
-  { id: "microsoft", aliases: ["microsoft", "microsoft 365", "office 365", "outlook"], color: "#5e5e5e", decorated: true, domains: ["microsoft.com", "microsoftonline.com", "live.com", "outlook.com", "office.com"] },
-  { id: "azure", title: "Microsoft Azure", aliases: ["azure", "microsoft azure"], color: "#ffffff", decorated: true, domains: ["azure.com"] },
-  { id: "heroku", aliases: ["heroku"], color: "#f4f3ee", decorated: true, domains: ["heroku.com"] },
-  { id: "snapp", aliases: ["snapp", "snapp app", "snapp platform"], color: "#131b2e", decorated: true },
-  { id: "aws", title: "Amazon Web Services", aliases: ["aws", "amazon web services"], color: "#232f3e", decorated: true, domains: ["aws.amazon.com", "amazonaws.com"] },
-  { id: "amazon", title: "Amazon", aliases: ["amazon"], color: "#9a5b00", decorated: true, domains: ["amazon.com"] },
-  { id: "apple", aliases: ["apple", "icloud"], color: "#000000", decorated: true, domains: ["apple.com", "icloud.com"] },
-  { id: "discord", aliases: ["discord"], color: "#5865f2", decorated: true, domains: ["discord.com", "discordapp.com"] },
-  { id: "facebook", aliases: ["facebook"], color: "#0866ff", decorated: true, domains: ["facebook.com", "fb.com"] },
-  { id: "meta", aliases: ["meta"], color: "#0467df", decorated: true, domains: ["meta.com"] },
-  { id: "instagram", aliases: ["instagram"], color: "#a52a6f", decorated: true, domains: ["instagram.com"] },
-  { id: "x", aliases: ["x"], color: "#000000", domains: ["x.com"] },
-  { id: "twitter", title: "Twitter", aliases: ["twitter"], color: "#1d79a8", decorated: true, domains: ["twitter.com"] },
-  { id: "reddit", aliases: ["reddit"], color: "#c93600", decorated: true, domains: ["reddit.com"] },
-  { id: "gitlab", aliases: ["gitlab"], color: "#b34715", decorated: true, domains: ["gitlab.com"] },
-  { id: "bitbucket", aliases: ["bitbucket"], color: "#0052cc", decorated: true, domains: ["bitbucket.org"] },
-  { id: "dropbox", aliases: ["dropbox"], color: "#0061ff", decorated: true, domains: ["dropbox.com"] },
-  { id: "slack", aliases: ["slack"], color: "#4a154b", decorated: true, domains: ["slack.com"] },
-  { id: "notion", aliases: ["notion"], color: "#000000", decorated: true, domains: ["notion.so", "notion.com"] },
-  { id: "figma", aliases: ["figma"], color: "#a33b19", decorated: true, domains: ["figma.com"] },
-  { id: "cloudflare", aliases: ["cloudflare"], color: "#a84900", decorated: true, domains: ["cloudflare.com"] },
-  { id: "digitalocean", aliases: ["digitalocean", "digital ocean"], color: "#006bcf", decorated: true, domains: ["digitalocean.com"] },
-  { id: "binance", aliases: ["binance"], color: "#806300", decorated: true, domains: ["binance.com"] },
-  { id: "coinbase", aliases: ["coinbase"], color: "#0052cc", decorated: true, domains: ["coinbase.com"] },
-  { id: "paypal", aliases: ["paypal"], color: "#002991", decorated: true, domains: ["paypal.com", "paypal.me"] },
-  { id: "stripe", aliases: ["stripe"], color: "#635bff", decorated: true, domains: ["stripe.com"] },
-  { id: "steam", aliases: ["steam"], color: "#000000", decorated: true, domains: ["steampowered.com", "steamcommunity.com"] },
-  { id: "twitch", aliases: ["twitch"], color: "#7a2fd1", decorated: true, domains: ["twitch.tv"] },
-  { id: "spotify", aliases: ["spotify"], color: "#126e35", decorated: true, domains: ["spotify.com"] },
-  { id: "linkedin", title: "LinkedIn", aliases: ["linkedin", "linked in"], color: "#0a66c2", decorated: true, domains: ["linkedin.com"] },
-  { id: "atlassian", aliases: ["atlassian"], color: "#0052cc", decorated: true, domains: ["atlassian.com"] },
-  { id: "proton", aliases: ["proton", "protonmail", "proton mail"], color: "#6d4aff", decorated: true, domains: ["proton.me", "protonmail.com", "protonvpn.com"] },
-  { id: "openai", title: "OpenAI", aliases: ["openai", "chatgpt"], color: "#111827", decorated: true, domains: ["openai.com", "chatgpt.com"] },
-
-  { id: "1password", domains: ["1password.com"] },
-  { id: "2fas", domains: ["2fas.com"] },
-  { id: "airbnb", domains: ["airbnb.com"] },
-  { id: "alibabadotcom", domains: ["alibaba.com"] },
-  { id: "aliexpress", domains: ["aliexpress.com"] },
-  { id: "anthropic", aliases: ["claude"], domains: ["anthropic.com", "claude.ai"] },
-  { id: "auth0", domains: ["auth0.com"] },
-  { id: "battledotnet", aliases: ["battle net"], domains: ["battle.net", "blizzard.com"] },
-  { id: "bookingdotcom", aliases: ["booking.com"], domains: ["booking.com"] },
-  { id: "ebay", domains: ["ebay.com"] },
-  { id: "epicgames", domains: ["epicgames.com"] },
-  { id: "etsy", domains: ["etsy.com"] },
-  { id: "evernote", domains: ["evernote.com"] },
-  { id: "huawei", domains: ["huawei.com"] },
-  { id: "intel", domains: ["intel.com"] },
-  { id: "kick", domains: ["kick.com"] },
-  { id: "lastpass", domains: ["lastpass.com"] },
-  { id: "mailchimp", domains: ["mailchimp.com"] },
-  { id: "mastercard", domains: ["mastercard.com"] },
-  { id: "medium", domains: ["medium.com"] },
-  { id: "mongodb", domains: ["mongodb.com"] },
-  { id: "netflix", domains: ["netflix.com"] },
-  { id: "nvidia", domains: ["nvidia.com"] },
-  { id: "patreon", domains: ["patreon.com"] },
-  { id: "pinterest", domains: ["pinterest.com"] },
-  { id: "playstation", domains: ["playstation.com"] },
-  { id: "roblox", domains: ["roblox.com"] },
-  { id: "samsung", domains: ["samsung.com"] },
-  { id: "shopify", domains: ["shopify.com"] },
-  { id: "snapchat", domains: ["snapchat.com"] },
-  { id: "stackoverflow", aliases: ["stack overflow"], domains: ["stackoverflow.com", "stackexchange.com"] },
-  { id: "telegram", domains: ["telegram.org", "t.me"] },
-  { id: "tiktok", domains: ["tiktok.com"] },
-  { id: "todoist", domains: ["todoist.com"] },
-  { id: "uber", domains: ["uber.com"] },
-  { id: "vercel", domains: ["vercel.com"] },
-  { id: "vk", domains: ["vk.com"] },
-  { id: "whatsapp", domains: ["whatsapp.com"] },
-  { id: "wordpress", domains: ["wordpress.com", "wordpress.org"] },
-  { id: "youtube", domains: ["youtube.com", "youtu.be"] },
-  { id: "zoom", domains: ["zoom.us"] },
-];
 
 const popularBrandIds = [
   "google", "microsoft", "azure", "apple", "github", "amazon", "aws", "facebook",

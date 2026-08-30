@@ -12,6 +12,7 @@ const EXTENSION_API_METHODS = new Map([
   ["/api/service-brands", new Set(["GET", "OPTIONS"])],
   ["/api/vault", new Set(["POST", "OPTIONS"])],
 ]);
+const EXTENSION_BRAND_ASSET = /^\/brands\/[a-z0-9][a-z0-9_.-]{0,128}\.svg$/u;
 
 // Keep this aligned with lib/server/extension-origin.ts. The dev shim only
 // bypasses Vinext; the API still performs its own canonical origin validation.
@@ -46,10 +47,12 @@ function allowBrowserExtensionDevOrigins(): Plugin {
           return;
         }
 
+        const extensionRouteAllowed = EXTENSION_API_METHODS.get(pathname)?.has(method) === true ||
+          (EXTENSION_BRAND_ASSET.test(pathname) && (method === "GET" || method === "HEAD"));
         if (
           typeof origin === "string" &&
           EXTENSION_ORIGIN_PATTERN.test(origin) &&
-          EXTENSION_API_METHODS.get(pathname)?.has(method)
+          extensionRouteAllowed
         ) {
           setForwardedHost(request, new URL(origin).hostname.toLowerCase());
         }
