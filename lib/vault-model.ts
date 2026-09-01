@@ -8,7 +8,8 @@ export const PRE_GROUP_CUSTOMIZATION_VAULT_PAYLOAD_VERSION = 4 as const;
 export const PRE_ACCOUNT_ICON_VAULT_PAYLOAD_VERSION = 5 as const;
 export const PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION = 6 as const;
 export const PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION = 7 as const;
-export const VAULT_PAYLOAD_VERSION = 8 as const;
+export const PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION = 8 as const;
+export const VAULT_PAYLOAD_VERSION = 9 as const;
 export const MAX_VAULT_ACCOUNTS = 5_000;
 export const MAX_PROFILE_AVATAR_BYTES = 512 * 1024;
 export const ACCOUNT_ICON_SIZE = 128;
@@ -33,8 +34,24 @@ export type VaultGroupIcon =
   | "travel"
   | "education"
   | "health"
-  | "social";
-export type VaultGroupColor = "rose" | "amber" | "lime" | "emerald" | "sky" | "blue" | "violet" | "slate";
+  | "social"
+  | "import"
+  | "ai"
+  | "drive"
+  | "forum";
+export type VaultGroupColor =
+  | "rose"
+  | "amber"
+  | "lime"
+  | "emerald"
+  | "sky"
+  | "blue"
+  | "violet"
+  | "slate"
+  | "coral"
+  | "teal"
+  | "magenta"
+  | "indigo";
 
 export type VaultGroupCustomization = {
   name: string;
@@ -125,8 +142,25 @@ const GROUP_ICONS = [
   "education",
   "health",
   "social",
+  "import",
+  "ai",
+  "drive",
+  "forum",
 ] as const satisfies readonly VaultGroupIcon[];
-const GROUP_COLORS = ["rose", "amber", "lime", "emerald", "sky", "blue", "violet", "slate"] as const satisfies readonly VaultGroupColor[];
+const GROUP_COLORS = [
+  "rose",
+  "amber",
+  "lime",
+  "emerald",
+  "sky",
+  "blue",
+  "violet",
+  "slate",
+  "coral",
+  "teal",
+  "magenta",
+  "indigo",
+] as const satisfies readonly VaultGroupColor[];
 export const MAX_GROUP_CUSTOMIZATIONS = 256;
 export const MAX_GROUP_ORDER_ENTRIES = MAX_VAULT_ACCOUNTS + MAX_GROUP_CUSTOMIZATIONS;
 export const MAX_VAULT_GROUP_NAME_LENGTH = 80;
@@ -273,6 +307,7 @@ function parseProfile(value: unknown, version: SupportedVaultPayloadVersion): Va
     version === PRE_ACCOUNT_ICON_VAULT_PAYLOAD_VERSION ||
     version === PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION ||
     version === PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION ||
+    version === PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION ||
     version === VAULT_PAYLOAD_VERSION;
   requireExactFields(value, supportsCustomization ? PROFILE_FIELDS : LEGACY_PROFILE_FIELDS, "profile");
   const name = requireText(value.name, "profile.name", 80);
@@ -293,6 +328,7 @@ type SupportedVaultPayloadVersion =
   | typeof PRE_ACCOUNT_ICON_VAULT_PAYLOAD_VERSION
   | typeof PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION
   | typeof PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION
+  | typeof PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION
   | typeof VAULT_PAYLOAD_VERSION;
 
 function parseMainScreen(value: unknown): VaultMainScreen {
@@ -316,7 +352,7 @@ function parseSettings(value: unknown, version: SupportedVaultPayloadVersion): V
     ? VERSION_1_SETTINGS_FIELDS
     : version === PREVIOUS_VAULT_PAYLOAD_VERSION
       ? VERSION_2_SETTINGS_FIELDS
-      : version === VAULT_PAYLOAD_VERSION
+      : version === PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION || version === VAULT_PAYLOAD_VERSION
         ? SETTINGS_FIELDS
         : PRE_MAIN_SCREEN_SETTINGS_FIELDS;
   requireExactFields(value, fields, "settings");
@@ -330,7 +366,7 @@ function parseSettings(value: unknown, version: SupportedVaultPayloadVersion): V
   ) throw new Error("settings.interfaceScale is invalid");
   if (version !== LEGACY_VAULT_PAYLOAD_VERSION && value.theme !== "dark" && value.theme !== "light") throw new Error("settings.theme is invalid");
   const theme: VaultTheme = version === LEGACY_VAULT_PAYLOAD_VERSION ? "dark" : value.theme as VaultTheme;
-  const mainScreen = version === VAULT_PAYLOAD_VERSION
+  const mainScreen = version === PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION || version === VAULT_PAYLOAD_VERSION
     ? parseMainScreen(value.mainScreen)
     : { kind: "all" } as const;
   return {
@@ -352,10 +388,12 @@ function parseAccount(value: unknown, index: number, version: SupportedVaultPayl
     version === PRE_ACCOUNT_ICON_VAULT_PAYLOAD_VERSION ||
     version === PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION ||
     version === PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION ||
+    version === PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION ||
     version === VAULT_PAYLOAD_VERSION;
   const supportsAccountIcons =
     version === PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION ||
     version === PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION ||
+    version === PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION ||
     version === VAULT_PAYLOAD_VERSION;
   requireExactFields(
     value,
@@ -557,6 +595,7 @@ export function parsePersistedVault(value: unknown): PersistedVault {
       value.version !== PRE_ACCOUNT_ICON_VAULT_PAYLOAD_VERSION &&
       value.version !== PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION &&
       value.version !== PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION &&
+      value.version !== PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION &&
       value.version !== VAULT_PAYLOAD_VERSION
     )
   ) {
@@ -567,9 +606,11 @@ export function parsePersistedVault(value: unknown): PersistedVault {
     sourceVersion === PRE_ACCOUNT_ICON_VAULT_PAYLOAD_VERSION ||
     sourceVersion === PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION ||
     sourceVersion === PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION ||
+    sourceVersion === PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION ||
     sourceVersion === VAULT_PAYLOAD_VERSION;
   const supportsGroupOrder =
     sourceVersion === PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION ||
+    sourceVersion === PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION ||
     sourceVersion === VAULT_PAYLOAD_VERSION;
   requireExactFields(
     value,

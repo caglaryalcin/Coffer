@@ -207,6 +207,7 @@ const COMMON_GROUP_STYLES: Readonly<Record<string, Pick<VaultGroupCustomization,
   personal: { icon: "person", color: "blue" },
   work: { icon: "briefcase", color: "amber" },
   finance: { icon: "shield", color: "lime" },
+  imported: { icon: "import", color: "rose" },
 };
 
 function groupKey(value: string) {
@@ -4150,8 +4151,10 @@ export default function VaultApp() {
                     data-color={customization.color}
                     aria-hidden="true"
                   />
-                  <span className="group-name" data-i18n-ignore>{name}</span>
-                  <span className="group-count">{counts[name]}</span>
+                  <span className="group-label">
+                    <span className="group-name" data-i18n-ignore>{name}</span>
+                    <span className="group-count">{counts[name]}</span>
+                  </span>
                 </button>
                 <button
                   type="button"

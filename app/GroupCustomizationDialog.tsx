@@ -30,7 +30,7 @@ export type GroupCustomizationDialogProps = {
 };
 
 export const GROUP_ICON_OPTIONS = [
-  { value: "dot", label: "Dot" },
+  { value: "dot", label: "Mail" },
   { value: "folder", label: "Folder" },
   { value: "briefcase", label: "Briefcase" },
   { value: "person", label: "Person" },
@@ -46,6 +46,10 @@ export const GROUP_ICON_OPTIONS = [
   { value: "education", label: "Education" },
   { value: "health", label: "Health" },
   { value: "social", label: "Social" },
+  { value: "import", label: "Import" },
+  { value: "ai", label: "AI" },
+  { value: "drive", label: "Drive" },
+  { value: "forum", label: "Forum" },
 ] as const satisfies readonly { value: VaultGroupIcon; label: string }[];
 
 export const GROUP_COLOR_OPTIONS = [
@@ -57,6 +61,10 @@ export const GROUP_COLOR_OPTIONS = [
   { value: "blue", label: "Blue" },
   { value: "violet", label: "Violet" },
   { value: "slate", label: "Slate" },
+  { value: "coral", label: "Coral" },
+  { value: "teal", label: "Teal" },
+  { value: "magenta", label: "Magenta" },
+  { value: "indigo", label: "Indigo" },
 ] as const satisfies readonly { value: VaultGroupColor; label: string }[];
 
 const CONTROL_CHARACTER = /\p{Cc}/u;
