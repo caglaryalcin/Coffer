@@ -313,6 +313,7 @@ export default function VaultApp() {
   const [view, setView] = useState<View>("all");
   const [cardView, setCardView] = useState<CardView>("default");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [addMode, setAddMode] = useState<"qr" | "link" | "manual">("qr");
@@ -344,6 +345,8 @@ export default function VaultApp() {
   const [newPeriod, setNewPeriod] = useState(30);
   const [formError, setFormError] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
+  const mobileSidebarRef = useRef<HTMLElement>(null);
+  const mobileSidebarTriggerRef = useRef<HTMLButtonElement>(null);
   const addDialogRef = useRef<HTMLElement>(null);
   const manualServiceInputRef = useRef<HTMLInputElement>(null);
   const addTriggerRef = useRef<HTMLElement | null>(null);
@@ -390,6 +393,12 @@ export default function VaultApp() {
   const resumeSavePromiseRef = useRef<Promise<void> | null>(null);
   const lastResumeRetryAtRef = useRef(0);
   const lastResumeTouchAtRef = useRef(0);
+
+  const closeMobileSidebar = useCallback(() => {
+    setMobileSidebarOpen(false);
+    setSidebarMenuTarget(null);
+    setSidebarMenuPosition(null);
+  }, []);
 
   const clearSelectedAccountDrag = useCallback(() => {
     selectedAccountDragRef.current = false;
@@ -2646,6 +2655,67 @@ export default function VaultApp() {
   }, []);
 
   useEffect(() => {
+    const mobileBreakpoint = window.matchMedia("(max-width: 620px)");
+    const closeAtDesktopWidth = () => {
+      if (!mobileBreakpoint.matches) closeMobileSidebar();
+    };
+    mobileBreakpoint.addEventListener("change", closeAtDesktopWidth);
+    return () => mobileBreakpoint.removeEventListener("change", closeAtDesktopWidth);
+  }, [closeMobileSidebar]);
+
+  useEffect(() => {
+    if (!mobileSidebarOpen) return;
+    const sidebar = mobileSidebarRef.current;
+    if (!sidebar) return;
+
+    const previousOverflow = document.body.style.overflow;
+    const trigger = mobileSidebarTriggerRef.current;
+    const focusableSelector = "button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+    const focusDrawer = window.requestAnimationFrame(() => {
+      sidebar.querySelector<HTMLElement>(".mobile-sidebar-close")?.focus({ preventScroll: true });
+    });
+    const onDrawerKeyDown = (event: KeyboardEvent) => {
+      const foregroundModal = Array.from(document.querySelectorAll<HTMLElement>('[aria-modal="true"]'))
+        .some((element) => element !== sidebar);
+      if (foregroundModal) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeMobileSidebar();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(sidebar.querySelectorAll<HTMLElement>(focusableSelector))
+        .filter((element) => {
+          const style = window.getComputedStyle(element);
+          return element.tabIndex >= 0 && style.display !== "none" && style.visibility !== "hidden";
+        });
+      if (focusable.length === 0) {
+        event.preventDefault();
+        sidebar.focus({ preventScroll: true });
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", onDrawerKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusDrawer);
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onDrawerKeyDown);
+      window.requestAnimationFrame(() => trigger?.focus({ preventScroll: true }));
+    };
+  }, [closeMobileSidebar, mobileSidebarOpen]);
+
+  useEffect(() => {
     if (!sidebarMenuTarget) return;
     const closeSidebarMenu = () => {
       setSidebarMenuTarget(null);
@@ -3912,8 +3982,16 @@ export default function VaultApp() {
     : undefined;
 
   return (
-    <main className={`app-shell theme-${theme} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
-      <aside className="sidebar" id="primary-sidebar">
+    <main className={`app-shell theme-${theme} ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${mobileSidebarOpen ? "mobile-sidebar-open" : ""}`}>
+      <aside
+        ref={mobileSidebarRef}
+        className="sidebar"
+        id="primary-sidebar"
+        role={mobileSidebarOpen ? "dialog" : undefined}
+        aria-modal={mobileSidebarOpen ? true : undefined}
+        aria-label="Vault navigation"
+        tabIndex={-1}
+      >
         <button
           type="button"
           className="sidebar-toggle"
@@ -3927,9 +4005,12 @@ export default function VaultApp() {
         </button>
 
         <div className="brand">
-          <button type="button" className="brand-home" onClick={showMainScreen} aria-label="Go to default main screen" title="Default main screen">
+          <button type="button" className="brand-home" onClick={() => { showMainScreen(); closeMobileSidebar(); }} aria-label="Go to default main screen" title="Default main screen">
             <span className="brand-mark" aria-hidden="true">C</span>
             <span className="brand-name">Coffer</span>
+          </button>
+          <button type="button" className="mobile-sidebar-close" onClick={closeMobileSidebar} aria-label="Close navigation" title="Close navigation">
+            <span aria-hidden="true" />
           </button>
         </div>
 
@@ -3940,7 +4021,7 @@ export default function VaultApp() {
               if (!event.currentTarget.contains(event.relatedTarget)) setSidebarMenuTarget(null);
             }}
           >
-            <button title="All codes" className="primary-nav-main" onClick={showAllAccounts}><span className="nav-icon grid-icon" aria-hidden="true" />All codes<span className="nav-count">{accounts.filter((account) => !account.archived).length}</span></button>
+            <button title="All codes" className="primary-nav-main" onClick={() => { showAllAccounts(); closeMobileSidebar(); }}><span className="nav-icon grid-icon" aria-hidden="true" />All codes<span className="nav-count">{accounts.filter((account) => !account.archived).length}</span></button>
             <button
               type="button"
               className="primary-options-button more-button"
@@ -3967,10 +4048,10 @@ export default function VaultApp() {
               </div>
             )}
           </div>
-          <button title="Favorites" className={`nav-item ${view === "favorites" ? "active" : ""}`} onClick={() => { setView("favorites"); setGroup("All"); }}><span className="nav-icon star-icon" aria-hidden="true">✦</span>Favorites<span className="nav-count">{accounts.filter((account) => account.favorite && !account.archived).length}</span></button>
-          <button title="Archive" className={`nav-item ${view === "archive" ? "active" : ""}`} onClick={() => { exitSelectionMode(); setView("archive"); setGroup("All"); }}><span className="nav-icon trash-icon" aria-hidden="true" />Archive<span className="nav-count">{accounts.filter((account) => account.archived).length}</span></button>
-          <button title="Data and backup" className={`nav-item ${view === "transfer" ? "active" : ""}`} onClick={() => { exitSelectionMode(); setView("transfer"); }}><span className="nav-icon transfer-icon" aria-hidden="true" />Data &amp; backup</button>
-          <button title="Settings" className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => { exitSelectionMode(); setView("settings"); }}><span className="nav-icon settings-icon" aria-hidden="true" />Settings</button>
+          <button title="Favorites" className={`nav-item ${view === "favorites" ? "active" : ""}`} onClick={() => { setView("favorites"); setGroup("All"); closeMobileSidebar(); }}><span className="nav-icon star-icon" aria-hidden="true">✦</span>Favorites<span className="nav-count">{accounts.filter((account) => account.favorite && !account.archived).length}</span></button>
+          <button title="Archive" className={`nav-item ${view === "archive" ? "active" : ""}`} onClick={() => { exitSelectionMode(); setView("archive"); setGroup("All"); closeMobileSidebar(); }}><span className="nav-icon trash-icon" aria-hidden="true" />Archive<span className="nav-count">{accounts.filter((account) => account.archived).length}</span></button>
+          <button title="Data and backup" className={`nav-item ${view === "transfer" ? "active" : ""}`} onClick={() => { exitSelectionMode(); setView("transfer"); closeMobileSidebar(); }}><span className="nav-icon transfer-icon" aria-hidden="true" />Data &amp; backup</button>
+          <button title="Settings" className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => { exitSelectionMode(); setView("settings"); closeMobileSidebar(); }}><span className="nav-icon settings-icon" aria-hidden="true" />Settings</button>
         </nav>
 
         <div className="sidebar-groups-heading">
@@ -4041,11 +4122,13 @@ export default function VaultApp() {
                     }
                     if (selectionMoveReady) {
                       moveSelectedAccounts(name, false);
+                      closeMobileSidebar();
                       return;
                     }
                     setSidebarMenuTarget(null);
                     setGroup(name);
                     setView("all");
+                    closeMobileSidebar();
                   }}
                   onContextMenu={(event) => {
                     event.preventDefault();
@@ -4110,8 +4193,30 @@ export default function VaultApp() {
         <SidebarFooter />
       </aside>
 
-      <section className="workspace" id="codes">
+      {mobileSidebarOpen && (
+        <button
+          type="button"
+          className="mobile-sidebar-backdrop"
+          onClick={closeMobileSidebar}
+          aria-label="Close navigation overlay"
+          tabIndex={-1}
+        />
+      )}
+
+      <section className="workspace" id="codes" inert={mobileSidebarOpen ? true : undefined}>
         <header className="topbar">
+          <button
+            ref={mobileSidebarTriggerRef}
+            type="button"
+            className="mobile-sidebar-trigger icon-button"
+            onClick={() => setMobileSidebarOpen(true)}
+            aria-controls="primary-sidebar"
+            aria-expanded={mobileSidebarOpen}
+            aria-label="Open navigation"
+            title="Open navigation"
+          >
+            <span aria-hidden="true" />
+          </button>
           <label className="search">
             <span className="search-icon" aria-hidden="true" />
             <input ref={searchRef} type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by service, account, or group…" aria-label="Search authenticator accounts" />

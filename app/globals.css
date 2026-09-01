@@ -239,6 +239,7 @@ button { color: inherit; }
 .sidebar-footer-help-icon { width: 15px; height: 15px; display: grid; place-items: center; border: 1.4px solid currentColor; border-radius: 50%; font-size: 10px; font-weight: 800; line-height: 1; }
 .sidebar-footer-help-icon { font-size: 9px; }
 .sidebar-collapsed .sidebar-footer { display: none; }
+.mobile-sidebar-close, .icon-button.mobile-sidebar-trigger, .mobile-sidebar-backdrop { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
   .sidebar-extension-preview { transition: none; }
@@ -1834,14 +1835,65 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 }
 
 @media (max-width: 620px) {
-  .app-shell, .app-shell.sidebar-collapsed { display: block; padding-bottom: 76px; }
-  .sidebar, .sidebar-collapsed .sidebar { position: fixed; z-index: 20; inset: auto 0 0; width: auto; height: 66px; flex-direction: row; justify-content: space-around; padding: 8px 16px; }
+  .app-shell, .app-shell.sidebar-collapsed { display: block; padding-bottom: 0; }
+  .sidebar, .sidebar-collapsed .sidebar {
+    width: min(86vw, 320px);
+    height: 100vh;
+    height: 100dvh;
+    position: fixed;
+    z-index: 45;
+    inset: 0 auto 0 -340px;
+    flex-direction: column;
+    justify-content: flex-start;
+    padding: calc(18px + env(safe-area-inset-top)) 16px 14px;
+    box-shadow: 18px 0 50px rgba(0, 0, 0, .34);
+    visibility: hidden;
+    pointer-events: none;
+    transition: left .22s ease, visibility 0s linear .22s;
+  }
+  .mobile-sidebar-open .sidebar, .mobile-sidebar-open.sidebar-collapsed .sidebar {
+    left: 0;
+    visibility: visible;
+    pointer-events: auto;
+    transition-delay: 0s;
+  }
   .sidebar-toggle { display: none; }
-  .brand, .sidebar-label, .sidebar-groups-heading, .group-nav, .profile-row, .sidebar-footer { display: none; }
-  .primary-nav { width: 100%; display: flex; justify-content: space-around; }
-  .nav-item, .nav-item.active, .nav-item:not(.active), .primary-nav-main { display: flex; width: 48px; height: 48px; font-size: 0; justify-content: center; }
+  .mobile-sidebar-backdrop { display: block; position: fixed; z-index: 40; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; background: rgba(12, 14, 13, .62); cursor: pointer; }
+  .icon-button.mobile-sidebar-trigger { display: grid; }
+  .mobile-sidebar-trigger > span { width: 19px; height: 14px; position: relative; display: block; border-top: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; }
+  .mobile-sidebar-trigger > span::after { content: ""; position: absolute; left: 0; right: 0; top: 5px; border-top: 1.5px solid currentColor; }
+  .mobile-sidebar-close { width: 40px; height: 40px; display: grid; place-items: center; flex: 0 0 40px; padding: 0; border: 1px solid #3b3e3b; border-radius: 11px; background: #242725; color: #d8d3d0; cursor: pointer; }
+  .mobile-sidebar-close:is(:hover, :focus-visible) { border-color: var(--theme-accent); background: var(--accent-soft); color: white; }
+  .mobile-sidebar-close > span { width: 17px; height: 17px; position: relative; display: block; }
+  .mobile-sidebar-close > span::before, .mobile-sidebar-close > span::after { content: ""; width: 18px; position: absolute; left: 0; top: 8px; border-top: 1.5px solid currentColor; }
+  .mobile-sidebar-close > span::before { transform: rotate(45deg); }
+  .mobile-sidebar-close > span::after { transform: rotate(-45deg); }
+  .sidebar .brand, .sidebar-collapsed .sidebar .brand { display: flex; justify-content: space-between; flex: 0 0 auto; gap: 12px; padding: 0 4px 22px; }
+  .sidebar-collapsed .sidebar .brand-name { display: inline; }
+  .sidebar .primary-nav, .sidebar-collapsed .sidebar .primary-nav { width: 100%; display: grid; flex: 0 0 auto; gap: 6px; }
+  .sidebar-collapsed .sidebar .primary-nav-row { width: 100%; grid-template-columns: minmax(0, 1fr) 44px; justify-self: stretch; }
+  .sidebar .nav-item, .sidebar .nav-item.active, .sidebar .nav-item:not(.active),
+  .sidebar-collapsed .sidebar .nav-item, .sidebar-collapsed .sidebar .primary-nav-main {
+    width: 100%;
+    min-height: 44px;
+    height: auto;
+    justify-content: flex-start;
+    gap: 12px;
+    margin-inline: 0;
+    padding: 0 12px;
+    font-size: 14px;
+  }
+  .sidebar .primary-nav-main, .sidebar-collapsed .sidebar .primary-nav-main { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 9px; padding: 0 5px 0 10px; font-size: 15px; }
+  .sidebar-collapsed .sidebar .primary-options-button { display: grid; }
+  .sidebar-collapsed .sidebar .nav-count { display: inline; }
+  .sidebar .sidebar-groups-heading, .sidebar-collapsed .sidebar .sidebar-groups-heading { display: flex; flex: 0 0 auto; }
+  .sidebar .sidebar-label, .sidebar-collapsed .sidebar .sidebar-label { display: inline; }
+  .sidebar .group-nav, .sidebar-collapsed .sidebar .group-nav { display: grid; align-content: start; grid-auto-rows: max-content; flex: 1 1 auto; min-height: 72px; overflow-y: auto; }
+  .sidebar .sidebar-footer, .sidebar-collapsed .sidebar .sidebar-footer { display: flex; margin: auto -16px -14px; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }
+  .sidebar-extension-preview { display: none; }
+  .sidebar-options-menu { right: 12px; left: auto !important; max-width: calc(100vw - 24px); }
   .workspace { grid-column: auto; }
-  .topbar { height: 66px; gap: 8px; padding: 0 12px; }
+  .topbar { height: 66px; position: sticky; z-index: 30; top: 0; gap: 8px; padding: 0 12px; }
   .top-actions { flex: 0 0 auto; gap: 6px; }
   .theme-toggle { width: 44px; height: 44px; }
   .theme-toggle::before { width: 20px; height: 20px; }
@@ -1888,7 +1940,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .title-row { align-items: flex-start; }
   .title-row-account-actions { gap: 8px; }
   .title-row .subtitle { max-width: 260px; line-height: 1.5; }
-  .add-button { width: 46px; min-width: 46px; padding: 0; justify-content: center; font-size: 0; }
+  .add-button { width: 46px; min-width: 46px; gap: 0; padding: 0; justify-content: center; font-size: 0; }
   .add-button span { background: transparent; color: var(--lime); }
   .vault-conflict-panel { margin: 16px 18px 0; }
   .vault-conflict-actions { width: 100%; justify-content: stretch; }
