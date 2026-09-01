@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Coffer — Feature overview banner</title>
+  <style>
+    :root {
+      --ink: #181a1b;
+      --paper: #f4f3ee;
+      --white: #f7f5f0;
+      --rose: #ca7373;
+      --rose-dark: #a95559;
+      --muted: #6f716b;
+      --line: rgba(24, 26, 27, 0.13);
+    }
+
+    * { box-sizing: border-box; }
+
+    html,
+    body {
+      width: 1920px;
+      height: 720px;
+      margin: 0;
+      overflow: hidden;
+      background: var(--paper);
+    }
+
+    body {
+      font-family: "Segoe UI Variable Display", "Segoe UI", Arial, sans-serif;
+      color: var(--ink);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .artboard {
+      isolation: isolate;
+      position: relative;
+      width: 1920px;
+      height: 720px;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 73% 17%, rgba(202, 115, 115, 0.23), transparent 31%),
+        linear-gradient(116deg, #f8f6f1 0%, #f3f1ec 57%, #e9e4dd 100%);
+    }
+
+    .artboard::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: -5;
+      opacity: 0.23;
+      background-image: radial-gradient(rgba(24, 26, 27, 0.34) 0.55px, transparent 0.55px);
+      background-size: 7px 7px;
+      mask-image: linear-gradient(90deg, rgba(0, 0, 0, 0.35), transparent 63%);
+    }
+
+    .top-rule {
+      position: absolute;
+      inset: 0 0 auto;
+      height: 8px;
+      background: var(--rose);
+    }
+
+    .brand {
+      position: absolute;
+      top: 38px;
+      left: 64px;
+      width: 190px;
+      height: auto;
+    }
+
+    .series-index {
+      position: absolute;
+      top: 48px;
+      right: 64px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: #5f615d;
+      font: 700 13px/1 Consolas, "SFMono-Regular", monospace;
+      letter-spacing: 0.12em;
+    }
+
+    .series-index::before {
+      content: "";
+      width: 38px;
+      height: 2px;
+      background: var(--rose);
+    }
+
+    .copy {
+      position: absolute;
+      z-index: 5;
+      top: 126px;
+      left: 64px;
+      width: 545px;
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 19px;
+      color: var(--rose-dark);
+      font: 750 13px/1 Consolas, "SFMono-Regular", monospace;
+      letter-spacing: 0.11em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      content: "C";
+      width: 20px;
+      height: 20px;
+      display: grid;
+      place-items: center;
+      border: 2px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 50%;
+      font-size: 0;
+      transform: rotate(-24deg);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 78px;
+      font-weight: 760;
+      letter-spacing: -0.068em;
+      line-height: 0.91;
+    }
+
+    .lede {
+      max-width: 505px;
+      margin: 24px 0 0;
+      color: #4e514d;
+      font-size: 20px;
+      font-weight: 470;
+      letter-spacing: -0.021em;
+      line-height: 1.36;
+    }
+
+    .trust-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 22px;
+      color: #5a5d58;
+      font: 700 11px/1 Consolas, "SFMono-Regular", monospace;
+      letter-spacing: 0.085em;
+      text-transform: uppercase;
+    }
+
+    .trust-row i {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--rose);
+    }
+
+    .orbit {
+      position: absolute;
+      z-index: -2;
+      top: -255px;
+      right: -45px;
+      width: 930px;
+      height: 930px;
+      border: 42px solid rgba(202, 115, 115, 0.17);
+      border-right-color: rgba(202, 115, 115, 0.38);
+      border-bottom-color: rgba(202, 115, 115, 0.38);
+      border-radius: 50%;
+      transform: rotate(17deg);
+    }
+
+    .orbit::before,
+    .orbit::after {
+      content: "";
+      position: absolute;
+      border-radius: 50%;
+    }
+
+    .orbit::before {
+      inset: 74px;
+      border: 3px solid rgba(24, 26, 27, 0.13);
+      border-left-color: transparent;
+      transform: rotate(-39deg);
+    }
+
+    .orbit::after {
+      inset: 168px;
+      border: 14px solid rgba(202, 115, 115, 0.19);
+      border-top-color: transparent;
+      transform: rotate(51deg);
+    }
+
+    .product-stage {
+      position: absolute;
+      z-index: 2;
+      top: 83px;
+      left: 640px;
+      width: 1230px;
+      height: 416px;
+    }
+
+    .drawer {
+      position: absolute;
+      width: 1230px;
+      height: 410px;
+      border-radius: 28px;
+    }
+
+    .drawer.back {
+      top: 32px;
+      left: -27px;
+      border: 2px solid rgba(24, 26, 27, 0.08);
+      background: rgba(24, 26, 27, 0.13);
+    }
+
+    .drawer.middle {
+      top: 18px;
+      left: -14px;
+      background: var(--rose);
+      box-shadow: 0 28px 62px rgba(85, 48, 50, 0.24);
+    }
+
+    .browser-window {
+      position: absolute;
+      inset: 0 auto auto 0;
+      width: 1230px;
+      height: 410px;
+      overflow: hidden;
+      border: 1px solid rgba(247, 245, 240, 0.13);
+      border-radius: 28px;
+      background: var(--ink);
+      box-shadow: 0 38px 74px rgba(24, 26, 27, 0.29);
+    }
+
+    .browser-bar {
+      height: 50px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 0 21px;
+      border-bottom: 1px solid rgba(247, 245, 240, 0.09);
+      background: #202326;
+    }
+
+    .browser-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: rgba(247, 245, 240, 0.20);
+    }
+
+    .browser-dot.active { background: var(--rose); }
+
+    .address {
+      width: 310px;
+      height: 26px;
+      display: flex;
+      align-items: center;
+      margin-left: 10px;
+      padding: 0 12px;
+      border: 1px solid rgba(247, 245, 240, 0.10);
+      border-radius: 8px;
+      color: rgba(247, 245, 240, 0.47);
+      font: 600 10px/1 Consolas, monospace;
+    }
+
+    .vault-state {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-left: auto;
+      color: rgba(247, 245, 240, 0.69);
+      font: 650 10px/1 Consolas, monospace;
+      text-transform: uppercase;
+    }
+
+    .vault-state::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #62ce79;
+      box-shadow: 0 0 0 3px rgba(98, 206, 121, 0.12);
+    }
+
+    .screen-crop {
+      position: relative;
+      width: 1230px;
+      height: 360px;
+      overflow: hidden;
+      background: var(--ink);
+    }
+
+    .screen-crop img {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 1230px;
+      height: auto;
+      max-width: none;
+    }
+
+    .screen-crop::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      box-shadow: inset 0 0 0 1px rgba(247, 245, 240, 0.05);
+      pointer-events: none;
+    }
+
+    .feature-grid {
+      position: absolute;
+      z-index: 8;
+      right: 64px;
+      bottom: 38px;
+      left: 64px;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .feature-card {
+      min-width: 0;
+      height: 160px;
+      display: grid;
+      grid-template-columns: 48px minmax(0, 1fr);
+      align-content: start;
+      gap: 14px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 21px;
+      background: rgba(247, 245, 240, 0.96);
+      box-shadow: 0 18px 40px rgba(24, 26, 27, 0.13);
+      backdrop-filter: blur(12px);
+    }
+
+    .feature-card:first-child {
+      border-color: rgba(247, 245, 240, 0.12);
+      background: rgba(24, 26, 27, 0.97);
+      color: var(--white);
+    }
+
+    .feature-card:last-child {
+      border-color: rgba(24, 26, 27, 0.10);
+      background: rgba(202, 115, 115, 0.97);
+    }
+
+    .feature-icon {
+      width: 48px;
+      height: 48px;
+      display: grid;
+      place-items: center;
+      border-radius: 15px;
+      background: rgba(202, 115, 115, 0.18);
+      color: var(--rose-dark);
+    }
+
+    .feature-card:first-child .feature-icon {
+      background: var(--rose);
+      color: var(--ink);
+    }
+
+    .feature-card:last-child .feature-icon {
+      background: rgba(24, 26, 27, 0.13);
+      color: var(--ink);
+    }
+
+    .feature-icon svg {
+      width: 25px;
+      height: 25px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .feature-copy { min-width: 0; }
+
+    .feature-label {
+      display: block;
+      margin: 0 0 5px;
+      color: var(--rose-dark);
+      font: 750 10px/1 Consolas, "SFMono-Regular", monospace;
+      letter-spacing: 0.105em;
+      text-transform: uppercase;
+    }
+
+    .feature-card:first-child .feature-label { color: #e59b9b; }
+    .feature-card:last-child .feature-label { color: rgba(24, 26, 27, 0.68); }
+
+    .feature-card h2 {
+      margin: 0 0 8px;
+      font-size: 17px;
+      font-weight: 760;
+      letter-spacing: -0.025em;
+      line-height: 1.15;
+    }
+
+    .feature-description {
+      margin: -1px 0 8px;
+      color: #686b66;
+      font-size: 11.5px;
+      font-weight: 610;
+      line-height: 1.28;
+    }
+
+    .feature-card:first-child .feature-description { color: rgba(247, 245, 240, 0.67); }
+    .feature-card:last-child .feature-description { color: rgba(24, 26, 27, 0.70); }
+
+    .feature-card ul {
+      display: grid;
+      gap: 4px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      color: #686b66;
+      font-size: 11.5px;
+      font-weight: 560;
+      line-height: 1.22;
+    }
+
+    .feature-card:first-child ul { color: rgba(247, 245, 240, 0.67); }
+    .feature-card:last-child ul { color: rgba(24, 26, 27, 0.70); }
+
+    .feature-card li {
+      position: relative;
+      padding-left: 11px;
+    }
+
+    .feature-card li::before {
+      content: "";
+      position: absolute;
+      top: 0.52em;
+      left: 0;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--rose);
+    }
+
+    .feature-card:last-child li::before { background: var(--ink); }
+  </style>
+</head>
+<body>
+  <main class="artboard" aria-label="Coffer feature overview">
+    <div class="top-rule"></div>
+    <img class="brand" src="../branding/coffer-wordmark-on-light.svg" alt="Coffer" />
+    <div class="series-index">FEATURE MAP / 01</div>
+
+    <section class="copy">
+      <p class="eyebrow">The whole vault, at a glance</p>
+      <h1>Your 2FA flow.<br />One private vault.</h1>
+      <p class="lede">Scan, organize, back up, transfer, and fill codes without handing over the keys.</p>
+      <div class="trust-row">
+        <span>Self-hosted</span><i></i><span>Open source</span><i></i><span>Your data</span>
+      </div>
+    </section>
+
+    <div class="orbit" aria-hidden="true"></div>
+
+    <section class="product-stage" aria-label="Coffer dashboard preview">
+      <div class="drawer back" aria-hidden="true"></div>
+      <div class="drawer middle" aria-hidden="true"></div>
+      <div class="browser-window">
+        <div class="browser-bar">
+          <span class="browser-dot active"></span>
+          <span class="browser-dot"></span>
+          <span class="browser-dot"></span>
+          <span class="address">Search codes, accounts, or groups…</span>
+          <span class="vault-state">Encrypted vault saved</span>
+        </div>
+        <div class="screen-crop">
+          <img src="../../screenshots/dark.png" alt="Coffer dashboard in dark mode" />
+        </div>
+      </div>
+    </section>
+
+    <section class="feature-grid" aria-label="Coffer feature groups">
+      <article class="feature-card">
+        <span class="feature-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><path d="M12 14v2"/></svg>
+        </span>
+        <div class="feature-copy">
+          <span class="feature-label">01 · Private by default</span>
+          <h2>Encrypted in your browser</h2>
+          <ul>
+            <li>The server stores ciphertext only</li>
+            <li>Automatic lock and clipboard controls</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature-card">
+        <span class="feature-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"/><path d="M8 12h8M12 8v8"/></svg>
+        </span>
+        <div class="feature-copy">
+          <span class="feature-label">02 · Add accounts</span>
+          <h2>From QR to code</h2>
+          <p class="feature-description">Scanning stays on this device.</p>
+          <ul>
+            <li>Live camera or QR image</li>
+            <li>Setup link or manual TOTP entry</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature-card">
+        <span class="feature-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M5 8h13M15 5l3 3-3 3M19 16H6M9 13l-3 3 3 3"/><path d="M4 4v16M20 4v16" opacity=".45"/></svg>
+        </span>
+        <div class="feature-copy">
+          <span class="feature-label">03 · Import / export</span>
+          <h2>Import / Export</h2>
+          <p class="feature-description">Portable authenticator transfers.</p>
+          <ul>
+            <li>Import: Coffer, 2FAS, 2FAuth, OTPAuth</li>
+            <li>Export: Coffer, 2FAS, or OTPAuth</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature-card">
+        <span class="feature-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 9h18M7 7h.01M10 7h.01"/><path d="M9 14h6M12 11v6"/></svg>
+        </span>
+        <div class="feature-copy">
+          <span class="feature-label">04 · Use it your way</span>
+          <h2>Ready wherever you sign in</h2>
+          <ul>
+            <li>Browser extension for faster fills</li>
+            <li>Responsive light and dark interfaces</li>
+            <li>Self-hosted, multi-user vaults</li>
+          </ul>
+        </div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

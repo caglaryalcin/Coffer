@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Coffer — Quiet Vault campaign artwork</title>
+  <style>
+    :root {
+      --ink: #181a1b;
+      --paper: #f4f3ee;
+      --white: #f7f5f0;
+      --rose: #ca7373;
+      --rose-deep: #a95559;
+      --muted: #6f716b;
+      --line: rgba(24, 26, 27, 0.14);
+    }
+
+    * { box-sizing: border-box; }
+
+    html,
+    body {
+      width: 1600px;
+      height: 1000px;
+      margin: 0;
+      overflow: hidden;
+      background: var(--paper);
+    }
+
+    body {
+      font-family: "Segoe UI Variable Display", "Segoe UI", Arial, sans-serif;
+      color: var(--ink);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .artboard {
+      isolation: isolate;
+      position: relative;
+      width: 1600px;
+      height: 1000px;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 75% 31%, rgba(202, 115, 115, 0.20) 0 18%, transparent 43%),
+        linear-gradient(118deg, #f7f5f0 0%, #f4f3ee 54%, #ece8e1 100%);
+    }
+
+    .artboard::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: -3;
+      opacity: 0.32;
+      background-image: radial-gradient(rgba(24, 26, 27, 0.26) 0.65px, transparent 0.65px);
+      background-size: 7px 7px;
+      mask-image: linear-gradient(90deg, rgba(0, 0, 0, 0.30), transparent 55%);
+    }
+
+    .top-rule {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 10px;
+      background: var(--rose);
+    }
+
+    .brand {
+      position: absolute;
+      top: 70px;
+      left: 84px;
+      width: 228px;
+      height: auto;
+    }
+
+    .edition {
+      position: absolute;
+      top: 77px;
+      right: 82px;
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      color: #5f615d;
+      font: 700 15px/1.2 Consolas, "SFMono-Regular", monospace;
+      letter-spacing: 0.12em;
+    }
+
+    .edition::before {
+      content: "";
+      width: 42px;
+      height: 2px;
+      background: var(--rose);
+    }
+
+    .copy {
+      position: absolute;
+      top: 207px;
+      left: 84px;
+      z-index: 5;
+      width: 640px;
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 0 0 27px;
+      color: var(--rose-deep);
+      font: 750 15px/1.2 Consolas, "SFMono-Regular", monospace;
+      letter-spacing: 0.11em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow-mark {
+      width: 14px;
+      height: 14px;
+      border: 3px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 50%;
+      transform: rotate(-28deg);
+    }
+
+    h1 {
+      max-width: 610px;
+      margin: 0;
+      font-size: 105px;
+      font-weight: 760;
+      letter-spacing: -0.073em;
+      line-height: 0.91;
+    }
+
+    .accent-line {
+      width: 126px;
+      height: 10px;
+      margin: 37px 0 28px;
+      border-radius: 999px;
+      background: var(--rose);
+    }
+
+    .lede {
+      max-width: 520px;
+      margin: 0;
+      color: #4d504c;
+      font-size: 25px;
+      font-weight: 460;
+      letter-spacing: -0.025em;
+      line-height: 1.35;
+    }
+
+    .vault-orbit {
+      position: absolute;
+      z-index: -1;
+      top: 108px;
+      right: -132px;
+      width: 790px;
+      height: 790px;
+      border: 42px solid rgba(202, 115, 115, 0.18);
+      border-right-color: rgba(202, 115, 115, 0.48);
+      border-bottom-color: rgba(202, 115, 115, 0.48);
+      border-radius: 50%;
+      transform: rotate(24deg);
+    }
+
+    .vault-orbit::before,
+    .vault-orbit::after {
+      content: "";
+      position: absolute;
+      border-radius: 50%;
+    }
+
+    .vault-orbit::before {
+      inset: 70px;
+      border: 3px solid rgba(24, 26, 27, 0.15);
+      border-left-color: transparent;
+      transform: rotate(-41deg);
+    }
+
+    .vault-orbit::after {
+      inset: 148px;
+      border: 16px solid rgba(202, 115, 115, 0.22);
+      border-top-color: transparent;
+      transform: rotate(53deg);
+    }
+
+    .product-stage {
+      position: absolute;
+      z-index: 4;
+      top: 358px;
+      left: 600px;
+      width: 1030px;
+      height: 560px;
+      transform: rotate(-2.2deg);
+      transform-origin: 52% 48%;
+    }
+
+    .drawer {
+      position: absolute;
+      width: 970px;
+      height: 500px;
+      border-radius: 30px;
+    }
+
+    .drawer.back {
+      top: 52px;
+      left: -30px;
+      background: rgba(24, 26, 27, 0.16);
+      border: 2px solid rgba(24, 26, 27, 0.08);
+    }
+
+    .drawer.middle {
+      top: 31px;
+      left: -14px;
+      background: var(--rose);
+      box-shadow: 0 28px 70px rgba(100, 59, 59, 0.26);
+    }
+
+    .browser-window {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 970px;
+      height: 500px;
+      overflow: hidden;
+      border: 1px solid rgba(247, 245, 240, 0.14);
+      border-radius: 30px;
+      background: var(--ink);
+      box-shadow:
+        0 45px 90px rgba(24, 26, 27, 0.30),
+        0 8px 20px rgba(24, 26, 27, 0.24);
+    }
+
+    .browser-bar {
+      height: 63px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 24px;
+      border-bottom: 1px solid rgba(247, 245, 240, 0.10);
+      background: #202326;
+    }
+
+    .browser-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: rgba(247, 245, 240, 0.20);
+    }
+
+    .browser-dot.active { background: var(--rose); }
+
+    .browser-address {
+      width: 360px;
+      height: 29px;
+      display: flex;
+      align-items: center;
+      margin-left: 13px;
+      padding: 0 14px;
+      border: 1px solid rgba(247, 245, 240, 0.11);
+      border-radius: 9px;
+      color: rgba(247, 245, 240, 0.55);
+      font: 600 12px/1 Consolas, monospace;
+      letter-spacing: 0.02em;
+    }
+
+    .browser-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+      color: rgba(247, 245, 240, 0.72);
+      font: 650 12px/1 Consolas, monospace;
+    }
+
+    .browser-status::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #62ce79;
+      box-shadow: 0 0 0 4px rgba(98, 206, 121, 0.12);
+    }
+
+    .screen-crop {
+      position: relative;
+      width: 970px;
+      height: 437px;
+      overflow: hidden;
+      background: var(--ink);
+    }
+
+    .screen-crop img {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 1288px;
+      height: auto;
+      max-width: none;
+    }
+
+    .screen-crop::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      box-shadow: inset 0 0 0 1px rgba(247, 245, 240, 0.06);
+    }
+
+    .encrypted-badge {
+      position: absolute;
+      z-index: 6;
+      top: -57px;
+      right: 90px;
+      min-width: 282px;
+      display: grid;
+      grid-template-columns: 48px 1fr;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 18px 14px 14px;
+      border: 1px solid rgba(24, 26, 27, 0.12);
+      border-radius: 20px;
+      background: var(--white);
+      box-shadow: 0 20px 50px rgba(24, 26, 27, 0.16);
+      transform: rotate(2.2deg);
+    }
+
+    .badge-icon {
+      position: relative;
+      width: 48px;
+      height: 48px;
+      border-radius: 15px;
+      background: var(--rose);
+    }
+
+    .badge-icon::before {
+      content: "";
+      position: absolute;
+      left: 15px;
+      top: 19px;
+      width: 18px;
+      height: 15px;
+      border: 2px solid var(--ink);
+      border-radius: 5px;
+    }
+
+    .badge-icon::after {
+      content: "";
+      position: absolute;
+      left: 19px;
+      top: 10px;
+      width: 10px;
+      height: 11px;
+      border: 2px solid var(--ink);
+      border-bottom: 0;
+      border-radius: 9px 9px 0 0;
+    }
+
+    .encrypted-badge strong,
+    .encrypted-badge span { display: block; }
+
+    .encrypted-badge strong {
+      margin-bottom: 4px;
+      font-size: 17px;
+      letter-spacing: -0.025em;
+    }
+
+    .encrypted-badge span {
+      color: var(--muted);
+      font: 600 12px/1.25 Consolas, monospace;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .code-ticket {
+      position: absolute;
+      z-index: 7;
+      left: -60px;
+      bottom: -25px;
+      width: 360px;
+      height: 108px;
+      display: grid;
+      grid-template-columns: 58px 1fr 44px;
+      align-items: center;
+      gap: 16px;
+      padding: 18px 20px;
+      border: 1px solid rgba(24, 26, 27, 0.16);
+      border-radius: 22px;
+      background: var(--white);
+      color: var(--ink);
+      box-shadow: 0 25px 55px rgba(24, 26, 27, 0.24);
+      transform: rotate(4.4deg);
+    }
+
+    .ticket-logo {
+      width: 58px;
+      height: 58px;
+      display: grid;
+      place-items: center;
+      border-radius: 17px;
+      background: var(--ink);
+    }
+
+    .ticket-logo img {
+      width: 31px;
+      height: 31px;
+      filter: brightness(0) invert(1);
+    }
+
+    .ticket-copy small {
+      display: block;
+      margin-bottom: 7px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .ticket-code {
+      font: 750 30px/1 Consolas, "SFMono-Regular", monospace;
+      letter-spacing: 0.12em;
+    }
+
+    .countdown {
+      width: 38px;
+      height: 38px;
+      border: 5px solid rgba(24, 26, 27, 0.14);
+      border-top-color: var(--rose);
+      border-right-color: var(--rose);
+      border-radius: 50%;
+      transform: rotate(-20deg);
+    }
+
+    .traits {
+      position: absolute;
+      left: 84px;
+      bottom: 82px;
+      z-index: 8;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      color: #5b5e59;
+      font: 700 14px/1 Consolas, "SFMono-Regular", monospace;
+      letter-spacing: 0.075em;
+      text-transform: uppercase;
+    }
+
+    .traits i {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--rose);
+    }
+
+    .corner-index {
+      position: absolute;
+      right: 80px;
+      bottom: 76px;
+      z-index: 8;
+      color: rgba(247, 245, 240, 0.72);
+      font: 700 14px/1 Consolas, monospace;
+      letter-spacing: 0.12em;
+    }
+
+    .rose-corner {
+      position: absolute;
+      z-index: -2;
+      right: -180px;
+      bottom: -300px;
+      width: 680px;
+      height: 680px;
+      border-radius: 50%;
+      background: var(--rose);
+    }
+  </style>
+</head>
+<body>
+  <main class="artboard" aria-label="Coffer promotional artwork">
+    <div class="top-rule"></div>
+    <img class="brand" src="../branding/coffer-wordmark-on-light.svg" alt="Coffer" />
+    <div class="edition">QUIET VAULT / 01</div>
+
+    <section class="copy">
+      <p class="eyebrow"><span class="eyebrow-mark"></span> Browser-encrypted authenticator</p>
+      <h1>Your codes.<br />Under your roof.</h1>
+      <div class="accent-line"></div>
+      <p class="lede">A calm, self-hosted vault that encrypts every account before it leaves your browser.</p>
+    </section>
+
+    <div class="vault-orbit" aria-hidden="true"></div>
+
+    <section class="product-stage" aria-label="Coffer product preview">
+      <div class="drawer back" aria-hidden="true"></div>
+      <div class="drawer middle" aria-hidden="true"></div>
+      <div class="browser-window">
+        <div class="browser-bar">
+          <span class="browser-dot active"></span>
+          <span class="browser-dot"></span>
+          <span class="browser-dot"></span>
+          <span class="browser-address">coffer.local / vault</span>
+          <span class="browser-status">Vault saved</span>
+        </div>
+        <div class="screen-crop">
+          <img src="../../screenshots/dark.png" alt="Coffer dashboard in dark mode" />
+        </div>
+      </div>
+
+      <div class="encrypted-badge">
+        <span class="badge-icon" aria-hidden="true"></span>
+        <div>
+          <strong>Encrypted before sync</strong>
+          <span>Ciphertext reaches the server</span>
+        </div>
+      </div>
+
+      <div class="code-ticket">
+        <span class="ticket-logo"><img src="../../public/brands/github.svg" alt="" /></span>
+        <span class="ticket-copy">
+          <small>GitHub · Personal</small>
+          <span class="ticket-code">329 469</span>
+        </span>
+        <span class="countdown" aria-hidden="true"></span>
+      </div>
+    </section>
+
+    <footer class="traits">
+      <span>Self-hosted</span><i></i><span>Multi-user</span><i></i><span>Open source</span>
+    </footer>
+    <span class="corner-index">COFFER / 2026</span>
+    <div class="rose-corner" aria-hidden="true"></div>
+  </main>
+</body>
+</html>
