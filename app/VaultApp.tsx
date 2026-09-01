@@ -321,6 +321,7 @@ export default function VaultApp() {
   const [accountMenuId, setAccountMenuId] = useState<string | null>(null);
   const [sidebarMenuTarget, setSidebarMenuTarget] = useState<SidebarMenuTarget | null>(null);
   const [sidebarMenuPosition, setSidebarMenuPosition] = useState<SidebarMenuPosition | null>(null);
+  const [confirmingSidebarGroupDeletion, setConfirmingSidebarGroupDeletion] = useState<string | null>(null);
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
   const [accountEditorReturnFocusTo, setAccountEditorReturnFocusTo] = useState<HTMLButtonElement | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
@@ -328,6 +329,7 @@ export default function VaultApp() {
   const [draggingSelectedAccounts, setDraggingSelectedAccounts] = useState(false);
   const [draggedAccountIds, setDraggedAccountIds] = useState<Set<string>>(() => new Set());
   const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
+  const [dragOverPrimaryTarget, setDragOverPrimaryTarget] = useState<"favorites" | "archive" | null>(null);
   const [accountDropTarget, setAccountDropTarget] = useState<AccountDropTarget | null>(null);
   const [draggingGroup, setDraggingGroup] = useState<string | null>(null);
   const [groupDropTarget, setGroupDropTarget] = useState<GroupDropTarget | null>(null);
@@ -399,6 +401,7 @@ export default function VaultApp() {
     setMobileSidebarOpen(false);
     setSidebarMenuTarget(null);
     setSidebarMenuPosition(null);
+    setConfirmingSidebarGroupDeletion(null);
   }, []);
 
   const clearSelectedAccountDrag = useCallback(() => {
@@ -408,6 +411,7 @@ export default function VaultApp() {
     setDraggingSelectedAccounts(false);
     setDraggedAccountIds(new Set());
     setDragOverGroup(null);
+    setDragOverPrimaryTarget(null);
     setAccountDropTarget(null);
     if (suppressSelectedAccountClickRef.current) {
       if (selectedAccountClickResetFrameRef.current !== null) {
@@ -2721,6 +2725,7 @@ export default function VaultApp() {
     const closeSidebarMenu = () => {
       setSidebarMenuTarget(null);
       setSidebarMenuPosition(null);
+      setConfirmingSidebarGroupDeletion(null);
     };
     window.addEventListener("resize", closeSidebarMenu);
     window.addEventListener("scroll", closeSidebarMenu, true);
@@ -2873,6 +2878,7 @@ export default function VaultApp() {
 
   const toggleSidebarMenu = (target: SidebarMenuTarget, trigger: HTMLElement) => {
     setAccountMenuId(null);
+    setConfirmingSidebarGroupDeletion(null);
     const menuIsOpen = sidebarMenuTarget !== null && sidebarMenuTargetKey(sidebarMenuTarget) === sidebarMenuTargetKey(target);
     if (menuIsOpen) {
       setSidebarMenuTarget(null);
@@ -3072,30 +3078,39 @@ export default function VaultApp() {
     return true;
   };
 
-  const deleteGroupCustomization = () => {
-    if (!customizingGroup) return false;
+  const groupDeletionError = (deletedName: string) => {
     const blockReason = mutationBlockReason();
     if (blockReason === "conflict" || blockReason === "conflict-pending") {
-      setToast("Resolve the encrypted save conflict before deleting groups.");
-      return false;
+      return "Resolve the encrypted save conflict before deleting groups.";
     }
     if (blockReason) {
-      setToast("Unlock your vault before deleting groups.");
+      return "Unlock your vault before deleting groups.";
+    }
+
+    const deletedKey = groupKey(deletedName);
+    const currentVault = vaultRef.current;
+    if (!currentVault) return "Unlock your vault before deleting groups.";
+    if (currentVault.accounts.some((account) => groupKey(account.group) === deletedKey)) {
+      return "Move every active and archived account to another group before deleting this group.";
+    }
+    if (!currentVault.groupCustomizations.some((customization) => groupKey(customization.name) === deletedKey)) {
+      return "This group is no longer available.";
+    }
+    return null;
+  };
+
+  const deleteGroupByName = (deletedName: string) => {
+    const deletionError = groupDeletionError(deletedName);
+    if (deletionError) {
+      setToast(deletionError);
       return false;
     }
 
-    const deletedName = customizingGroup;
     const deletedKey = groupKey(deletedName);
-    const currentVault = vaultRef.current;
-    if (!currentVault) return false;
-    if (currentVault.accounts.some((account) => groupKey(account.group) === deletedKey)) {
-      setToast("Move every active and archived account to another group before deleting this group.");
-      return false;
-    }
-    if (!currentVault.groupCustomizations.some((customization) => groupKey(customization.name) === deletedKey)) {
-      setToast("This group is no longer available.");
-      return false;
-    }
+    const deletedIndex = groups.findIndex((name) => groupKey(name) === deletedKey);
+    const focusGroupName = deletedIndex >= 0
+      ? groups[deletedIndex + 1] ?? groups[deletedIndex - 1] ?? null
+      : null;
 
     const saved = commitVault((current) => withVaultUpdate(current, {
       settings: {
@@ -3113,9 +3128,38 @@ export default function VaultApp() {
     if (!saved) return false;
 
     if (groupKey(group) === deletedKey) setGroup("All");
+    setSidebarMenuTarget(null);
+    setSidebarMenuPosition(null);
+    setConfirmingSidebarGroupDeletion(null);
     closeGroupCustomization();
+    window.requestAnimationFrame(() => {
+      const nextGroup = focusGroupName
+        ? Array.from(document.querySelectorAll<HTMLButtonElement>(".group-nav-main"))
+          .find((button) => groupKey(button.dataset.groupName ?? "") === groupKey(focusGroupName))
+        : null;
+      (nextGroup ?? document.querySelector<HTMLButtonElement>(".primary-nav-main"))
+        ?.focus({ preventScroll: true });
+    });
     setToast(`${deletedName} group deleted.`);
     return true;
+  };
+
+  const deleteGroupCustomization = () => (
+    customizingGroup ? deleteGroupByName(customizingGroup) : false
+  );
+
+  const requestSidebarGroupDeletion = (name: string) => {
+    const deletionError = groupDeletionError(name);
+    if (deletionError) {
+      setConfirmingSidebarGroupDeletion(null);
+      setToast(deletionError);
+      return false;
+    }
+    if (!confirmingSidebarGroupDeletion || groupKey(confirmingSidebarGroupDeletion) !== groupKey(name)) {
+      setConfirmingSidebarGroupDeletion(name);
+      return true;
+    }
+    return deleteGroupByName(name);
   };
 
   const moveSelectedAccounts = (
@@ -3280,7 +3324,7 @@ export default function VaultApp() {
     }
     suppressSelectedAccountClickRef.current = true;
     selectedAccountDragRef.current = true;
-    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.effectAllowed = "copyMove";
     event.dataTransfer.setData(SELECTED_ACCOUNT_DRAG_TYPE, "1");
     event.dataTransfer.setData("text/plain", "coffer-accounts");
     const card = event.currentTarget.closest(".account-card");
@@ -3294,6 +3338,7 @@ export default function VaultApp() {
     }
     setDraggingSelectedAccounts(true);
     setDragOverGroup(null);
+    setDragOverPrimaryTarget(null);
   };
 
   const acceptsSelectedAccountDrag = () => selectedAccountDragRef.current;
@@ -3309,9 +3354,49 @@ export default function VaultApp() {
     canMoveAccountIdsToGroup(selectedVisibleAccountIds, groupName)
   );
 
+  const canAddAccountIdsToFavorites = (accountIds: ReadonlySet<string>) => accounts.some((account) => (
+    accountIds.has(account.id) && !account.archived && !account.favorite
+  ));
+
+  const canArchiveAccountIds = (accountIds: ReadonlySet<string>) => accounts.some((account) => (
+    accountIds.has(account.id) && !account.archived
+  ));
+
+  const canDropAccountIdsOnPrimaryTarget = (
+    accountIds: ReadonlySet<string>,
+    target: "favorites" | "archive",
+  ) => target === "favorites"
+    ? canAddAccountIdsToFavorites(accountIds)
+    : canArchiveAccountIds(accountIds);
+
+  const dragSelectedAccountsOverPrimaryTarget = (
+    event: ReactDragEvent<HTMLButtonElement>,
+    target: "favorites" | "archive",
+  ) => {
+    if (!acceptsSelectedAccountDrag()) return;
+    setAccountDropTarget(null);
+    setDragOverGroup(null);
+    if (!canDropAccountIdsOnPrimaryTarget(draggedAccountIdsRef.current, target)) {
+      setDragOverPrimaryTarget(null);
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = target === "favorites" ? "copy" : "move";
+    if (dragOverPrimaryTarget !== target) setDragOverPrimaryTarget(target);
+  };
+
+  const leaveSelectedAccountPrimaryTarget = (
+    event: ReactDragEvent<HTMLButtonElement>,
+    target: "favorites" | "archive",
+  ) => {
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    if (dragOverPrimaryTarget === target) setDragOverPrimaryTarget(null);
+  };
+
   const dragSelectedAccountsOverGroup = (event: ReactDragEvent<HTMLDivElement>, groupName: string) => {
     if (!acceptsSelectedAccountDrag()) return;
     setAccountDropTarget(null);
+    setDragOverPrimaryTarget(null);
     if (!canMoveAccountIdsToGroup(draggedAccountIdsRef.current, groupName)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
@@ -3334,12 +3419,14 @@ export default function VaultApp() {
   const dragSelectedAccountsOverAccount = (event: ReactDragEvent<HTMLElement>, targetAccountId: string) => {
     if (!acceptsSelectedAccountDrag() || draggedAccountIdsRef.current.has(targetAccountId)) {
       setAccountDropTarget(null);
+      setDragOverPrimaryTarget(null);
       return;
     }
     event.preventDefault();
     event.stopPropagation();
     event.dataTransfer.dropEffect = "move";
     setDragOverGroup(null);
+    setDragOverPrimaryTarget(null);
     const placement = accountDropPlacement(event);
     setAccountDropTarget((current) => (
       current?.id === targetAccountId && current.edge === placement.edge && current.axis === placement.axis
@@ -3461,7 +3548,11 @@ export default function VaultApp() {
     if (saved) setToast(`${sourceName} group moved.`);
   };
 
-  const setSelectedAccountsFavorite = (favorite: boolean) => {
+  const setAccountIdsFavorite = (
+    accountIds: ReadonlySet<string>,
+    favorite: boolean,
+    exitAfter = false,
+  ) => {
     const blockReason = mutationBlockReason();
     if (blockReason) {
       setToast(blockReason === "conflict" || blockReason === "conflict-pending"
@@ -3469,29 +3560,40 @@ export default function VaultApp() {
         : "Unlock your vault before managing favorites.");
       return false;
     }
-    if (selectedVisibleAccountIds.size === 0) {
-      setToast("Select at least one account to manage favorites.");
+    if (accountIds.size === 0) {
+      setToast("Select at least one account to manage Favorites.");
       return false;
     }
 
-    const selected = new Set(selectedVisibleAccountIds);
-    let changedCount = 0;
+    const changedIds = new Set(accounts
+      .filter((account) => accountIds.has(account.id) && !account.archived && account.favorite !== favorite)
+      .map((account) => account.id));
+    const changedCount = changedIds.size;
+    if (changedCount === 0) {
+      setToast(`Selected accounts are already ${favorite ? "in Favorites" : "not in Favorites"}.`);
+      return false;
+    }
+
     const saved = setAccounts((current) => current.map((account) => {
-      if (!selected.has(account.id) || account.archived || account.favorite === favorite) {
-        return account;
-      }
-      changedCount += 1;
+      if (!changedIds.has(account.id) || account.archived || account.favorite === favorite) return account;
       return { ...account, favorite };
     }));
     if (!saved) return false;
 
-    setToast(changedCount === 0
-      ? `Selected accounts are already ${favorite ? "in Favorites" : "not in Favorites"}.`
-      : `${changedCount} ${changedCount === 1 ? "account" : "accounts"} ${favorite ? "added to" : "removed from"} Favorites.`);
+    if (exitAfter) exitSelectionMode();
+    setToast(`${changedCount} ${changedCount === 1 ? "account" : "accounts"} ${favorite ? "added to" : "removed from"} Favorites.`);
     return true;
   };
 
-  const archiveSelectedAccounts = () => {
+  const addAccountIdsToFavorites = (accountIds: ReadonlySet<string>) => (
+    setAccountIdsFavorite(accountIds, true, true)
+  );
+
+  const setSelectedAccountsFavorite = (favorite: boolean) => (
+    setAccountIdsFavorite(selectedVisibleAccountIds, favorite)
+  );
+
+  const archiveAccountIds = (accountIds: ReadonlySet<string>) => {
     const blockReason = mutationBlockReason();
     if (blockReason) {
       setToast(blockReason === "conflict" || blockReason === "conflict-pending"
@@ -3499,16 +3601,22 @@ export default function VaultApp() {
         : "Unlock your vault before archiving accounts.");
       return false;
     }
-    if (selectedVisibleAccountIds.size === 0) {
+    if (accountIds.size === 0) {
       setToast("Select at least one account to archive.");
       return false;
     }
 
-    const selected = new Set(selectedVisibleAccountIds);
-    let archivedCount = 0;
+    const changedIds = new Set(accounts
+      .filter((account) => accountIds.has(account.id) && !account.archived)
+      .map((account) => account.id));
+    const archivedCount = changedIds.size;
+    if (archivedCount === 0) {
+      setToast("Selected accounts are already in Archive.");
+      return false;
+    }
+
     const saved = setAccounts((current) => current.map((account) => {
-      if (!selected.has(account.id) || account.archived) return account;
-      archivedCount += 1;
+      if (!changedIds.has(account.id) || account.archived) return account;
       return { ...account, archived: true };
     }));
     if (!saved) return false;
@@ -3516,6 +3624,21 @@ export default function VaultApp() {
     exitSelectionMode();
     setToast(`${archivedCount} ${archivedCount === 1 ? "account" : "accounts"} moved to Archive.`);
     return true;
+  };
+
+  const archiveSelectedAccounts = () => archiveAccountIds(selectedVisibleAccountIds);
+
+  const dropSelectedAccountsOnPrimaryTarget = (
+    event: ReactDragEvent<HTMLButtonElement>,
+    target: "favorites" | "archive",
+  ) => {
+    if (!acceptsSelectedAccountDrag() || !canDropAccountIdsOnPrimaryTarget(draggedAccountIdsRef.current, target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const accountIds = new Set(draggedAccountIdsRef.current);
+    clearSelectedAccountDrag();
+    if (target === "favorites") addAccountIdsToFavorites(accountIds);
+    else archiveAccountIds(accountIds);
   };
 
   const restoreSelectedArchivedAccounts = () => {
@@ -3978,6 +4101,15 @@ export default function VaultApp() {
   const allCodesActive = view === "all" && group === "All";
   const allCodesDefault = isDefaultMainScreen(allCodesTarget);
   const allCodesMenuOpen = sidebarMenuIsOpen(allCodesTarget);
+  const primarySelectionActive = selectionMode && view === "all" && selectedVisibleAccountIds.size > 0;
+  const favoriteSelectionReady = primarySelectionActive && canAddAccountIdsToFavorites(selectedVisibleAccountIds);
+  const archiveSelectionReady = primarySelectionActive && canArchiveAccountIds(selectedVisibleAccountIds);
+  const favoriteDragReady = draggingSelectedAccounts && canAddAccountIdsToFavorites(draggedAccountIds);
+  const archiveDragReady = draggingSelectedAccounts && canArchiveAccountIds(draggedAccountIds);
+  const favoriteDropReady = favoriteSelectionReady || favoriteDragReady;
+  const archiveDropReady = archiveSelectionReady || archiveDragReady;
+  const favoriteDropTarget = favoriteDragReady && dragOverPrimaryTarget === "favorites";
+  const archiveDropTarget = archiveDragReady && dragOverPrimaryTarget === "archive";
   const sidebarMenuStyle = sidebarMenuPosition
     ? { top: sidebarMenuPosition.top, left: sidebarMenuPosition.left }
     : undefined;
@@ -4019,7 +4151,10 @@ export default function VaultApp() {
           <div
             className={`primary-nav-row ${allCodesActive ? "active" : ""} ${allCodesDefault ? "main-screen-default" : ""} ${allCodesMenuOpen ? "menu-open" : ""}`}
             onBlur={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget)) setSidebarMenuTarget(null);
+              if (!event.currentTarget.contains(event.relatedTarget)) {
+                setSidebarMenuTarget(null);
+                setConfirmingSidebarGroupDeletion(null);
+              }
             }}
           >
             <button title="All codes" className="primary-nav-main" onClick={() => { showAllAccounts(); closeMobileSidebar(); }}><span className="nav-icon grid-icon" aria-hidden="true" />All codes<span className="nav-count">{accounts.filter((account) => !account.archived).length}</span></button>
@@ -4049,8 +4184,43 @@ export default function VaultApp() {
               </div>
             )}
           </div>
-          <button title="Favorites" className={`nav-item ${view === "favorites" ? "active" : ""}`} onClick={() => { setView("favorites"); setGroup("All"); closeMobileSidebar(); }}><span className="nav-icon star-icon" aria-hidden="true">✦</span>Favorites<span className="nav-count">{accounts.filter((account) => account.favorite && !account.archived).length}</span></button>
-          <button title="Archive" className={`nav-item ${view === "archive" ? "active" : ""}`} onClick={() => { exitSelectionMode(); setView("archive"); setGroup("All"); closeMobileSidebar(); }}><span className="nav-icon trash-icon" aria-hidden="true" />Archive<span className="nav-count">{accounts.filter((account) => account.archived).length}</span></button>
+          <button
+            title={primarySelectionActive ? "Add selected accounts to Favorites" : "Favorites"}
+            aria-label={primarySelectionActive ? "Add selected accounts to Favorites" : "Favorites"}
+            className={`nav-item ${view === "favorites" ? "active" : ""} ${favoriteDropReady ? "drop-ready" : ""} ${favoriteDropTarget ? "drop-target" : ""}`}
+            onDragEnter={(event) => dragSelectedAccountsOverPrimaryTarget(event, "favorites")}
+            onDragOver={(event) => dragSelectedAccountsOverPrimaryTarget(event, "favorites")}
+            onDragLeave={(event) => leaveSelectedAccountPrimaryTarget(event, "favorites")}
+            onDrop={(event) => dropSelectedAccountsOnPrimaryTarget(event, "favorites")}
+            onClick={() => {
+              if (primarySelectionActive) {
+                if (addAccountIdsToFavorites(new Set(selectedVisibleAccountIds))) closeMobileSidebar();
+                return;
+              }
+              setView("favorites");
+              setGroup("All");
+              closeMobileSidebar();
+            }}
+          ><span className="nav-icon star-icon" aria-hidden="true">✦</span>Favorites<span className="nav-count">{accounts.filter((account) => account.favorite && !account.archived).length}</span></button>
+          <button
+            title={primarySelectionActive ? "Move selected accounts to Archive" : "Archive"}
+            aria-label={primarySelectionActive ? "Move selected accounts to Archive" : "Archive"}
+            className={`nav-item ${view === "archive" ? "active" : ""} ${archiveDropReady ? "drop-ready" : ""} ${archiveDropTarget ? "drop-target" : ""}`}
+            onDragEnter={(event) => dragSelectedAccountsOverPrimaryTarget(event, "archive")}
+            onDragOver={(event) => dragSelectedAccountsOverPrimaryTarget(event, "archive")}
+            onDragLeave={(event) => leaveSelectedAccountPrimaryTarget(event, "archive")}
+            onDrop={(event) => dropSelectedAccountsOnPrimaryTarget(event, "archive")}
+            onClick={() => {
+              if (primarySelectionActive) {
+                if (archiveAccountIds(new Set(selectedVisibleAccountIds))) closeMobileSidebar();
+                return;
+              }
+              exitSelectionMode();
+              setView("archive");
+              setGroup("All");
+              closeMobileSidebar();
+            }}
+          ><span className="nav-icon trash-icon" aria-hidden="true" />Archive<span className="nav-count">{accounts.filter((account) => account.archived).length}</span></button>
           <button title="Data and backup" className={`nav-item ${view === "transfer" ? "active" : ""}`} onClick={() => { exitSelectionMode(); setView("transfer"); closeMobileSidebar(); }}><span className="nav-icon transfer-icon" aria-hidden="true" />Data &amp; backup</button>
           <button title="Settings" className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => { exitSelectionMode(); setView("settings"); closeMobileSidebar(); }}><span className="nav-icon settings-icon" aria-hidden="true" />Settings</button>
         </nav>
@@ -4077,6 +4247,10 @@ export default function VaultApp() {
             const groupTarget: SidebarMenuTarget = { kind: "group", name };
             const groupDefault = isDefaultMainScreen(groupTarget);
             const groupMenuOpen = sidebarMenuIsOpen(groupTarget);
+            const groupDeleteConfirming = Boolean(
+              confirmingSidebarGroupDeletion &&
+              groupKey(confirmingSidebarGroupDeletion) === groupKey(name)
+            );
             const selectionMoveReady = selectionMode && view === "all" && selectedVisibleAccountIds.size > 0 && canMoveSelectedAccountsToGroup(name);
             const dragMoveReady = draggingSelectedAccounts && canMoveAccountIdsToGroup(draggedAccountIds, name);
             const dropReady = selectionMoveReady || dragMoveReady;
@@ -4089,7 +4263,10 @@ export default function VaultApp() {
                 key={name}
                 className={`group-nav-row ${active ? "active" : ""} ${groupDefault ? "main-screen-default" : ""} ${groupMenuOpen ? "menu-open" : ""} ${dropReady ? "drop-ready" : ""} ${dropTarget ? "drop-target" : ""} ${groupDragSource ? "group-drag-source" : ""} ${reorderBefore ? "reorder-before" : ""} ${reorderAfter ? "reorder-after" : ""}`}
                 onBlur={(event) => {
-                  if (!event.currentTarget.contains(event.relatedTarget)) setSidebarMenuTarget(null);
+                  if (!event.currentTarget.contains(event.relatedTarget)) {
+                    setSidebarMenuTarget(null);
+                    setConfirmingSidebarGroupDeletion(null);
+                  }
                 }}
                 onDragEnter={(event) => groupDragNameRef.current
                   ? dragGroupOver(event, name)
@@ -4186,6 +4363,14 @@ export default function VaultApp() {
                     >
                       {groupDefault ? "Default main screen" : "Set default main screen"}
                     </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={`sidebar-delete-option ${groupDeleteConfirming ? "confirming" : ""}`}
+                      onClick={() => requestSidebarGroupDeletion(name)}
+                    >
+                      {groupDeleteConfirming ? "Confirm delete" : "Delete group"}
+                    </button>
                   </div>
                 )}
               </div>
@@ -4238,7 +4423,9 @@ export default function VaultApp() {
               className="icon-button lock-button"
               onClick={() => void lockVault()}
               aria-label="Lock vault"
-            ><span /></button>
+            >
+              <span className="lock-button-icon" aria-hidden="true" />
+            </button>
             <ThemeToggle theme={theme} onToggle={() => updateSettings({ theme: theme === "dark" ? "light" : "dark" })} />
             <ProfileMenu
               profile={profile}
@@ -4342,7 +4529,7 @@ export default function VaultApp() {
 
           {visibleAccounts.length > 0 ? (
             <section className="account-grid" data-card-view={cardView} aria-label="Authenticator accounts">
-              <span className="visually-hidden" id="account-drag-instructions">With a mouse, hold outside the code row and drag an account onto another card to reorder it, or onto a sidebar group to move it. Dragging a selected account moves the selection together. Keyboard and touch users can use Move to group.</span>
+              <span className="visually-hidden" id="account-drag-instructions">With a mouse, hold outside the code row and drag an account onto another card to reorder it, or onto Favorites, Archive, or a sidebar group. Dragging a selected account moves the selection together. Keyboard and touch users can select accounts and choose the sidebar destination.</span>
               {visibleAccounts.map((account) => {
                 const { current: currentCode, next: nextCode, remaining } = accountCodePreview(
                   account,
@@ -4359,8 +4546,8 @@ export default function VaultApp() {
                   "aria-describedby": draggableAccount ? "account-drag-instructions" : undefined,
                   title: draggableAccount
                     ? selectionMode && selected
-                      ? "Hold and drag outside the code area to reorder or move selected accounts"
-                      : "Hold and drag outside the code area to reorder this account or move it to a group"
+                      ? "Hold and drag outside the code area to reorder or move selected accounts to Favorites, Archive, or a group"
+                      : "Hold and drag outside the code area to reorder this account or move it to Favorites, Archive, or a group"
                     : undefined,
                   onMouseDown: (event) => prepareSelectedAccountDrag(event, account.id, draggableAccount),
                   onMouseEnter: (event) => updateSelectedAccountDragZone(event, draggableAccount),

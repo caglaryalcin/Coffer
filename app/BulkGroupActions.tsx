@@ -128,7 +128,7 @@ export function ArchiveBulkActions({
             onClick={onSelectAllVisible}
             disabled={selectionDisabled || allVisibleSelected}
           >
-            {allVisibleSelected ? "All visible selected" : "Select all visible"}
+            {allVisibleSelected ? "All selected" : "Select all"}
           </button>
           <button
             type="button"
@@ -246,7 +246,7 @@ export default function BulkGroupActions({
             <strong>{selectedCount} selected</strong>
             <span>{visibleCount} visible</span>
           </div>
-          {showGroupDragHint && selectedCount > 0 && <span className="bulk-drag-hint">Hold outside the code row and drag a selected card to a sidebar group, or use Move to group.</span>}
+          {showGroupDragHint && selectedCount > 0 && <span className="bulk-drag-hint">Hold outside the code row and drag a selected card to Favorites, Archive, or a sidebar group.</span>}
         </div>
 
         <div className="bulk-action-buttons">
@@ -256,7 +256,7 @@ export default function BulkGroupActions({
             onClick={onSelectAllVisible}
             disabled={selectionDisabled || allVisibleSelected}
           >
-            {allVisibleSelected ? "All visible selected" : "Select all visible"}
+            {allVisibleSelected ? "All selected" : "Select all"}
           </button>
           <button
             type="button"
@@ -266,14 +266,16 @@ export default function BulkGroupActions({
           >
             Clear selection
           </button>
-          <button
-            type="button"
-            className="bulk-secondary-action"
-            onClick={() => onSetFavorite(!allSelectedFavorited)}
-            disabled={moveDisabled}
-          >
-            {allSelectedFavorited ? "Remove from favorites" : "Add to favorites"}
-          </button>
+          {!showGroupDragHint && (
+            <button
+              type="button"
+              className="bulk-secondary-action"
+              onClick={() => onSetFavorite(!allSelectedFavorited)}
+              disabled={moveDisabled}
+            >
+              {allSelectedFavorited ? "Remove from favorites" : "Add to favorites"}
+            </button>
+          )}
           <button
             type="button"
             className="bulk-secondary-action"
@@ -282,28 +284,32 @@ export default function BulkGroupActions({
           >
             Change logo
           </button>
-          <button
-            type="button"
-            className="bulk-secondary-action"
-            onClick={() => {
-              const accepted = onArchive();
-              if (accepted !== false) closeMovePanel();
-            }}
-            disabled={moveDisabled}
-          >
-            Move to Archive
-          </button>
-          <button
-            type="button"
-            className="bulk-move-trigger"
-            aria-expanded={movePanelOpen}
-            aria-controls={panelId}
-            onClick={() => setMovePanelOpen((open) => !open)}
-            disabled={moveDisabled}
-          >
-            Move to group
-            <span aria-hidden="true">⌄</span>
-          </button>
+          {!showGroupDragHint && (
+            <button
+              type="button"
+              className="bulk-secondary-action"
+              onClick={() => {
+                const accepted = onArchive();
+                if (accepted !== false) closeMovePanel();
+              }}
+              disabled={moveDisabled}
+            >
+              Move to Archive
+            </button>
+          )}
+          {!showGroupDragHint && (
+            <button
+              type="button"
+              className="bulk-move-trigger"
+              aria-expanded={movePanelOpen}
+              aria-controls={panelId}
+              onClick={() => setMovePanelOpen((open) => !open)}
+              disabled={moveDisabled}
+            >
+              Move to group
+              <span aria-hidden="true">⌄</span>
+            </button>
+          )}
           <button
             type="button"
             className="bulk-done-action"
@@ -318,7 +324,7 @@ export default function BulkGroupActions({
         </div>
       </div>
 
-      {movePanelOpen && (
+      {!showGroupDragHint && movePanelOpen && (
         <div className="bulk-move-panel" id={panelId}>
           <div className="bulk-move-heading">
             <strong>Move selected accounts</strong>
