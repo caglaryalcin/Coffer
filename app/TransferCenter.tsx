@@ -526,7 +526,7 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
             <>
               <div className="source-grid">
                 {(Object.keys(sourceCopy) as ImportSource[]).map((key) => (
-                  <button className={`source-card ${source === key ? "active" : ""}`} key={key} aria-pressed={source === key} onClick={() => setImportSource(key)} disabled={busy}>
+                  <button className={`source-card ${source === key ? "active" : ""}`} data-source={key} key={key} aria-pressed={source === key} onClick={() => setImportSource(key)} disabled={busy}>
                     <span className={`source-icon ${key}`} aria-hidden="true"><TransferGlyph kind={key} className="transfer-source-glyph" /></span>
                     <span><strong>{sourceCopy[key].title}</strong>{sourceCopy[key].badge && <em>{sourceCopy[key].badge}</em>}<small>{sourceCopy[key].description}</small></span>
                     <i aria-hidden="true">{source === key ? "✓" : ""}</i>

@@ -274,6 +274,27 @@ function AddAccountIcon({ className }: { className: string }) {
   );
 }
 
+function RestoreCodesIcon({ className }: { className: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <rect className="add-button-icon-bg" x="1" y="1" width="22" height="22" rx="7" />
+      <path
+        className="add-button-icon-mark"
+        d="M5 5v4h4M5.3 9A7 7 0 1 1 6.1 17"
+        fill="none"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function SidebarChevronIcon({ className }: { className: string }) {
   return (
     <svg
@@ -4837,7 +4858,7 @@ export default function VaultApp() {
             <div className="title-row title-row-actions-only">
               <div className="title-row-account-actions">
                 <button type="button" className="add-button restore-all-button" onClick={restoreAllArchivedAccounts}>
-                  <span aria-hidden="true">&#8634;</span>
+                  <RestoreCodesIcon className="add-button-icon" />
                   Restore all codes
                 </button>
               </div>
@@ -4975,7 +4996,7 @@ export default function VaultApp() {
               })}
 
               {view !== "archive" && !selectionMode && <button className="add-card" onClick={openAdd} aria-label="Add a new authenticator account">
-                <span className="add-card-icon">+</span><strong>Add a new account</strong><small>Scan a QR code, paste a setup link, or enter a secret</small>
+                <AddAccountIcon className="add-card-icon" /><strong>Add a new account</strong><small>Scan a QR code, paste a setup link, or enter a secret</small>
               </button>}
             </section>
           ) : (
