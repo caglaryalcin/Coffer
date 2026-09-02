@@ -135,7 +135,23 @@ export default function SidebarFooter() {
           rel="noopener noreferrer"
           aria-label="Open a new Coffer issue on GitHub in a new tab"
           title="Help and issues"
-        ><span className="sidebar-footer-help-icon" aria-hidden="true">?</span></a>
+        >
+          <svg
+            className="sidebar-footer-help-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <path d="M9.09 9a3 3 0 1 1 5.83 1c0 2-3 2-3 4" />
+            <path d="M12 17h.01" />
+          </svg>
+        </a>
       </nav>
     </footer>
   );

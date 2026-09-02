@@ -236,38 +236,21 @@ function SettingsIcon({ className }: { className: string }) {
 
 function HeaderLockIcon({ className }: { className: string }) {
   return (
-    <span className={className} aria-hidden="true">
-      <svg
-        className="header-lock-layer header-lock-open"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        overflow="visible"
-        focusable="false"
-      >
-        <circle cx="12" cy="16" r="1" />
-        <rect width="18" height="12" x="3" y="10" rx="2" />
-        <path d="M7 10V7a5 5 0 0 1 9.33-2.5" />
-      </svg>
-      <svg
-        className="header-lock-layer header-lock-closed"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        overflow="visible"
-        focusable="false"
-      >
-        <circle className="header-lock-fill-part header-lock-delay-0" cx="12" cy="16" r="1" />
-        <rect className="header-lock-fade-part header-lock-delay-1" x="3" y="10" width="18" height="12" rx="2" />
-        <path className="header-lock-fade-part header-lock-delay-2" d="M7 10V7a5 5 0 0 1 10 0v3" />
-      </svg>
-    </span>
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <circle cx="12" cy="16" r="1" />
+      <rect x="3" y="10" width="18" height="12" rx="2" />
+      <path d="M7 10V7a5 5 0 0 1 10 0v3" />
+    </svg>
   );
 }
 

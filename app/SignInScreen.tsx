@@ -404,6 +404,7 @@ export default function SignInScreen({
             </div>
 
             <div className="auth-recovery-warning" role="note">
+              <span className="mini-lock" aria-hidden="true" />
               <div>
                 <strong>Your password cannot be recovered</strong>
                 <p>
@@ -416,6 +417,7 @@ export default function SignInScreen({
 
             <div className="transfer-footer auth-submit-footer">
               <aside className="local-only-note" role="note" aria-label="Browser-encrypted vault">
+                <span className="local-note-icon" aria-hidden="true" />
                 Encrypted in your browser<br />
                 <small>The server stores ciphertext only</small>
               </aside>

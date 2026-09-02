@@ -16,6 +16,7 @@ import type { VaultColor } from "../lib/vault-model";
 import ServiceLogo, { isServiceBrandId } from "./ServiceLogo";
 
 type ImportSource = "coffer" | "2fas" | "2fauth" | "otpauth";
+type TransferGlyphKind = ImportSource | "upload" | "warning";
 type ReviewStatus = "new" | "exact" | "possible" | "invalid";
 type ReviewAction = "keep" | "replace" | "skip";
 
@@ -59,6 +60,67 @@ const sourceCopy: Record<ImportSource, { title: string; description: string; bad
     description: "Paste or upload one otpauth:// link per line for an interoperable transfer.",
   },
 };
+
+function TransferGlyph({ kind, className }: { kind: TransferGlyphKind; className: string }) {
+  if (kind === "2fas") {
+    return (
+      <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+        <path d="M12 0c-.918 0-1.833.12-2.72.355L4.07 1.748a2.64 2.64 0 0 0-1.96 2.547v9.115a7.913 7.913 0 0 0 3.552 6.606l5.697 3.765a1.32 1.32 0 0 0 1.467-.008l5.572-3.752a7.931 7.931 0 0 0 3.493-6.57V4.295a2.638 2.638 0 0 0-1.961-2.547L14.72.355A10.594 10.594 0 0 0 12 0ZM7.383 5.4h9.228c.726 0 1.32.594 1.32 1.32 0 .734-.587 1.32-1.32 1.32H7.383c-.727 0-1.32-.593-1.32-1.32 0-.726.593-1.32 1.32-1.32zM7.38 9.357h3.299c.727 0 1.32.595 1.32 1.32a1.32 1.32 0 0 1-1.318 1.32H7.38c-.726 0-1.32-.592-1.32-1.32 0-.725.594-1.32 1.32-1.32zm0 3.96c.727 0 1.32.593 1.32 1.32 0 .727-.586 1.318-1.32 1.318-.726 0-1.32-.592-1.32-1.318 0-.727.594-1.32 1.32-1.32z" />
+      </svg>
+    );
+  }
+
+  if (kind === "2fauth") {
+    return (
+      <svg className={className} viewBox="0 0 512 512" fill="currentColor" aria-hidden="true" focusable="false">
+        <path d="M213.5 347.7v-23.9h198.1V167.9H201.8v-23.6h240.4V512h-30.6V347.8zm66.7-283.2V0H69.8v512h93.5V278.8h95.4v-65.1h-95.4V64.5z" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {kind === "coffer" && (
+        <>
+          <circle cx="12" cy="16" r="1" />
+          <rect x="3" y="10" width="18" height="12" rx="2" />
+          <path d="M7 10V7a5 5 0 0 1 10 0v3" />
+        </>
+      )}
+      {kind === "otpauth" && (
+        <>
+          <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+          <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+        </>
+      )}
+      {kind === "upload" && (
+        <>
+          <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2Z" />
+          <path d="M14 2v6h6" />
+          <path d="M12 18v-6" />
+          <path d="m9 15 3-3 3 3" />
+        </>
+      )}
+      {kind === "warning" && (
+        <>
+          <path d="M21.73 18 13.73 4a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+          <path d="M12 9v4" />
+          <path d="M12 17h.01" />
+        </>
+      )}
+    </svg>
+  );
+}
 
 const reviewLogoColors = ["ink", "orange", "blue", "violet", "green"] as const satisfies readonly VaultColor[];
 
@@ -465,7 +527,7 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
               <div className="source-grid">
                 {(Object.keys(sourceCopy) as ImportSource[]).map((key) => (
                   <button className={`source-card ${source === key ? "active" : ""}`} key={key} aria-pressed={source === key} onClick={() => setImportSource(key)} disabled={busy}>
-                    <span className={`source-icon ${key}`} aria-hidden="true" />
+                    <span className={`source-icon ${key}`} aria-hidden="true"><TransferGlyph kind={key} className="transfer-source-glyph" /></span>
                     <span><strong>{sourceCopy[key].title}</strong>{sourceCopy[key].badge && <em>{sourceCopy[key].badge}</em>}<small>{sourceCopy[key].description}</small></span>
                     <i aria-hidden="true">{source === key ? "✓" : ""}</i>
                   </button>
@@ -477,13 +539,13 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
                   <label><span>OTPAuth links</span><textarea value={otpLinks} onChange={(event) => handleOtpLinksChange(event.target.value)} placeholder="otpauth://totp/Example:user@example.com?secret=…" disabled={busy} /><small>Enter one link per line. Blank lines are ignored.</small></label>
                   <div className="form-divider"><span>or upload a text file</span></div>
                   <div className={`file-drop ${fileName ? "has-file" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
-                    <span className="file-icon" /><div><strong data-i18n-ignore={fileName ? true : undefined}>{fileName || "Drop a file here"}</strong><small>{fileName ? "Ready to review" : "Plain UTF-8 text, up to 5 MiB"}</small></div><button onClick={() => fileInput.current?.click()} disabled={busy}>{fileName ? "Change file" : "Choose file"}</button>
+                    <TransferGlyph kind="upload" className="file-icon" /><div><strong data-i18n-ignore={fileName ? true : undefined}>{fileName || "Drop a file here"}</strong><small>{fileName ? "Ready to review" : "Plain UTF-8 text, up to 5 MiB"}</small></div><button onClick={() => fileInput.current?.click()} disabled={busy}>{fileName ? "Change file" : "Choose file"}</button>
                   </div>
                 </div>
               ) : (
                 <div className="transfer-form">
                   <div className={`file-drop ${fileName ? "has-file" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
-                    <span className="file-icon" /><div><strong data-i18n-ignore={fileName ? true : undefined}>{fileName || "Drop a file here"}</strong><small>{fileName ? "Ready to review" : source === "coffer" ? ".coffer or JSON, up to 5 MiB" : source === "2fas" ? ".2fas or JSON, up to 5 MiB" : "2FAuth JSON, up to 5 MiB"}</small></div><button onClick={() => fileInput.current?.click()} disabled={busy}>{fileName ? "Change file" : "Choose file"}</button>
+                    <TransferGlyph kind="upload" className="file-icon" /><div><strong data-i18n-ignore={fileName ? true : undefined}>{fileName || "Drop a file here"}</strong><small>{fileName ? "Ready to review" : source === "coffer" ? ".coffer or JSON, up to 5 MiB" : source === "2fas" ? ".2fas or JSON, up to 5 MiB" : "2FAuth JSON, up to 5 MiB"}</small></div><button onClick={() => fileInput.current?.click()} disabled={busy}>{fileName ? "Change file" : "Choose file"}</button>
                   </div>
                   {source === "coffer" && <label><span>Backup passphrase (if used)</span><input type="password" value={importPassword} onChange={(event) => setImportPassword(event.target.value)} placeholder="Enter the passphrase if this backup is protected" autoComplete="new-password" disabled={busy} /></label>}
                   {source === "2fas" && <label><span>2FAS backup password</span><input type="password" value={importPassword} onChange={(event) => setImportPassword(event.target.value)} placeholder="Enter the password used for this backup" autoComplete="new-password" disabled={busy} /><small>Leave this blank only if the 2FAS backup was exported without a password.</small></label>}
@@ -497,7 +559,7 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
       ) : (
         <div className="export-stack">
           <section className="export-card recommended">
-            <div className="export-card-head"><span className="export-icon encrypted" aria-hidden="true" /><div><p>RECOMMENDED</p><h2>Coffer backup</h2><span>Create a complete backup containing accounts, groups, favorites, custom logos, and TOTP settings. Add a passphrase for protection, or leave both fields blank.</span></div></div>
+            <div className="export-card-head"><span className="export-icon encrypted" aria-hidden="true"><TransferGlyph kind="coffer" className="transfer-export-glyph" /></span><div><p>RECOMMENDED</p><h2>Coffer backup</h2><span>Create a complete backup containing accounts, groups, favorites, custom logos, and TOTP settings. Add a passphrase for protection, or leave both fields blank.</span></div></div>
             <div className="export-fields">
               <label><span>Backup passphrase (optional)</span><input type="password" value={exportPassword} onChange={(event) => { setExportPassword(event.target.value); setUnprotectedBackupConfirm(false); }} placeholder="Leave blank or use 12+ characters" autoComplete="new-password" disabled={busy} /></label>
               <label><span>Confirm passphrase</span><input type="password" value={exportPasswordConfirm} onChange={(event) => { setExportPasswordConfirm(event.target.value); setUnprotectedBackupConfirm(false); }} placeholder="Repeat it if used" autoComplete="new-password" disabled={busy} /></label>
@@ -515,7 +577,7 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
           </section>
 
           <section className="export-card interoperable">
-            <div className="export-card-head"><span className="export-icon twofas" aria-hidden="true" /><div><p>2FAS COMPATIBLE</p><h2>2FAS mobile backup</h2><span>Create a .2fas file for the mobile app. Account secrets are password-protected; 2FAS metadata and group names may remain readable. Archived accounts and custom logos are excluded.</span></div></div>
+            <div className="export-card-head"><span className="export-icon twofas" aria-hidden="true"><TransferGlyph kind="2fas" className="transfer-export-glyph" /></span><div><p>2FAS COMPATIBLE</p><h2>2FAS mobile backup</h2><span>Create a .2fas file for the mobile app. Account secrets are password-protected; 2FAS metadata and group names may remain readable. Archived accounts and custom logos are excluded.</span></div></div>
             <div className="export-fields">
               <label><span>2FAS backup passphrase</span><input type="password" value={twoFasExportPassword} onChange={(event) => setTwoFasExportPassword(event.target.value)} placeholder="At least 12 characters" autoComplete="new-password" disabled={busy} /></label>
               <label><span>Confirm passphrase</span><input type="password" value={twoFasExportPasswordConfirm} onChange={(event) => setTwoFasExportPasswordConfirm(event.target.value)} placeholder="Repeat your passphrase" autoComplete="new-password" disabled={busy} /></label>
@@ -524,7 +586,7 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
           </section>
 
           <section className={`export-card danger ${plainOpen ? "open" : ""}`}>
-            <button className="danger-toggle" aria-expanded={plainOpen} aria-controls="plaintext-export-options" onClick={() => { setPlainOpen((value) => !value); setPlainConfirm(false); }}><span className="export-icon readable" /><span><em>Not recommended</em><strong>Plaintext export</strong><small>Export interoperable files containing readable secrets.</small></span><i>{plainOpen ? "−" : "+"}</i></button>
+            <button className="danger-toggle" aria-expanded={plainOpen} aria-controls="plaintext-export-options" onClick={() => { setPlainOpen((value) => !value); setPlainConfirm(false); }}><span className="export-icon readable" aria-hidden="true"><TransferGlyph kind="warning" className="transfer-export-glyph" /></span><span><em>Not recommended</em><strong>Plaintext export</strong><small>Export interoperable files containing readable secrets.</small></span><i>{plainOpen ? "−" : "+"}</i></button>
             {plainOpen && <div className="danger-body" id="plaintext-export-options">
               <div className="danger-warning"><strong>Your authentication secrets will be readable without a password.</strong><span>Anyone with this file can generate your verification codes.</span></div>
               <div className="plain-options">
