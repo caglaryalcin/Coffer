@@ -54,9 +54,43 @@ export function writeCardViewPreference(
 
 function CardViewGlyph({ value }: { value: CardView }) {
   return (
-    <span className={`card-view-glyph card-view-glyph-${value}`} aria-hidden="true">
-      <i /><i /><i /><i /><i /><i />
-    </span>
+    <svg
+      className={`card-view-glyph card-view-glyph-${value}`}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {value === "default" && (
+        <>
+          <rect x="3" y="3" width="7" height="7" rx="1.4" />
+          <rect x="14" y="3" width="7" height="7" rx="1.4" />
+          <rect x="3" y="14" width="7" height="7" rx="1.4" />
+          <rect x="14" y="14" width="7" height="7" rx="1.4" />
+        </>
+      )}
+      {value === "compact" && (
+        <>
+          <rect x="3" y="4" width="18" height="4" rx="1.3" />
+          <rect x="3" y="10" width="18" height="4" rx="1.3" />
+          <rect x="3" y="16" width="18" height="4" rx="1.3" />
+        </>
+      )}
+      {value === "grid" && (
+        <>
+          <rect x="3" y="4" width="5" height="6" rx="1.2" />
+          <rect x="9.5" y="4" width="5" height="6" rx="1.2" />
+          <rect x="16" y="4" width="5" height="6" rx="1.2" />
+          <rect x="3" y="14" width="5" height="6" rx="1.2" />
+          <rect x="9.5" y="14" width="5" height="6" rx="1.2" />
+          <rect x="16" y="14" width="5" height="6" rx="1.2" />
+        </>
+      )}
+    </svg>
   );
 }
 

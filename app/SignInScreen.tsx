@@ -36,6 +36,25 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 export const MINIMUM_PASSWORD_LENGTH = 12;
 export const MAXIMUM_PASSWORD_LENGTH = 256;
 
+function ArrowRightIcon({ className }: { className: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M5 12h14" />
+      <path d="m14 7 5 5-5 5" />
+    </svg>
+  );
+}
+
 export function validateAccessFields(
   mode: AccessMode,
   fields: AccessFields,
@@ -385,7 +404,6 @@ export default function SignInScreen({
             </div>
 
             <div className="auth-recovery-warning" role="note">
-              <span className="mini-lock" aria-hidden="true" />
               <div>
                 <strong>Your password cannot be recovered</strong>
                 <p>
@@ -398,7 +416,6 @@ export default function SignInScreen({
 
             <div className="transfer-footer auth-submit-footer">
               <aside className="local-only-note" role="note" aria-label="Browser-encrypted vault">
-                <span className="local-note-icon" aria-hidden="true" />
                 Encrypted in your browser<br />
                 <small>The server stores ciphertext only</small>
               </aside>
@@ -406,7 +423,7 @@ export default function SignInScreen({
                 {isBusy
                   ? (isCreateAccount ? "Creating account…" : "Signing in…")
                   : (isCreateAccount ? "Create account" : "Sign in")}
-                {!isBusy && <span aria-hidden="true">→</span>}
+                {!isBusy && <ArrowRightIcon className="auth-submit-icon" />}
               </button>
             </div>
           </form>

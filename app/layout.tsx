@@ -36,7 +36,6 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: PRODUCT_TITLE,
     description: "A calm, modern, self-hosted authenticator vault built around privacy and speed.",
-    icons: { icon: [{ url: "/favicon-v2.svg", type: "image/svg+xml", sizes: "any" }] },
     openGraph: {
       title: PRODUCT_TITLE,
       description: "A calm, modern, self-hosted authenticator vault built around privacy and speed.",

@@ -56,6 +56,25 @@ export function mouseIsOutsideAccountCodeRow(event: ReactMouseEvent<HTMLElement>
     || event.clientY > bounds.bottom;
 }
 
+function SelectAccountsIcon() {
+  return (
+    <svg
+      className="bulk-select-icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="5" />
+      <path className="bulk-select-icon-check" d="m8 12 2.5 2.5L16.5 8.5" />
+    </svg>
+  );
+}
+
 function uniqueGroupNames(groups: readonly string[]) {
   const names = new Map<string, string>();
 
@@ -106,7 +125,7 @@ export function ArchiveBulkActions({
           onClick={onBeginSelection}
           disabled={selectionDisabled}
         >
-          <span className="bulk-select-icon" aria-hidden="true" />
+          <SelectAccountsIcon />
           Select accounts
         </button>
       </div>
@@ -231,7 +250,7 @@ export default function BulkGroupActions({
           onClick={onBeginSelection}
           disabled={selectionDisabled}
         >
-          <span className="bulk-select-icon" aria-hidden="true" />
+          <SelectAccountsIcon />
           Select accounts
         </button>
       </div>

@@ -127,8 +127,6 @@ export function findAccountIconOptions(
 
 function AccountEditorForm({ account, brandOptions, codePreview, onClose, onSave, returnFocusTo, renderIcon }: Omit<AccountEditorProps, "account"> & { account: VaultAccount }) {
   const initial = accountEditorValues(account);
-  const titleId = useId();
-  const descriptionId = useId();
   const iconPickerId = useId();
   const secretInputId = useId();
   const secretTestFeedbackId = useId();
@@ -386,12 +384,10 @@ function AccountEditorForm({ account, brandOptions, codePreview, onClose, onSave
   return (
     <div className="account-editor-backdrop">
       <button type="button" className="account-editor-backdrop-dismiss" aria-label="Close account editor" onClick={close} disabled={busy} tabIndex={-1} />
-      <section ref={dialogRef} className="account-editor" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} tabIndex={-1}>
+      <section ref={dialogRef} className="account-editor" role="dialog" aria-modal="true" aria-label="Edit account" tabIndex={-1}>
         <header className="account-editor-header">
           <div>
             <p className="eyebrow"><span /> ACCOUNT DETAILS</p>
-            <h2 id={titleId}>Edit account</h2>
-            <p id={descriptionId}>Update the service, sign-in identity, icon, or TOTP settings.</p>
           </div>
           <button type="button" className="account-editor-close" aria-label="Close account editor" onClick={close} disabled={busy}>×</button>
         </header>
@@ -478,37 +474,9 @@ function AccountEditorForm({ account, brandOptions, codePreview, onClose, onSave
             </div>
           </fieldset>
 
-          {codePreview && (
-            <div className="account-editor-code-panel" role="group" aria-label={`Live codes for ${account.service}`}>
-              <div className={`account-editor-current-code ${codeExpiring ? "expiring" : ""}`}>
-                <span aria-hidden="true">Current</span>
-                <strong aria-hidden="true">{codePreview.current ?? "--- ---"}</strong>
-                <span className="visually-hidden">{codePreview.current
-                  ? `Current code ${codePreview.current.replace(/\s/gu, "").split("").join(" ")}`
-                  : "Current code loading"}</span>
-              </div>
-              <div className={`account-editor-next-code ${codeExpiring ? "visible" : ""}`} aria-hidden={!codeExpiring}>
-                <span aria-hidden="true">Next</span>
-                <strong aria-hidden="true">{codePreview.next ?? "--- ---"}</strong>
-                <span className="visually-hidden">{codePreview.next
-                  ? `Next code ${codePreview.next.replace(/\s/gu, "").split("").join(" ")}`
-                  : "Next code loading"}</span>
-              </div>
-              <div
-                className={`countdown ${codeExpiring ? "urgent" : ""}`}
-                style={{ "--progress": `${(codePreview.remaining / codePreview.period) * 360}deg` } as CSSProperties}
-              >
-                <span aria-hidden="true">{codePreview.remaining}</span>
-                <span className="visually-hidden">{codePreview.remaining} seconds remaining</span>
-              </div>
-              <p>Codes use the saved settings until you save these changes.</p>
-            </div>
-          )}
-
           <div className="account-editor-grid">
             <label><span>Service name</span><input ref={serviceInputRef} value={service} onChange={(event) => setService(event.target.value)} maxLength={256} /></label>
             <label><span>Username</span><input value={identity} onChange={(event) => setIdentity(event.target.value)} maxLength={256} autoComplete="off" /></label>
-            <label className="account-editor-group"><span>Group</span><input value={account.group} readOnly aria-readonly="true" /><small>Move accounts between groups from selection mode.</small></label>
             <div className="account-editor-secret">
               <label htmlFor={secretInputId}>Secret key</label>
               <span className="account-editor-secret-control">
@@ -535,6 +503,32 @@ function AccountEditorForm({ account, brandOptions, codePreview, onClose, onSave
                 >{secretTestHint}</p>
               )}
             </div>
+            {codePreview && (
+              <div className="account-editor-code-panel" role="group" aria-label={`Live codes for ${account.service}`}>
+                <div className={`account-editor-current-code ${codeExpiring ? "expiring" : ""}`}>
+                  <span aria-hidden="true">Current</span>
+                  <strong aria-hidden="true">{codePreview.current ?? "--- ---"}</strong>
+                  <span className="visually-hidden">{codePreview.current
+                    ? `Current code ${codePreview.current.replace(/\s/gu, "").split("").join(" ")}`
+                    : "Current code loading"}</span>
+                </div>
+                <div className={`account-editor-next-code ${codeExpiring ? "visible" : ""}`} aria-hidden={!codeExpiring}>
+                  <span aria-hidden="true">Next</span>
+                  <strong aria-hidden="true">{codePreview.next ?? "--- ---"}</strong>
+                  <span className="visually-hidden">{codePreview.next
+                    ? `Next code ${codePreview.next.replace(/\s/gu, "").split("").join(" ")}`
+                    : "Next code loading"}</span>
+                </div>
+                <div
+                  className={`countdown ${codeExpiring ? "urgent" : ""}`}
+                  style={{ "--progress": `${(codePreview.remaining / codePreview.period) * 360}deg` } as CSSProperties}
+                >
+                  <span aria-hidden="true">{codePreview.remaining}</span>
+                  <span className="visually-hidden">{codePreview.remaining} seconds remaining</span>
+                </div>
+                <p>Codes use the saved settings until you save these changes.</p>
+              </div>
+            )}
             <label><span>Digits</span><select value={digits} onChange={(event) => changeDigits(Number(event.target.value) as 6 | 8)}><option value="6">6 digits</option><option value="8">8 digits</option></select></label>
             <label><span>Algorithm</span><select value={algorithm} onChange={(event) => changeAlgorithm(event.target.value as TotpAlgorithm)}><option value="SHA-1">SHA-1</option><option value="SHA-256">SHA-256</option><option value="SHA-512">SHA-512</option></select></label>
             <label><span>Period</span><span className="account-editor-period"><input type="number" min={1} max={300} step={1} value={period} onChange={(event) => changePeriod(Number(event.target.value))} /><small>seconds</small></span></label>

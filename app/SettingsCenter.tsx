@@ -58,6 +58,108 @@ type PasswordErrorField = "current" | "new" | "confirmation" | "form" | null;
 const MIN_PASSWORD_CHARACTERS = 12;
 const MAX_PASSWORD_CHARACTERS = 256;
 
+type SettingsGlyphKind = "profile" | "language" | "security" | "about" | "session" | "delete";
+
+function SettingsGlyph({ kind }: { kind: SettingsGlyphKind }) {
+  return (
+    <span className={`settings-glyph ${kind === "delete" ? "account-delete-glyph" : `${kind}-glyph`}`} aria-hidden="true">
+      <svg
+        className="settings-glyph-icon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        focusable="false"
+      >
+        {kind === "profile" && (
+          <>
+            <circle cx="12" cy="8" r="4" />
+            <path d="M4.5 21a7.5 7.5 0 0 1 15 0" />
+          </>
+        )}
+        {kind === "language" && (
+          <>
+            <circle cx="12" cy="12" r="9" />
+            <path d="M3 12h18" />
+            <path d="M12 3c2.5 2.5 3.8 5.5 3.8 9s-1.3 6.5-3.8 9M12 3c-2.5 2.5-3.8 5.5-3.8 9s1.3 6.5 3.8 9" />
+          </>
+        )}
+        {kind === "security" && (
+          <>
+            <rect x="5" y="10" width="14" height="11" rx="2.5" />
+            <path d="M8 10V7a4 4 0 0 1 8 0v3M12 14.5V17" />
+          </>
+        )}
+        {kind === "about" && (
+          <>
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 11v5" />
+            <circle cx="12" cy="7.5" r="1" fill="currentColor" stroke="none" />
+          </>
+        )}
+        {kind === "session" && (
+          <>
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 2" />
+          </>
+        )}
+        {kind === "delete" && (
+          <>
+            <path d="M4 7h16M9 7V4h6v3" />
+            <path d="m6.5 7 .8 13h9.4l.8-13M10 11v5M14 11v5" />
+          </>
+        )}
+      </svg>
+    </span>
+  );
+}
+
+function GitHubIcon() {
+  return (
+    <svg className="settings-about-github-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+      <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
+    </svg>
+  );
+}
+
+function LanguageFlagIcon({ language }: { language: CofferLanguage }) {
+  const clipPathId = `settings-language-flag-${language}`;
+  return (
+    <svg className="settings-language-flag" viewBox="0 0 24 16" aria-hidden="true" focusable="false">
+      <defs><clipPath id={clipPathId}><rect width="24" height="16" rx="2.5" /></clipPath></defs>
+      <g clipPath={`url(#${clipPathId})`}>
+        {language === "en" && (
+          <>
+            <rect width="24" height="16" fill="#012169" />
+            <path d="M0 0 24 16M24 0 0 16" stroke="#fff" strokeWidth="4" />
+            <path d="M0 0 24 16M24 0 0 16" stroke="#c8102e" strokeWidth="1.7" />
+            <path d="M12 0v16M0 8h24" stroke="#fff" strokeWidth="5" />
+            <path d="M12 0v16M0 8h24" stroke="#c8102e" strokeWidth="2.6" />
+          </>
+        )}
+        {language === "tr" && (
+          <>
+            <rect width="24" height="16" fill="#e30a17" />
+            <circle cx="9.2" cy="8" r="4.2" fill="#fff" />
+            <circle cx="10.8" cy="7.5" r="3.35" fill="#e30a17" />
+            <path d="m16.4 5.25.65 1.8 1.9.06-1.5 1.16.53 1.83-1.58-1.07-1.58 1.07.53-1.83-1.5-1.16 1.9-.06.65-1.8Z" fill="#fff" />
+          </>
+        )}
+        {language === "de" && (
+          <>
+            <rect width="24" height="5.34" fill="#151515" />
+            <rect y="5.33" width="24" height="5.34" fill="#dd0000" />
+            <rect y="10.66" width="24" height="5.34" fill="#ffce00" />
+          </>
+        )}
+      </g>
+      <rect x=".35" y=".35" width="23.3" height="15.3" rx="2.2" fill="none" stroke="currentColor" strokeOpacity=".18" strokeWidth=".7" />
+    </svg>
+  );
+}
+
 export default function SettingsCenter({
   profile,
   autoLockMinutes,
@@ -345,7 +447,7 @@ export default function SettingsCenter({
       <div className="settings-layout">
         <div className="settings-stack">
           <section className="settings-card" id="profile-settings" aria-labelledby="profile-settings-title" tabIndex={-1}>
-            <div className="settings-card-copy"><span className="settings-glyph profile-glyph" /><div><h2 id="profile-settings-title">Profile</h2></div></div>
+            <div className="settings-card-copy"><SettingsGlyph kind="profile" /><div><h2 id="profile-settings-title">Profile</h2></div></div>
             <form className="settings-form" onSubmit={(event) => void saveProfile(event)}>
               <div className="profile-photo-control" aria-busy={avatarBusy}>
                 <span className={`profile-photo-preview${profile.avatarDataUrl ? " has-photo" : ""}`} aria-hidden="true">
@@ -389,26 +491,29 @@ export default function SettingsCenter({
           </section>
 
           <section className="settings-card" id="language-settings" aria-labelledby="language-settings-title" tabIndex={-1}>
-            <div className="settings-card-copy"><span className="settings-glyph language-glyph" aria-hidden="true" /><div><h2 id="language-settings-title">Language</h2><p>Read and write Coffer in your preferred language. This setting stays in this browser and updates the interface immediately.</p></div></div>
+            <div className="settings-card-copy"><SettingsGlyph kind="language" /><div><h2 id="language-settings-title">Language</h2><p>Read and write Coffer in your preferred language. This setting stays in this browser and updates the interface immediately.</p></div></div>
             <div className="settings-control-row">
               <div><strong>Language</strong><span>Choose the interface language.</span></div>
-              <select
-                aria-label="Language"
-                value={language}
-                onChange={(event) => setLanguage(event.target.value as CofferLanguage)}
-                disabled={passwordBusy || avatarBusy || profileBusy || deleteBusy}
-              >
-                {languages.map((option) => (
-                  <option key={option.code} value={option.code} data-i18n-ignore>
-                    {`${option.flag} ${option.nativeLabel}`}
-                  </option>
-                ))}
-              </select>
+              <div className="settings-language-select">
+                <LanguageFlagIcon language={language} />
+                <select
+                  aria-label="Language"
+                  value={language}
+                  onChange={(event) => setLanguage(event.target.value as CofferLanguage)}
+                  disabled={passwordBusy || avatarBusy || profileBusy || deleteBusy}
+                >
+                  {languages.map((option) => (
+                    <option key={option.code} value={option.code} data-i18n-ignore>
+                      {option.nativeLabel}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </section>
 
           <section className="settings-card" id="security-settings" aria-labelledby="security-settings-title" tabIndex={-1}>
-            <div className="settings-card-copy"><span className="settings-glyph security-glyph" aria-hidden="true"><span className="security-glyph-lock" /></span><div><h2 id="security-settings-title">Security</h2><p>Change your vault password and control when the vault locks and how the clipboard behaves.</p></div></div>
+            <div className="settings-card-copy"><SettingsGlyph kind="security" /><div><h2 id="security-settings-title">Security</h2><p>Change your vault password and control when the vault locks and how the clipboard behaves.</p></div></div>
             <div className="password-change-row">
               <div><strong id="vault-password-title">Vault password</strong><span id="vault-password-description">Choose a unique password that you do not use for another service.</span></div>
               {!passwordExpanded && (
@@ -539,12 +644,12 @@ export default function SettingsCenter({
 
           <section className="settings-about" id="about-settings" aria-labelledby="about-title" tabIndex={-1}>
             <div className="settings-about-panel">
-              <div className="settings-card-copy"><span className="settings-glyph about-glyph" aria-hidden="true" /><div><h2 id="about-title">About</h2><p className="settings-about-description">Coffer is a multi-user, self-hosted authenticator vault for encrypted TOTP accounts, QR imports, local service logos, groups, and portable backups.</p></div></div>
+              <div className="settings-card-copy"><SettingsGlyph kind="about" /><div><h2 id="about-title">About</h2><p className="settings-about-description">Coffer is a multi-user, self-hosted authenticator vault for encrypted TOTP accounts, QR imports, local service logos, groups, and portable backups.</p></div></div>
               <p className="settings-about-stack"><strong>Stack:</strong> React 19 + Vinext + Vite 8 + TypeScript 5 + Tailwind CSS 4, Web Crypto (AES-256-GCM and HMAC-SHA-256) + Argon2id, Node.js 22, and Docker.</p>
               <p className="settings-about-author">
                 <strong>Author:</strong>
                 <a className="settings-about-link" href="https://github.com/caglaryalcin/Coffer" target="_blank" rel="noopener noreferrer" aria-label="Coffer repository by caglaryalcin on GitHub (opens in a new tab)">
-                  <span className="settings-about-github-icon" aria-hidden="true" />
+                  <GitHubIcon />
                   <span>caglaryalcin</span>
                 </a>
               </p>
@@ -552,12 +657,12 @@ export default function SettingsCenter({
           </section>
 
           <section className="settings-card session-card" id="session-settings" aria-labelledby="session-settings-title" tabIndex={-1}>
-            <div className="settings-card-copy"><span className="settings-glyph session-glyph" /><div><h2 id="session-settings-title">Vault session</h2><p>Encrypted vault data is persisted on your self-hosted server and remains available after refresh.</p></div></div>
+            <div className="settings-card-copy"><SettingsGlyph kind="session" /><div><h2 id="session-settings-title">Vault session</h2><p>Encrypted vault data is persisted on your self-hosted server and remains available after refresh.</p></div></div>
             <button className="signout-button" onClick={onSignOut} disabled={passwordBusy}>Lock and sign out</button>
           </section>
 
           <section className="settings-card account-delete-card" id="delete-account-settings" aria-labelledby="delete-account-settings-title" tabIndex={-1}>
-            <div className="settings-card-copy"><span className="settings-glyph account-delete-glyph" aria-hidden="true" /><div><h2 id="delete-account-settings-title">Delete account</h2><p>Permanently remove this user and its encrypted vault from Coffer server storage.</p></div></div>
+            <div className="settings-card-copy"><SettingsGlyph kind="delete" /><div><h2 id="delete-account-settings-title">Delete account</h2><p>Permanently remove this user and its encrypted vault from Coffer server storage.</p></div></div>
             {!deleteExpanded ? (
               <button
                 ref={deleteToggleRef}

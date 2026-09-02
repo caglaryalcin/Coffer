@@ -524,7 +524,7 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
           </section>
 
           <section className={`export-card danger ${plainOpen ? "open" : ""}`}>
-            <button className="danger-toggle" aria-expanded={plainOpen} aria-controls="plaintext-export-options" onClick={() => { setPlainOpen((value) => !value); setPlainConfirm(false); }}><span className="export-icon readable" /><span><em>Dangerous</em><strong>Plaintext export</strong><small>Export interoperable files containing readable secrets.</small></span><i>{plainOpen ? "−" : "+"}</i></button>
+            <button className="danger-toggle" aria-expanded={plainOpen} aria-controls="plaintext-export-options" onClick={() => { setPlainOpen((value) => !value); setPlainConfirm(false); }}><span className="export-icon readable" /><span><em>Not recommended</em><strong>Plaintext export</strong><small>Export interoperable files containing readable secrets.</small></span><i>{plainOpen ? "−" : "+"}</i></button>
             {plainOpen && <div className="danger-body" id="plaintext-export-options">
               <div className="danger-warning"><strong>Your authentication secrets will be readable without a password.</strong><span>Anyone with this file can generate your verification codes.</span></div>
               <div className="plain-options">

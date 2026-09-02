@@ -273,17 +273,20 @@ function GroupCustomizationDialogContent({
         className="group-customization-dialog"
         role="dialog"
         aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={descriptionId}
+        aria-label={mode === "edit" ? "Customize group" : undefined}
+        aria-labelledby={mode === "create" ? titleId : undefined}
+        aria-describedby={mode === "create" ? descriptionId : undefined}
         tabIndex={-1}
       >
-        <header className="group-customization-header">
+        <header className="group-customization-header" data-mode={mode}>
           <div>
             <p className="eyebrow"><span /> {mode === "create" ? "NEW GROUP" : "GROUP DETAILS"}</p>
-            <h2 id={titleId}>{mode === "create" ? "Create group" : "Customize group"}</h2>
-            <p id={descriptionId}>{mode === "create"
-              ? "Name this empty group and choose how it appears in the sidebar."
-              : "Rename this group and choose how it appears in the sidebar."}</p>
+            {mode === "create" && (
+              <>
+                <h2 id={titleId}>Create group</h2>
+                <p id={descriptionId}>Name this empty group and choose how it appears in the sidebar.</p>
+              </>
+            )}
           </div>
           <button
             type="button"

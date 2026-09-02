@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type HTMLAttributes, type MouseEvent as ReactMouseEvent } from "react";
+import { FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type HTMLAttributes, type MouseEvent as ReactMouseEvent } from "react";
 import AccountEditor, { type AccountEditorCodePreview, type AccountIconOption } from "./AccountEditor";
 import BulkGroupActions, { AccountSelectionIndicator, ArchiveBulkActions, mouseIsOutsideAccountCodeRow, normalizeGroupName } from "./BulkGroupActions";
 import BulkLogoPicker, { retainedAccountIconBytes, type BulkAccountLogoPatch } from "./BulkLogoPicker";
@@ -15,7 +15,7 @@ import SettingsCenter, { type UserProfile, type UserProfilePatch } from "./Setti
 import SignInScreen from "./SignInScreen";
 import ThemeToggle from "./ThemeToggle";
 import TransferCenter, { type ImportDecision } from "./TransferCenter";
-import { formatCode, generateTotp, isTotpExpiring, isValidBase32, normalizeSecret, parseOtpAuthUri, totpWindow, type TotpAlgorithm } from "../lib/totp";
+import { formatCode, generateTotp, generateTotpTestPreview, isTotpExpiring, isValidBase32, normalizeSecret, parseOtpAuthUri, totpWindow, type TotpAlgorithm, type TotpTestPreview } from "../lib/totp";
 import { changeVaultPassword, claimLegacyVault, deleteVaultAccount, getVaultBootstrap, identifyVault, loginVault, logoutVault, saveVault, setupVault, updateInstanceSettings, VAULT_API_TIMEOUT_MS, VaultApiError, type VaultInstanceSettings } from "../lib/vault-api";
 import { createAuthProof, createEncryptedVault, DEFAULT_VAULT_RESUME_AGE_MS, decryptVaultPayload, encryptVaultPayload, REMEMBERED_VAULT_RESUME_AGE_MS, rotateVaultPassword, unlockVaultHeader, VaultCryptoError, type EncryptedVaultHeader, type VaultPayloadCipher, type VaultRuntime } from "../lib/vault-crypto";
 import { createEmptyVault, MAX_GROUP_CUSTOMIZATIONS, parsePersistedVault, withVaultUpdate, type PersistedVault, type VaultAccount, type VaultGroupColor, type VaultGroupCustomization, type VaultGroupIcon, type VaultMainScreen, type VaultTheme } from "../lib/vault-model";
@@ -80,6 +80,234 @@ type ReadyVaultSessionPublication = {
 type GroupDropTarget = { name: string; edge: GroupDropEdge };
 type AccountDropTarget = { id: string; edge: AccountDropEdge; axis: "horizontal" | "vertical" };
 type SidebarMenuTarget = { kind: "all" } | { kind: "group"; name: string };
+type NewAccountSecretTestFeedback =
+  | { status: "idle" }
+  | { status: "testing" }
+  | { status: "success"; preview: TotpTestPreview; remainingSeconds: number }
+  | { status: "error" };
+
+function HeartIcon({ className, filled = false }: { className: string; filled?: boolean }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d={filled
+        ? "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35Z"
+        : "M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3Zm-4.4 15.55-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05Z"} />
+    </svg>
+  );
+}
+
+function SidebarFavoritesIcon({ className, filled = false }: { className: string; filled?: boolean }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      overflow="visible"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        className="sidebar-favorites-heart-path"
+        d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5"
+      />
+    </svg>
+  );
+}
+
+function ArchiveIcon({ className }: { className: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <rect x="2" y="3" width="20" height="5" rx="1" />
+      <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
+      <path d="M10 12h4" />
+    </svg>
+  );
+}
+
+function SidebarArchiveIcon({ className }: { className: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      overflow="visible"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <rect className="sidebar-scale-pop-part sidebar-icon-delay-0" width="20" height="5" x="2" y="3" rx="1" />
+      <path className="sidebar-scale-pop-part sidebar-icon-delay-1" d="M4 8v11a2 2 0 0 0 2 2h2" />
+      <path className="sidebar-scale-pop-part sidebar-icon-delay-2" d="M20 8v11a2 2 0 0 1-2 2h-2" />
+      <path className="sidebar-scale-pop-part sidebar-icon-delay-3" d="m9 15 3-3 3 3" />
+      <path className="sidebar-scale-pop-part sidebar-icon-delay-4" d="M12 12v9" />
+    </svg>
+  );
+}
+
+function CardsIcon({ className }: { className: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      overflow="visible"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path className="sidebar-scale-pop-part sidebar-icon-delay-0" d="M16 10h2" />
+      <path className="sidebar-scale-pop-part sidebar-icon-delay-1" d="M16 14h2" />
+      <path className="sidebar-scale-pop-part sidebar-icon-delay-2" d="M6.17 15a3 3 0 0 1 5.66 0" />
+      <circle className="sidebar-scale-pop-part sidebar-icon-delay-3" cx="9" cy="11" r="2" />
+      <rect className="sidebar-scale-pop-part sidebar-icon-delay-4" x="2" y="5" width="20" height="14" rx="2" />
+    </svg>
+  );
+}
+
+function DataBackupIcon({ className }: { className: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      overflow="visible"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <ellipse className="sidebar-scale-pop-part sidebar-icon-delay-0" cx="12" cy="5" rx="9" ry="3" />
+      <path className="sidebar-scale-pop-part sidebar-icon-delay-1" d="M3 12a9 3 0 0 0 5 2.69" />
+      <path className="sidebar-scale-pop-part sidebar-icon-delay-2" d="M21 9.3V5" />
+      <path className="sidebar-scale-pop-part sidebar-icon-delay-3" d="M3 5v14a9 3 0 0 0 6.47 2.88" />
+      <path className="sidebar-scale-pop-part sidebar-icon-delay-4" d="M12 12v4h4" />
+      <path className="sidebar-scale-pop-part sidebar-icon-delay-5" d="M13 20a5 5 0 0 0 9-3 4.5 4.5 0 0 0-4.5-4.5c-1.33 0-2.54.54-3.41 1.41L12 16" />
+    </svg>
+  );
+}
+
+function SettingsIcon({ className }: { className: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      overflow="visible"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path className="sidebar-settings-gear sidebar-icon-delay-0" d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" />
+      <circle className="sidebar-settings-gear sidebar-icon-delay-1" cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function HeaderLockIcon({ className }: { className: string }) {
+  return (
+    <span className={className} aria-hidden="true">
+      <svg
+        className="header-lock-layer header-lock-open"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        overflow="visible"
+        focusable="false"
+      >
+        <circle cx="12" cy="16" r="1" />
+        <rect width="18" height="12" x="3" y="10" rx="2" />
+        <path d="M7 10V7a5 5 0 0 1 9.33-2.5" />
+      </svg>
+      <svg
+        className="header-lock-layer header-lock-closed"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        overflow="visible"
+        focusable="false"
+      >
+        <circle className="header-lock-fill-part header-lock-delay-0" cx="12" cy="16" r="1" />
+        <rect className="header-lock-fade-part header-lock-delay-1" x="3" y="10" width="18" height="12" rx="2" />
+        <path className="header-lock-fade-part header-lock-delay-2" d="M7 10V7a5 5 0 0 1 10 0v3" />
+      </svg>
+    </span>
+  );
+}
+
+function AddAccountIcon({ className }: { className: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <rect className="add-button-icon-bg" x="1" y="1" width="22" height="22" rx="7" />
+      <path
+        className="add-button-icon-mark"
+        d="M8 12h8M12 8v8"
+        fill="none"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function SidebarChevronIcon({ className }: { className: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="m14.5 6-6 6 6 6" />
+    </svg>
+  );
+}
 
 function resumePersistenceForRememberLogin(rememberLogin: boolean): VaultResumePersistence {
   return rememberLogin ? "remembered" : "session";
@@ -294,6 +522,9 @@ function accountCodePreview(account: Account, timestamp: number, storedPair?: Ge
 }
 
 export default function VaultApp() {
+  const newAccountSecretInputId = useId();
+  const newAccountSecretTestFeedbackId = useId();
+  const newAccountSecretStorageHintId = useId();
   const [authStatus, setAuthStatus] = useState<AuthStatus>("loading");
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -347,6 +578,7 @@ export default function VaultApp() {
   const [newDigits, setNewDigits] = useState<6 | 8>(6);
   const [newPeriod, setNewPeriod] = useState(30);
   const [formError, setFormError] = useState("");
+  const [newAccountSecretTestFeedback, setNewAccountSecretTestFeedback] = useState<NewAccountSecretTestFeedback>({ status: "idle" });
   const searchRef = useRef<HTMLInputElement>(null);
   const mobileSidebarRef = useRef<HTMLElement>(null);
   const mobileSidebarTriggerRef = useRef<HTMLButtonElement>(null);
@@ -354,6 +586,8 @@ export default function VaultApp() {
   const manualServiceInputRef = useRef<HTMLInputElement>(null);
   const addTriggerRef = useRef<HTMLElement | null>(null);
   const addOriginViewRef = useRef<View>("all");
+  const newAccountSecretTestRequestRef = useRef(0);
+  const newAccountSecretTestExpiryTimerRef = useRef<number | null>(null);
   const runtimeRef = useRef<VaultRuntime | null>(null);
   const vaultRef = useRef<PersistedVault | null>(null);
   const bootstrapHeaderRef = useRef<EncryptedVaultHeader | null>(null);
@@ -439,12 +673,25 @@ export default function VaultApp() {
     }
   }, []);
 
+  const resetNewAccountSecretTest = useCallback(() => {
+    newAccountSecretTestRequestRef.current += 1;
+    if (newAccountSecretTestExpiryTimerRef.current !== null) {
+      window.clearTimeout(newAccountSecretTestExpiryTimerRef.current);
+      newAccountSecretTestExpiryTimerRef.current = null;
+    }
+    setNewAccountSecretTestFeedback({ status: "idle" });
+  }, []);
+
   useEffect(() => () => {
     if (selectedAccountClickResetFrameRef.current !== null) {
       window.cancelAnimationFrame(selectedAccountClickResetFrameRef.current);
     }
     if (groupClickResetFrameRef.current !== null) {
       window.cancelAnimationFrame(groupClickResetFrameRef.current);
+    }
+    newAccountSecretTestRequestRef.current += 1;
+    if (newAccountSecretTestExpiryTimerRef.current !== null) {
+      window.clearTimeout(newAccountSecretTestExpiryTimerRef.current);
     }
   }, []);
 
@@ -1005,6 +1252,7 @@ export default function VaultApp() {
               setVault(null);
               setCodePairs({});
               setSetupLink("");
+              resetNewAccountSecretTest();
               setSecret("");
               setSaveConflict(null);
               setAuthError("Conflicting encrypted data could not be opened safely. The browser recovery remains intact; sign in again to retry.");
@@ -1059,7 +1307,7 @@ export default function VaultApp() {
     });
     drainRef.current = { generation, promise: tracked };
     return tracked;
-  }, [attemptVaultSave, publishConflict, stagePendingVaults]);
+  }, [attemptVaultSave, publishConflict, resetNewAccountSecretTest, stagePendingVaults]);
 
   useEffect(() => {
     flushVaultSavesRef.current = flushVaultSaves;
@@ -1575,6 +1823,7 @@ export default function VaultApp() {
     setSetupLink("");
     setService("");
     setIdentity("");
+    resetNewAccountSecretTest();
     setSecret("");
     setNewGroup("Personal");
     setNewAlgorithm("SHA-1");
@@ -1637,7 +1886,7 @@ export default function VaultApp() {
     });
     lockPromiseRef.current = tracked;
     return tracked;
-  }, [beginSessionTransition, clearGroupDrag, clearSelectedAccountDrag]);
+  }, [beginSessionTransition, clearGroupDrag, clearSelectedAccountDrag, resetNewAccountSecretTest]);
 
   const deleteOwnAccount = useCallback(async (password: string): Promise<void> => {
     if (passwordChangeRef.current) {
@@ -1777,6 +2026,7 @@ export default function VaultApp() {
     setSetupLink("");
     setService("");
     setIdentity("");
+    resetNewAccountSecretTest();
     setSecret("");
     setNewGroup("Personal");
     setNewAlgorithm("SHA-1");
@@ -1929,7 +2179,7 @@ export default function VaultApp() {
     });
     lockPromiseRef.current = tracked;
     return tracked;
-  }, [attemptVaultSave, beginSessionTransition, clearGroupDrag, clearSelectedAccountDrag, stagePendingVaults]);
+  }, [attemptVaultSave, beginSessionTransition, clearGroupDrag, clearSelectedAccountDrag, resetNewAccountSecretTest, stagePendingVaults]);
 
   const changeOwnPassword = useCallback(async (
     currentPassword: string,
@@ -2649,6 +2899,7 @@ export default function VaultApp() {
         event.preventDefault();
         searchRef.current?.focus();
       } else if (event.key === "Escape") {
+        resetNewAccountSecretTest();
         setAddOpen(false);
         setAccountMenuId(null);
         setSidebarMenuTarget(null);
@@ -2657,7 +2908,7 @@ export default function VaultApp() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [resetNewAccountSecretTest]);
 
   useEffect(() => {
     const mobileBreakpoint = window.matchMedia("(max-width: 620px)");
@@ -2909,7 +3160,7 @@ export default function VaultApp() {
     if (!saved) return false;
     setSidebarMenuTarget(null);
     setToast(target.kind === "all"
-      ? "All codes is now the default main screen."
+      ? "All Cards is now the default main screen."
       : `${target.name} is now the default main screen.`);
     return true;
   };
@@ -3664,7 +3915,7 @@ export default function VaultApp() {
     if (!saved) return false;
 
     exitSelectionMode();
-    setToast(`${restoredCount} ${restoredCount === 1 ? "account" : "accounts"} restored to All codes.`);
+    setToast(`${restoredCount} ${restoredCount === 1 ? "account" : "accounts"} restored to All Cards.`);
     return true;
   };
 
@@ -3785,7 +4036,7 @@ export default function VaultApp() {
     if (!target) return;
     setAccounts((current) => current.map((account) => account.id === id ? { ...account, archived: !account.archived } : account));
     setAccountMenuId(null);
-    setToast(target.archived ? `${target.service} restored to All codes.` : `${target.service} moved to Archive.`);
+    setToast(target.archived ? `${target.service} restored to All Cards.` : `${target.service} moved to Archive.`);
   };
 
   const restoreAllArchivedAccounts = () => {
@@ -3810,7 +4061,7 @@ export default function VaultApp() {
     if (!saved) return;
 
     setAccountMenuId(null);
-    setToast(`${restoredCount} ${restoredCount === 1 ? "account" : "accounts"} restored to All codes.`);
+    setToast(`${restoredCount} ${restoredCount === 1 ? "account" : "accounts"} restored to All Cards.`);
   };
 
   const deleteArchivedAccount = (id: string) => {
@@ -3925,6 +4176,7 @@ export default function VaultApp() {
     setFormError("");
     try {
       const parsed = parseOtpAuthUri(value);
+      resetNewAccountSecretTest();
       setSetupLink(value);
       setService(parsed.issuer || "Imported account");
       setIdentity(parsed.account);
@@ -3940,7 +4192,101 @@ export default function VaultApp() {
 
   const parseLink = () => applySetupLink(setupLink);
 
+  const newAccountSecretTestReady = isValidBase32(secret);
+  const newAccountSecretTestBusy = newAccountSecretTestFeedback.status === "testing";
+  const newAccountSecretTestHint = newAccountSecretTestBusy
+    ? "Generating a test code locally…"
+    : newAccountSecretTestReady
+      ? "Generate a code locally from this unsaved secret."
+      : "Enter a valid Base32 secret before testing.";
+
+  const changeNewAccountSecret = (value: string) => {
+    resetNewAccountSecretTest();
+    setSecret(value);
+  };
+
+  const changeNewAccountAlgorithm = (value: TotpAlgorithm) => {
+    resetNewAccountSecretTest();
+    setNewAlgorithm(value);
+  };
+
+  const changeNewAccountDigits = (value: 6 | 8) => {
+    resetNewAccountSecretTest();
+    setNewDigits(value);
+  };
+
+  const changeNewAccountPeriod = (value: number) => {
+    resetNewAccountSecretTest();
+    setNewPeriod(value);
+  };
+
+  const testNewAccountSecret = async () => {
+    if (!newAccountSecretTestReady || newAccountSecretTestBusy) return;
+
+    const request = newAccountSecretTestRequestRef.current + 1;
+    newAccountSecretTestRequestRef.current = request;
+    if (newAccountSecretTestExpiryTimerRef.current !== null) {
+      window.clearTimeout(newAccountSecretTestExpiryTimerRef.current);
+      newAccountSecretTestExpiryTimerRef.current = null;
+    }
+    setNewAccountSecretTestFeedback({ status: "testing" });
+
+    const configuration = {
+      secret: normalizeSecret(secret),
+      algorithm: newAlgorithm,
+      digits: newDigits,
+      period: newPeriod,
+    } as const;
+
+    function publishPreview(preview: TotpTestPreview) {
+      if (newAccountSecretTestRequestRef.current !== request) return;
+
+      const millisecondsRemaining = preview.expiresAt - Date.now();
+      if (millisecondsRemaining <= 0) {
+        void refreshPreview();
+        return;
+      }
+
+      const remainingSeconds = Math.ceil(millisecondsRemaining / 1000);
+      setNewAccountSecretTestFeedback({ status: "success", preview, remainingSeconds });
+
+      const millisecondsUntilNextSecond = millisecondsRemaining - ((remainingSeconds - 1) * 1000);
+      const refreshTimer = window.setTimeout(() => {
+        if (newAccountSecretTestExpiryTimerRef.current === refreshTimer) {
+          newAccountSecretTestExpiryTimerRef.current = null;
+        }
+        if (newAccountSecretTestRequestRef.current !== request) return;
+        if (Date.now() >= preview.expiresAt) {
+          void refreshPreview();
+        } else {
+          publishPreview(preview);
+        }
+      }, Math.max(1, Math.min(1000, millisecondsUntilNextSecond)));
+      newAccountSecretTestExpiryTimerRef.current = refreshTimer;
+    }
+
+    async function refreshPreview() {
+      try {
+        let preview = await generateTotpTestPreview(configuration);
+        if (newAccountSecretTestRequestRef.current !== request) return;
+        if (Date.now() >= preview.expiresAt) {
+          preview = await generateTotpTestPreview(configuration);
+        }
+        if (newAccountSecretTestRequestRef.current !== request) return;
+        if (Date.now() >= preview.expiresAt) throw new Error("The generated code expired before it could be shown.");
+        publishPreview(preview);
+      } catch {
+        if (newAccountSecretTestRequestRef.current === request) {
+          setNewAccountSecretTestFeedback({ status: "error" });
+        }
+      }
+    }
+
+    await refreshPreview();
+  };
+
   const resetForm = () => {
+    resetNewAccountSecretTest();
     setSetupLink("");
     setService("");
     setIdentity("");
@@ -4134,7 +4480,7 @@ export default function VaultApp() {
           aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
-          <span aria-hidden="true" />
+          <SidebarChevronIcon className="sidebar-toggle-icon" />
         </button>
 
         <div className="brand">
@@ -4157,15 +4503,15 @@ export default function VaultApp() {
               }
             }}
           >
-            <button title="All codes" className="primary-nav-main" onClick={() => { showAllAccounts(); closeMobileSidebar(); }}><span className="nav-icon grid-icon" aria-hidden="true" />All codes<span className="nav-count">{accounts.filter((account) => !account.archived).length}</span></button>
+            <button title="All Cards" className="primary-nav-main sidebar-all-cards-button" onClick={() => { showAllAccounts(); closeMobileSidebar(); }}><CardsIcon className="nav-icon cards-icon" />All Cards<span className="nav-count">{accounts.filter((account) => !account.archived).length}</span></button>
             <button
               type="button"
               className="primary-options-button more-button"
               onClick={(event) => toggleSidebarMenu(allCodesTarget, event.currentTarget)}
               aria-haspopup="menu"
               aria-expanded={allCodesMenuOpen}
-              aria-label="Open All codes options"
-              title="All codes options"
+              aria-label="Open All Cards options"
+              title="All Cards options"
             >
               <span aria-hidden="true">•••</span>
             </button>
@@ -4187,7 +4533,7 @@ export default function VaultApp() {
           <button
             title={primarySelectionActive ? "Add selected accounts to Favorites" : "Favorites"}
             aria-label={primarySelectionActive ? "Add selected accounts to Favorites" : "Favorites"}
-            className={`nav-item ${view === "favorites" ? "active" : ""} ${favoriteDropReady ? "drop-ready" : ""} ${favoriteDropTarget ? "drop-target" : ""}`}
+            className={`nav-item sidebar-favorites-button ${view === "favorites" ? "active" : ""} ${favoriteDropReady ? "drop-ready" : ""} ${favoriteDropTarget ? "drop-target" : ""}`}
             onDragEnter={(event) => dragSelectedAccountsOverPrimaryTarget(event, "favorites")}
             onDragOver={(event) => dragSelectedAccountsOverPrimaryTarget(event, "favorites")}
             onDragLeave={(event) => leaveSelectedAccountPrimaryTarget(event, "favorites")}
@@ -4201,11 +4547,11 @@ export default function VaultApp() {
               setGroup("All");
               closeMobileSidebar();
             }}
-          ><span className="nav-icon star-icon" aria-hidden="true">✦</span>Favorites<span className="nav-count">{accounts.filter((account) => account.favorite && !account.archived).length}</span></button>
+          ><SidebarFavoritesIcon className="nav-icon heart-icon" filled={view === "favorites"} />Favorites<span className="nav-count">{accounts.filter((account) => account.favorite && !account.archived).length}</span></button>
           <button
             title={primarySelectionActive ? "Move selected accounts to Archive" : "Archive"}
             aria-label={primarySelectionActive ? "Move selected accounts to Archive" : "Archive"}
-            className={`nav-item ${view === "archive" ? "active" : ""} ${archiveDropReady ? "drop-ready" : ""} ${archiveDropTarget ? "drop-target" : ""}`}
+            className={`nav-item sidebar-archive-button ${view === "archive" ? "active" : ""} ${archiveDropReady ? "drop-ready" : ""} ${archiveDropTarget ? "drop-target" : ""}`}
             onDragEnter={(event) => dragSelectedAccountsOverPrimaryTarget(event, "archive")}
             onDragOver={(event) => dragSelectedAccountsOverPrimaryTarget(event, "archive")}
             onDragLeave={(event) => leaveSelectedAccountPrimaryTarget(event, "archive")}
@@ -4220,9 +4566,9 @@ export default function VaultApp() {
               setGroup("All");
               closeMobileSidebar();
             }}
-          ><span className="nav-icon trash-icon" aria-hidden="true" />Archive<span className="nav-count">{accounts.filter((account) => account.archived).length}</span></button>
-          <button title="Data and backup" className={`nav-item ${view === "transfer" ? "active" : ""}`} onClick={() => { exitSelectionMode(); setView("transfer"); closeMobileSidebar(); }}><span className="nav-icon transfer-icon" aria-hidden="true" />Data &amp; backup</button>
-          <button title="Settings" className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => { exitSelectionMode(); setView("settings"); closeMobileSidebar(); }}><span className="nav-icon settings-icon" aria-hidden="true" />Settings</button>
+          ><SidebarArchiveIcon className="nav-icon archive-icon" />Archive<span className="nav-count">{accounts.filter((account) => account.archived).length}</span></button>
+          <button title="Data and backup" className={`nav-item sidebar-data-backup-button ${view === "transfer" ? "active" : ""}`} onClick={() => { exitSelectionMode(); setView("transfer"); closeMobileSidebar(); }}><DataBackupIcon className="nav-icon transfer-icon" />Data &amp; backup</button>
+          <button title="Settings" className={`nav-item sidebar-settings-button ${view === "settings" ? "active" : ""}`} onClick={() => { exitSelectionMode(); setView("settings"); closeMobileSidebar(); }}><SettingsIcon className="nav-icon settings-icon" />Settings</button>
         </nav>
 
         <div className="sidebar-groups-heading">
@@ -4288,6 +4634,7 @@ export default function VaultApp() {
                   data-group-dragging={groupDragSource || undefined}
                   draggable={!selectionMode && groups.length > 1}
                   aria-pressed={active}
+                  aria-label={selectionMoveReady ? `Move selected accounts to ${name}` : name}
                   title={selectionMoveReady
                     ? `Move selected accounts to ${name}`
                     : `Open ${name}. Drag to reorder; right-click for options or press F2 to edit.`}
@@ -4424,7 +4771,7 @@ export default function VaultApp() {
               onClick={() => void lockVault()}
               aria-label="Lock vault"
             >
-              <span className="lock-button-icon" aria-hidden="true" />
+              <HeaderLockIcon className="lock-button-icon" />
             </button>
             <ThemeToggle theme={theme} onToggle={() => updateSettings({ theme: theme === "dark" ? "light" : "dark" })} />
             <ProfileMenu
@@ -4497,7 +4844,7 @@ export default function VaultApp() {
                     setSidebarMenuTarget(null);
                   }}
                 />
-                <button type="button" className="add-button" onClick={openAdd}><span>+</span> Add account</button>
+                <button type="button" className="add-button" onClick={openAdd}><AddAccountIcon className="add-button-icon" /> Add account</button>
                 {selectableVisibleIds.length > 0 && bulkGroupActions}
               </div>
             </div>
@@ -4517,7 +4864,7 @@ export default function VaultApp() {
           {view === "archive" ? (
             <>
               <section className="archive-explainer" aria-label="About Archive">
-                <span className="archive-explainer-icon" aria-hidden="true"><span className="nav-icon trash-icon" /></span>
+                <span className="archive-explainer-icon" aria-hidden="true"><ArchiveIcon className="nav-icon archive-icon" /></span>
                 <div><strong>Hidden, not deleted</strong><p>Archived accounts stay encrypted and keep generating codes until you restore them.</p></div>
                 <span>{accounts.filter((account) => account.archived).length} archived</span>
               </section>
@@ -4602,7 +4949,7 @@ export default function VaultApp() {
                     ) : (
                       <div className="account-card-actions">
                         {account.archived && <span className="archived-badge">Archived</span>}
-                        {!account.archived && <button className={`favorite ${account.favorite ? "selected" : ""}`} onClick={() => toggleFavorite(account.id)} aria-label={`${account.favorite ? "Remove" : "Add"} ${account.service} ${account.favorite ? "from" : "to"} favorites`}>✦</button>}
+                        {!account.archived && <button className={`favorite ${account.favorite ? "selected" : ""}`} onClick={() => toggleFavorite(account.id)} aria-label={`${account.favorite ? "Remove" : "Add"} ${account.service} ${account.favorite ? "from" : "to"} favorites`}><HeartIcon className="card-favorite-icon" filled={account.favorite} /></button>}
                         <div className="account-menu-wrap" onBlur={(event) => {
                           if (editingAccountId !== account.id && !event.currentTarget.contains(event.relatedTarget)) {
                             setAccountMenuId(null);
@@ -4633,11 +4980,11 @@ export default function VaultApp() {
                           aria-label={accessibleCurrentCode ? `Copy ${account.service} ${account.identity} code ${accessibleCurrentCode}` : `Copy ${account.service} ${account.identity} code when ready`}
                         ><span className="code-value" data-digits={account.digits} aria-hidden="true">{locked ? "••• •••" : currentCode ?? "--- ---"}</span></button>
                       )}
-                      <div className={`next-code ${revealNextCode ? "visible" : ""}`} aria-hidden={selectionMode || !revealNextCode ? true : undefined}>
-                        <span className="visually-hidden">{locked ? "Next code hidden" : nextCode ? `Next code ${nextCode.replace(/\s/gu, "").split("").join(" ")}` : "Next code loading"}</span>
-                        <span className="next-code-label" aria-hidden="true">Next</span>
-                        <span className="next-code-value" aria-hidden="true">{locked ? "••• •••" : nextCode ?? "--- ---"}</span>
-                      </div>
+                    </div>
+                    <div className={`next-code ${revealNextCode ? "visible" : ""}`} aria-hidden={selectionMode || !revealNextCode ? true : undefined}>
+                      <span className="visually-hidden">{locked ? "Next code hidden" : nextCode ? `Next code ${nextCode.replace(/\s/gu, "").split("").join(" ")}` : "Next code loading"}</span>
+                      <span className="next-code-label" aria-hidden="true">Next</span>
+                      <span className="next-code-value" aria-hidden="true">{locked ? "••• •••" : nextCode ?? "--- ---"}</span>
                     </div>
                     <div className={`countdown ${revealNextCode ? "urgent" : ""}`} style={{ "--progress": `${(remaining / account.period) * 360}deg` } as React.CSSProperties}><span>{locked ? "—" : remaining}</span></div>
                   </div>
@@ -4653,7 +5000,7 @@ export default function VaultApp() {
               <div className="empty-rings"><span /><span /><span /></div>
               <h2>{view === "archive" ? query.trim() ? "No archived accounts found" : "Archive is empty" : "No codes found"}</h2>
               <p>{view === "archive" ? query.trim() ? "Try a different search." : "Accounts you archive will appear here." : "Try another search or add a new authenticator account."}</p>
-              {view === "archive" ? <button onClick={() => { if (query.trim()) setQuery(""); else setView("all"); }}>{query.trim() ? "Clear search" : "Back to all codes"}</button> : <button onClick={openAdd}>Add account</button>}
+              {view === "archive" ? <button onClick={() => { if (query.trim()) setQuery(""); else setView("all"); }}>{query.trim() ? "Clear search" : "Back to All Cards"}</button> : <button onClick={openAdd}>Add account</button>}
             </section>
           )}
         </div>
@@ -4669,14 +5016,14 @@ export default function VaultApp() {
             </div>
 
             <div className="mode-switch account-input-modes" aria-label="Account input method">
-              <button data-autofocus className={addMode === "qr" ? "active" : ""} onClick={() => { setAddMode("qr"); setFormError(""); }}>Scan QR</button>
-              <button className={addMode === "link" ? "active" : ""} onClick={() => { setAddMode("link"); setFormError(""); }}>Setup link</button>
-              <button className={addMode === "manual" ? "active" : ""} onClick={() => { setAddMode("manual"); setFormError(""); }}>Manual entry</button>
+              <button data-autofocus className={addMode === "qr" ? "active" : ""} onClick={() => { resetNewAccountSecretTest(); setAddMode("qr"); setFormError(""); }}>Scan QR</button>
+              <button className={addMode === "link" ? "active" : ""} onClick={() => { resetNewAccountSecretTest(); setAddMode("link"); setFormError(""); }}>Setup link</button>
+              <button className={addMode === "manual" ? "active" : ""} onClick={() => { resetNewAccountSecretTest(); setAddMode("manual"); setFormError(""); }}>Manual entry</button>
             </div>
 
             {addMode === "qr" ? (
               <div className="qr-panel">
-                <QrScanner onDetected={applySetupLink} onFallback={() => { setAddMode("link"); setFormError(""); }} />
+                <QrScanner onDetected={applySetupLink} onFallback={() => { resetNewAccountSecretTest(); setAddMode("link"); setFormError(""); }} />
                 {formError && <p className="form-error" role="alert">{formError}</p>}
               </div>
             ) : addMode === "link" ? (
@@ -4687,7 +5034,7 @@ export default function VaultApp() {
                 <label><span>Setup link</span><textarea value={setupLink} onChange={(event) => setSetupLink(event.target.value)} placeholder="otpauth://totp/Service:account…" /></label>
                 {formError && <p className="form-error" role="alert">{formError}</p>}
                 <button className="modal-primary" onClick={parseLink} disabled={!setupLink.trim()}>Review account <span>→</span></button>
-                <button className="text-button" onClick={() => setAddMode("manual")}>I only have the secret key</button>
+                <button className="text-button" onClick={() => { resetNewAccountSecretTest(); setAddMode("manual"); }}>I only have the secret key</button>
               </div>
             ) : (
               <form className="manual-form" onSubmit={addAccount}>
@@ -4706,14 +5053,61 @@ export default function VaultApp() {
                   <label><span>Group</span><select value={newGroup} onChange={(event) => setNewGroup(event.target.value as Group)}>{entryGroups.map((name) => <option key={name} data-i18n-ignore>{name}</option>)}</select></label>
                 </div>
                 <label><span>Account name</span><input value={identity} onChange={(event) => setIdentity(event.target.value)} placeholder="name@example.com" /></label>
-                <label><span>Base32 secret</span><input className="secret-input" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="JBSW Y3DP EHPK 3PXP" autoComplete="off" spellCheck={false} /><small>Encrypted in this browser before the vault is saved.</small></label>
+                <div className="manual-secret-field">
+                  <label htmlFor={newAccountSecretInputId}><span>Base32 secret</span></label>
+                  <span className="account-editor-secret-control manual-secret-control">
+                    <input
+                      id={newAccountSecretInputId}
+                      className="secret-input"
+                      value={secret}
+                      onChange={(event) => changeNewAccountSecret(event.target.value)}
+                      placeholder="JBSW Y3DP EHPK 3PXP"
+                      maxLength={1_280}
+                      autoComplete="off"
+                      spellCheck={false}
+                      aria-describedby={`${newAccountSecretTestFeedbackId} ${newAccountSecretStorageHintId}`}
+                    />
+                    <button
+                      className="account-editor-test-secret"
+                      type="button"
+                      onClick={() => void testNewAccountSecret()}
+                      disabled={!newAccountSecretTestReady || newAccountSecretTestBusy}
+                      aria-describedby={newAccountSecretTestFeedbackId}
+                    >{newAccountSecretTestBusy ? "Testing…" : "Test"}</button>
+                  </span>
+                  {newAccountSecretTestFeedback.status === "success" ? (
+                    <div className="manual-secret-test-result">
+                      <p id={newAccountSecretTestFeedbackId} className="account-editor-secret-test-feedback success" role="status" aria-live="polite" aria-atomic="true">
+                        <span>Test code</span>
+                        <strong aria-hidden="true">{newAccountSecretTestFeedback.preview.code}</strong>
+                        <span className="visually-hidden">Draft code {newAccountSecretTestFeedback.preview.code.replace(/\s/gu, "").split("").join(" ")}</span>
+                      </p>
+                      <span
+                        className={`countdown manual-secret-test-countdown ${isTotpExpiring(newAccountSecretTestFeedback.remainingSeconds) ? "urgent" : ""}`}
+                        style={{ "--progress": `${(newAccountSecretTestFeedback.remainingSeconds / newPeriod) * 360}deg` } as React.CSSProperties}
+                        aria-hidden="true"
+                      ><span>{newAccountSecretTestFeedback.remainingSeconds}</span></span>
+                    </div>
+                  ) : newAccountSecretTestFeedback.status === "error" ? (
+                    <p id={newAccountSecretTestFeedbackId} className="account-editor-secret-test-feedback error" role="alert">Coffer could not generate a test code. Check the secret and TOTP settings, then try again.</p>
+                  ) : (
+                    <p
+                      id={newAccountSecretTestFeedbackId}
+                      className="account-editor-secret-test-feedback"
+                      role={newAccountSecretTestBusy ? "status" : undefined}
+                      aria-live={newAccountSecretTestBusy ? "polite" : undefined}
+                      aria-atomic={newAccountSecretTestBusy ? "true" : undefined}
+                    >{newAccountSecretTestHint}</p>
+                  )}
+                  <small id={newAccountSecretStorageHintId} className="manual-secret-storage-hint">Encrypted in this browser before the vault is saved.</small>
+                </div>
                 <div className="field-row advanced-fields">
-                  <label><span>Algorithm</span><select value={newAlgorithm} onChange={(event) => setNewAlgorithm(event.target.value as TotpAlgorithm)}><option>SHA-1</option><option>SHA-256</option><option>SHA-512</option></select></label>
-                  <label><span>Digits</span><select value={newDigits} onChange={(event) => setNewDigits(Number(event.target.value) as 6 | 8)}><option value="6">6 digits</option><option value="8">8 digits</option></select></label>
-                  <label><span>Period</span><select value={newPeriod} onChange={(event) => setNewPeriod(Number(event.target.value))}><option value="30">30 seconds</option><option value="60">60 seconds</option></select></label>
+                  <label><span>Algorithm</span><select value={newAlgorithm} onChange={(event) => changeNewAccountAlgorithm(event.target.value as TotpAlgorithm)}><option>SHA-1</option><option>SHA-256</option><option>SHA-512</option></select></label>
+                  <label><span>Digits</span><select value={newDigits} onChange={(event) => changeNewAccountDigits(Number(event.target.value) as 6 | 8)}><option value="6">6 digits</option><option value="8">8 digits</option></select></label>
+                  <label><span>Period</span><select value={newPeriod} onChange={(event) => changeNewAccountPeriod(Number(event.target.value))}><option value="30">30 seconds</option><option value="60">60 seconds</option></select></label>
                 </div>
                 {formError && <p className="form-error" role="alert">{formError}</p>}
-                <div className="modal-actions"><button type="button" className="modal-secondary" onClick={closeAdd}>Cancel</button><button className="modal-primary" type="submit">Add account <span>→</span></button></div>
+                <div className="modal-actions"><button type="button" className="modal-secondary" onClick={closeAdd}>Cancel</button><button className="modal-primary" type="submit" disabled={newAccountSecretTestBusy}>Add account <span>→</span></button></div>
               </form>
             )}
           </section>
