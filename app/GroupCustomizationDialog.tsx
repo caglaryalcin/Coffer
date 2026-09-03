@@ -9,6 +9,7 @@ import {
   type FormEvent,
 } from "react";
 import type { VaultGroupColor, VaultGroupIcon } from "../lib/vault-model";
+import GroupIcon from "./GroupIcon";
 
 export type GroupCustomizationValue = {
   name: string;
@@ -301,11 +302,10 @@ function GroupCustomizationDialogContent({
 
         <form className="group-customization-form" onSubmit={save} noValidate>
           <div className="group-customization-name-row">
-            <span
+            <GroupIcon
               className="group-customization-preview"
-              data-icon={icon}
-              data-color={color}
-              aria-hidden="true"
+              icon={icon}
+              color={color}
             />
             <label htmlFor={nameId}>
               <span>Group name</span>
@@ -340,11 +340,10 @@ function GroupCustomizationDialogContent({
                     checked={icon === option.value}
                     onChange={() => setIcon(option.value)}
                   />
-                  <span
+                  <GroupIcon
                     className="group-customization-option-icon"
-                    data-icon={option.value}
-                    data-color={color}
-                    aria-hidden="true"
+                    icon={option.value}
+                    color={color}
                   />
                   <span>{option.label}</span>
                 </label>

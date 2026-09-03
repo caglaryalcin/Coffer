@@ -6,6 +6,7 @@ import BulkGroupActions, { AccountSelectionIndicator, ArchiveBulkActions, mouseI
 import BulkLogoPicker, { retainedAccountIconBytes, type BulkAccountLogoPatch } from "./BulkLogoPicker";
 import CardViewMenu, { CARD_VIEW_STORAGE_KEY, parseCardView, readCardViewPreference, writeCardViewPreference, type CardView } from "./CardViewMenu";
 import GroupCustomizationDialog from "./GroupCustomizationDialog";
+import GroupIcon from "./GroupIcon";
 import OverflowingIdentity from "./OverflowingIdentity";
 import ProfileMenu from "./ProfileMenu";
 import QrScanner from "./QrScanner";
@@ -274,6 +275,23 @@ function AddAccountIcon({ className }: { className: string }) {
   );
 }
 
+function GroupAddIcon({ className }: { className: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M5 12h14M12 5v14" />
+    </svg>
+  );
+}
+
 function RestoreCodesIcon({ className }: { className: string }) {
   return (
     <svg
@@ -460,16 +478,26 @@ function sidebarMenuTargetKey(target: SidebarMenuTarget) {
   return target.kind === "all" ? "all" : `group:${groupKey(target.name)}`;
 }
 
-function sidebarMenuPositionFromTrigger(trigger: HTMLElement): SidebarMenuPosition {
+function sidebarMenuPositionFromTrigger(target: SidebarMenuTarget, trigger: HTMLElement): SidebarMenuPosition {
   const anchor = trigger
     .closest(".primary-nav-row, .group-nav-row")
     ?.querySelector<HTMLElement>(".primary-options-button, .group-options-button") ?? trigger;
   const rect = anchor.getBoundingClientRect();
-  const margin = 8;
+  const viewportMargin = 8;
+  const menuGap = 6;
+  const menuWidth = 205;
+  const menuHeight = target.kind === "group" ? 140 : 54;
   const menuLeft = rect.left + (rect.width / 2) - 4;
+  const belowTop = rect.bottom + menuGap;
+  const fitsBelow = belowTop + menuHeight <= window.innerHeight - viewportMargin;
   return {
-    top: Math.round(rect.bottom + 6),
-    left: Math.round(Math.max(margin, menuLeft)),
+    top: Math.round(fitsBelow
+      ? belowTop
+      : Math.max(viewportMargin, rect.top - menuGap - menuHeight)),
+    left: Math.round(Math.min(
+      Math.max(viewportMargin, menuLeft),
+      Math.max(viewportMargin, window.innerWidth - viewportMargin - menuWidth),
+    )),
   };
 }
 
@@ -3140,7 +3168,7 @@ export default function VaultApp() {
       setSidebarMenuPosition(null);
       return;
     }
-    setSidebarMenuPosition(sidebarMenuPositionFromTrigger(trigger));
+    setSidebarMenuPosition(sidebarMenuPositionFromTrigger(target, trigger));
     setSidebarMenuTarget(target);
   };
 
@@ -4587,7 +4615,7 @@ export default function VaultApp() {
             aria-expanded={creatingGroup}
             title={selectionMode ? "Finish selecting accounts before creating a group" : "Create group"}
           >
-            <span aria-hidden="true">+</span>
+            <GroupAddIcon className="group-add-icon" />
           </button>
         </div>
         <nav className="group-nav" aria-labelledby="sidebar-groups-label">
@@ -4673,11 +4701,10 @@ export default function VaultApp() {
                     }
                   }}
                 >
-                  <span
+                  <GroupIcon
                     className="group-symbol"
-                    data-icon={customization.icon}
-                    data-color={customization.color}
-                    aria-hidden="true"
+                    icon={customization.icon}
+                    color={customization.color}
                   />
                   <span className="group-label">
                     <span className="group-name" data-i18n-ignore>{name}</span>
