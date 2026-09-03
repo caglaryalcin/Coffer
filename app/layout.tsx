@@ -73,6 +73,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        {/* Keep favicon links in the initial head so Firefox can persist them for bookmarks. */}
+        <link rel="icon" href="/favicon.ico?v=3" type="image/x-icon" sizes="16x16 32x32 48x48" />
+        <link rel="icon" href="/favicon-48x48.png?v=3" type="image/png" sizes="48x48" />
+        <link rel="icon" href="/favicon-32x32.png?v=3" type="image/png" sizes="32x32" />
+        <link rel="icon" href="/favicon-16x16.png?v=3" type="image/png" sizes="16x16" />
+        <link rel="shortcut icon" href="/favicon.ico?v=3" type="image/x-icon" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=3" sizes="180x180" />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
