@@ -2,9 +2,9 @@
 
 ![Status](https://img.shields.io/badge/status-stable-ca7373) [![Latest Release](https://img.shields.io/github/v/release/caglaryalcin/Coffer?include_prereleases&color=blue)](https://github.com/caglaryalcin/Coffer/releases)
 
-![🌐 Chrome Extension](https://chromewebstore.google.com/detail/coffer/ajekhlpjkcohkdedhkdjkadilecboimd)
+🌐 [Chrome Extension](https://chromewebstore.google.com/detail/coffer/ajekhlpjkcohkdedhkdjkadilecboimd)
 
-![🌐 Firefox Extension](https://addons.mozilla.org/tr/firefox/addon/coffer/)
+🌐 [Firefox Extension](https://addons.mozilla.org/tr/firefox/addon/coffer/)
 
 # Coffer
 
