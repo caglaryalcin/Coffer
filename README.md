@@ -4,7 +4,7 @@
 
 ![🌐 Chrome Extension](https://chromewebstore.google.com/detail/coffer/ajekhlpjkcohkdedhkdjkadilecboimd)
 
-🌐 Firefox Extension (***Waiting review***...)
+![🌐 Firefox Extension](https://addons.mozilla.org/tr/firefox/addon/coffer/)
 
 # Coffer
 
