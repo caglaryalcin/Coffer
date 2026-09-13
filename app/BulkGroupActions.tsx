@@ -18,6 +18,7 @@ export type BulkGroupActionsProps = {
   onSetFavorite: (favorite: boolean) => boolean | void;
   onArchive: () => boolean | void;
   onChangeLogo: (trigger: HTMLButtonElement) => void;
+  onAddUrls: (trigger: HTMLButtonElement) => void;
   onMoveToGroup: (groupName: string) => boolean | void;
   onCreateGroupAndMove: (groupName: string) => boolean | void;
 };
@@ -203,6 +204,7 @@ export default function BulkGroupActions({
   onSetFavorite,
   onArchive,
   onChangeLogo,
+  onAddUrls,
   onMoveToGroup,
   onCreateGroupAndMove,
 }: BulkGroupActionsProps) {
@@ -302,6 +304,14 @@ export default function BulkGroupActions({
             disabled={moveDisabled}
           >
             Change logo
+          </button>
+          <button
+            type="button"
+            className="bulk-secondary-action"
+            onClick={(event) => onAddUrls(event.currentTarget)}
+            disabled={moveDisabled}
+          >
+            Add URLs
           </button>
           {!showGroupDragHint && (
             <button

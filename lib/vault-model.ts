@@ -10,7 +10,8 @@ export const PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION = 6 as const;
 export const PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION = 7 as const;
 export const PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION = 8 as const;
 export const PRE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION = 9 as const;
-export const VAULT_PAYLOAD_VERSION = 10 as const;
+export const PRE_MULTIPLE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION = 10 as const;
+export const VAULT_PAYLOAD_VERSION = 11 as const;
 export const MAX_VAULT_ACCOUNTS = 5_000;
 export const MAX_PROFILE_AVATAR_BYTES = 512 * 1024;
 export const ACCOUNT_ICON_SIZE = 128;
@@ -68,8 +69,8 @@ export type VaultAccount = {
   id: string;
   service: string;
   identity: string;
-  /** The HTTP(S) website used by browser clients to match this account. */
-  url: string | null;
+  /** HTTP(S) websites used by browser clients to match this account. */
+  urls: string[];
   secret: string;
   group: string;
   color: VaultColor;
@@ -127,7 +128,8 @@ const SETTINGS_FIELDS = [...PRE_MAIN_SCREEN_SETTINGS_FIELDS, "mainScreen"] as co
 const LEGACY_ACCOUNT_FIELDS = ["id", "service", "identity", "secret", "group", "color", "letter", "favorite", "lastUsed", "algorithm", "digits", "period", "archived"] as const;
 const BRAND_ACCOUNT_FIELDS = [...LEGACY_ACCOUNT_FIELDS, "iconBrand"] as const;
 const ICON_ACCOUNT_FIELDS = [...BRAND_ACCOUNT_FIELDS, "iconDataUrl"] as const;
-const ACCOUNT_FIELDS = [...ICON_ACCOUNT_FIELDS, "url"] as const;
+const SINGLE_URL_ACCOUNT_FIELDS = [...ICON_ACCOUNT_FIELDS, "url"] as const;
+const ACCOUNT_FIELDS = [...ICON_ACCOUNT_FIELDS, "urls"] as const;
 const GROUP_CUSTOMIZATION_FIELDS = ["name", "icon", "color"] as const;
 const GROUP_ICONS = [
   "dot",
@@ -169,6 +171,7 @@ export const MAX_GROUP_CUSTOMIZATIONS = 256;
 export const MAX_GROUP_ORDER_ENTRIES = MAX_VAULT_ACCOUNTS + MAX_GROUP_CUSTOMIZATIONS;
 export const MAX_VAULT_GROUP_NAME_LENGTH = 80;
 export const MAX_ACCOUNT_URL_LENGTH = 2_048;
+export const MAX_ACCOUNT_URLS = 32;
 
 const CANONICAL_BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 const LOCAL_ICON_BRAND = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
@@ -277,6 +280,23 @@ export function parseAccountUrl(value: unknown, path = "url"): string | null {
   return parsed.href;
 }
 
+export function parseAccountUrls(value: unknown, path = "urls"): string[] {
+  if (!Array.isArray(value) || value.length > MAX_ACCOUNT_URLS) {
+    throw new Error(`${path} must contain at most ${MAX_ACCOUNT_URLS} website URLs`);
+  }
+  const urls: string[] = [];
+  const seen = new Set<string>();
+  value.forEach((entry, index) => {
+    const url = parseAccountUrl(entry, `${path}[${index}]`);
+    if (!url) throw new Error(`${path}[${index}] must be a website URL`);
+    if (!seen.has(url)) {
+      seen.add(url);
+      urls.push(url);
+    }
+  });
+  return urls;
+}
+
 function decodedBase64Bytes(encoded: string) {
   const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
   return (encoded.length / 4) * 3 - padding;
@@ -339,6 +359,7 @@ function parseProfile(value: unknown, version: SupportedVaultPayloadVersion): Va
     version === PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION ||
     version === PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION ||
     version === PRE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
+    version === PRE_MULTIPLE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
     version === VAULT_PAYLOAD_VERSION;
   requireExactFields(value, supportsCustomization ? PROFILE_FIELDS : LEGACY_PROFILE_FIELDS, "profile");
   const name = requireText(value.name, "profile.name", 80);
@@ -361,6 +382,7 @@ type SupportedVaultPayloadVersion =
   | typeof PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION
   | typeof PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION
   | typeof PRE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION
+  | typeof PRE_MULTIPLE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION
   | typeof VAULT_PAYLOAD_VERSION;
 
 function parseMainScreen(value: unknown): VaultMainScreen {
@@ -386,6 +408,7 @@ function parseSettings(value: unknown, version: SupportedVaultPayloadVersion): V
       ? VERSION_2_SETTINGS_FIELDS
       : version === PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION ||
           version === PRE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
+          version === PRE_MULTIPLE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
           version === VAULT_PAYLOAD_VERSION
         ? SETTINGS_FIELDS
         : PRE_MAIN_SCREEN_SETTINGS_FIELDS;
@@ -402,6 +425,7 @@ function parseSettings(value: unknown, version: SupportedVaultPayloadVersion): V
   const theme: VaultTheme = version === LEGACY_VAULT_PAYLOAD_VERSION ? "dark" : value.theme as VaultTheme;
   const mainScreen = version === PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION ||
     version === PRE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
+    version === PRE_MULTIPLE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
     version === VAULT_PAYLOAD_VERSION
     ? parseMainScreen(value.mainScreen)
     : { kind: "all" } as const;
@@ -426,18 +450,23 @@ function parseAccount(value: unknown, index: number, version: SupportedVaultPayl
     version === PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION ||
     version === PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION ||
     version === PRE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
+    version === PRE_MULTIPLE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
     version === VAULT_PAYLOAD_VERSION;
   const supportsAccountIcons =
     version === PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION ||
     version === PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION ||
     version === PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION ||
     version === PRE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
+    version === PRE_MULTIPLE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
     version === VAULT_PAYLOAD_VERSION;
-  const supportsAccountUrls = version === VAULT_PAYLOAD_VERSION;
+  const supportsSingleAccountUrl = version === PRE_MULTIPLE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION;
+  const supportsMultipleAccountUrls = version === VAULT_PAYLOAD_VERSION;
   requireExactFields(
     value,
-    supportsAccountUrls
+    supportsMultipleAccountUrls
       ? ACCOUNT_FIELDS
+      : supportsSingleAccountUrl
+        ? SINGLE_URL_ACCOUNT_FIELDS
       : supportsAccountIcons
         ? ICON_ACCOUNT_FIELDS
         : supportsBrandCustomization
@@ -465,7 +494,14 @@ function parseAccount(value: unknown, index: number, version: SupportedVaultPayl
     id: requireText(value.id, `${path}.id`, 128),
     service: requireText(value.service, `${path}.service`, 256).trim(),
     identity: requireText(value.identity, `${path}.identity`, 256).trim(),
-    url: supportsAccountUrls ? parseAccountUrl(value.url, `${path}.url`) : null,
+    urls: supportsMultipleAccountUrls
+      ? parseAccountUrls(value.urls, `${path}.urls`)
+      : supportsSingleAccountUrl
+        ? (() => {
+            const url = parseAccountUrl(value.url, `${path}.url`);
+            return url ? [url] : [];
+          })()
+        : [],
     secret: parseBase32Secret(requireText(value.secret, `${path}.secret`, 1_024)),
     group: requireText(value.group, `${path}.group`, MAX_VAULT_GROUP_NAME_LENGTH).trim(),
     color,
@@ -639,6 +675,7 @@ export function parsePersistedVault(value: unknown): PersistedVault {
       value.version !== PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION &&
       value.version !== PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION &&
       value.version !== PRE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION &&
+      value.version !== PRE_MULTIPLE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION &&
       value.version !== VAULT_PAYLOAD_VERSION
     )
   ) {
@@ -651,11 +688,13 @@ export function parsePersistedVault(value: unknown): PersistedVault {
     sourceVersion === PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION ||
     sourceVersion === PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION ||
     sourceVersion === PRE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
+    sourceVersion === PRE_MULTIPLE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
     sourceVersion === VAULT_PAYLOAD_VERSION;
   const supportsGroupOrder =
     sourceVersion === PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION ||
     sourceVersion === PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION ||
     sourceVersion === PRE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
+    sourceVersion === PRE_MULTIPLE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
     sourceVersion === VAULT_PAYLOAD_VERSION;
   requireExactFields(
     value,

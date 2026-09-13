@@ -2,13 +2,15 @@ import {
   MAX_VAULT_ACCOUNT_ICON_BYTES,
   parseAccountIconDataUrl,
   parseAccountUrl,
+  parseAccountUrls,
   parseLocalIconBrand,
 } from "./vault-model";
 
 export const COFFER_BACKUP_FORMAT = "coffer-backup" as const;
 export const LEGACY_COFFER_BACKUP_VERSION = 1 as const;
 export const PRE_ACCOUNT_URL_COFFER_BACKUP_VERSION = 2 as const;
-export const COFFER_BACKUP_VERSION = 3 as const;
+export const PRE_MULTIPLE_ACCOUNT_URL_COFFER_BACKUP_VERSION = 3 as const;
+export const COFFER_BACKUP_VERSION = 4 as const;
 export const COFFER_BACKUP_KDF_ITERATIONS = 600_000 as const;
 
 export const MAX_BACKUP_FILE_BYTES = 5 * 1024 * 1024;
@@ -49,8 +51,8 @@ export type CofferAccount = {
   iconBrand?: string | null;
   /** A normalized local PNG. Missing and explicit null intentionally remain distinct. */
   iconDataUrl?: string | null;
-  /** An HTTP(S) website URL. Missing keeps older backups backward compatible. */
-  url?: string | null;
+  /** HTTP(S) website URLs. Missing keeps older backups backward compatible. */
+  urls?: string[];
 };
 
 export function projectCofferAccount(account: CofferAccount): CofferAccount {
@@ -67,7 +69,7 @@ export function projectCofferAccount(account: CofferAccount): CofferAccount {
   };
   if (account.iconBrand !== undefined) projected.iconBrand = account.iconBrand;
   if (account.iconDataUrl !== undefined) projected.iconDataUrl = account.iconDataUrl;
-  if (account.url !== undefined) projected.url = account.url;
+  if (account.urls !== undefined) projected.urls = [...account.urls];
   return projected;
 }
 
@@ -107,6 +109,7 @@ type JsonRecord = Record<string, unknown>;
 type SupportedCofferBackupVersion =
   | typeof LEGACY_COFFER_BACKUP_VERSION
   | typeof PRE_ACCOUNT_URL_COFFER_BACKUP_VERSION
+  | typeof PRE_MULTIPLE_ACCOUNT_URL_COFFER_BACKUP_VERSION
   | typeof COFFER_BACKUP_VERSION;
 
 function cryptoApi(): Crypto {
@@ -191,8 +194,10 @@ function validateAccount(
 
   const requiredKeys = ["service", "identity", "secret", "group", "favorite", "archived"];
   const optionalKeys = version === COFFER_BACKUP_VERSION
-    ? ["algorithm", "digits", "period", "iconBrand", "iconDataUrl", "url"]
-    : version === PRE_ACCOUNT_URL_COFFER_BACKUP_VERSION
+    ? ["algorithm", "digits", "period", "iconBrand", "iconDataUrl", "urls"]
+    : version === PRE_MULTIPLE_ACCOUNT_URL_COFFER_BACKUP_VERSION
+      ? ["algorithm", "digits", "period", "iconBrand", "iconDataUrl", "url"]
+      : version === PRE_ACCOUNT_URL_COFFER_BACKUP_VERSION
       ? ["algorithm", "digits", "period", "iconBrand", "iconDataUrl"]
       : ["algorithm", "digits", "period", "iconBrand"];
   const actualKeys = Object.keys(value);
@@ -243,8 +248,11 @@ function validateAccount(
   if (Object.hasOwn(value, "iconDataUrl")) {
     account.iconDataUrl = parseAccountIconDataUrl(value.iconDataUrl, `${field}.iconDataUrl`);
   }
-  if (Object.hasOwn(value, "url")) {
-    account.url = parseAccountUrl(value.url, `${field}.url`);
+  if (Object.hasOwn(value, "urls")) {
+    account.urls = parseAccountUrls(value.urls, `${field}.urls`);
+  } else if (Object.hasOwn(value, "url")) {
+    const url = parseAccountUrl(value.url, `${field}.url`);
+    account.urls = url ? [url] : [];
   }
   if (account.iconBrand && account.iconDataUrl) {
     throw new Error(`${field} cannot use both iconBrand and iconDataUrl`);
@@ -306,6 +314,7 @@ function validatePlainEnvelope(value: unknown): PlainBackupEnvelope {
   if (
     value.version !== LEGACY_COFFER_BACKUP_VERSION &&
     value.version !== PRE_ACCOUNT_URL_COFFER_BACKUP_VERSION &&
+    value.version !== PRE_MULTIPLE_ACCOUNT_URL_COFFER_BACKUP_VERSION &&
     value.version !== COFFER_BACKUP_VERSION
   ) {
     throw new Error("Unsupported Coffer backup version");
@@ -331,6 +340,7 @@ function validateEncryptedEnvelope(value: unknown): EncryptedBackupEnvelope {
   if (
     value.version !== LEGACY_COFFER_BACKUP_VERSION &&
     value.version !== PRE_ACCOUNT_URL_COFFER_BACKUP_VERSION &&
+    value.version !== PRE_MULTIPLE_ACCOUNT_URL_COFFER_BACKUP_VERSION &&
     value.version !== COFFER_BACKUP_VERSION
   ) {
     throw new Error("Unsupported Coffer backup version");

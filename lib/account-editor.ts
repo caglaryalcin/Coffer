@@ -4,12 +4,12 @@ import {
   type TotpAlgorithm,
   type TotpConfiguration,
 } from "./totp";
-import { parseAccountIconDataUrl, parseAccountUrl, parseLocalIconBrand, type VaultAccount } from "./vault-model";
+import { parseAccountIconDataUrl, parseAccountUrls, parseLocalIconBrand, type VaultAccount } from "./vault-model";
 
 export type AccountEditorValues = {
   service: string;
   identity: string;
-  url: string;
+  urls: string[];
   secret: string;
   iconBrand: string | null;
   iconDataUrl: string | null;
@@ -18,10 +18,7 @@ export type AccountEditorValues = {
   period: number;
 };
 
-export type EditableAccountPatch = Omit<AccountEditorValues, "url"> & {
-  url: string | null;
-  letter: string;
-};
+export type EditableAccountPatch = AccountEditorValues & { letter: string };
 
 export type AccountSecretTestDraft = Pick<
   AccountEditorValues,
@@ -113,7 +110,7 @@ export function accountEditorValues(account: VaultAccount): AccountEditorValues 
   return {
     service: account.service,
     identity: account.identity,
-    url: account.url ?? "",
+    urls: account.urls.length > 0 ? [...account.urls] : [""],
     secret: account.secret,
     iconBrand: account.iconBrand,
     iconDataUrl: account.iconDataUrl,
@@ -129,7 +126,7 @@ export function validateAccountEditorValues(
 ): EditableAccountPatch {
   const service = cleanText(values.service, "Service name", 256);
   const identity = cleanText(values.identity, "Username", 256);
-  const url = parseAccountUrl(values.url, "Website URL");
+  const urls = parseAccountUrls(values.urls.filter((url) => url.trim()), "Website URLs");
   const iconBrand = parseLocalIconBrand(values.iconBrand);
   const iconDataUrl = parseAccountIconDataUrl(values.iconDataUrl);
   if (iconBrand && iconDataUrl) {
@@ -143,7 +140,7 @@ export function validateAccountEditorValues(
   return {
     service,
     identity,
-    url,
+    urls,
     secret: parseBase32Secret(normalizeSecret(values.secret)),
     iconBrand,
     iconDataUrl,

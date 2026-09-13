@@ -2,6 +2,7 @@
 
 import { FormEvent, ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from "react";
 import { ACCOUNT_LOGO_ACCEPT, prepareAccountLogo } from "./account-logo";
+import AccountUrlFields from "./AccountUrlFields";
 import { COFFER_INITIALS_BRAND_ID } from "./ServiceLogo";
 import {
   accountSecretTestReadiness,
@@ -132,7 +133,7 @@ function AccountEditorForm({ account, brandOptions, codePreview, onClose, onSave
   const secretTestFeedbackId = useId();
   const [service, setService] = useState(initial.service);
   const [identity, setIdentity] = useState(initial.identity);
-  const [url, setUrl] = useState(initial.url);
+  const [urls, setUrls] = useState(initial.urls);
   const [secret, setSecret] = useState(initial.secret);
   const [iconBrand, setIconBrand] = useState(initial.iconBrand ?? "");
   const [iconDataUrl, setIconDataUrl] = useState(initial.iconDataUrl);
@@ -247,7 +248,7 @@ function AccountEditorForm({ account, brandOptions, codePreview, onClose, onSave
       const patch = validateAccountEditorValues({
         service,
         identity,
-        url,
+        urls,
         secret,
         iconBrand: iconBrand || null,
         iconDataUrl,
@@ -479,19 +480,7 @@ function AccountEditorForm({ account, brandOptions, codePreview, onClose, onSave
           <div className="account-editor-grid">
             <label><span>Service name</span><input ref={serviceInputRef} value={service} onChange={(event) => setService(event.target.value)} maxLength={256} /></label>
             <label><span>Username</span><input value={identity} onChange={(event) => setIdentity(event.target.value)} maxLength={256} autoComplete="off" /></label>
-            <label className="account-editor-wide-field">
-              <span>Website URL</span>
-              <input
-                type="text"
-                value={url}
-                onChange={(event) => setUrl(event.target.value)}
-                placeholder="https://example.com"
-                maxLength={2_048}
-                autoComplete="url"
-                inputMode="url"
-              />
-              <small>Used by the Coffer extension to match this account for autofill.</small>
-            </label>
+            <AccountUrlFields urls={urls} onChange={setUrls} disabled={busy} />
             <div className="account-editor-secret">
               <label htmlFor={secretInputId}>Secret key</label>
               <span className="account-editor-secret-control">

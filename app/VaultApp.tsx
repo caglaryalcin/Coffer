@@ -2,8 +2,10 @@
 
 import { FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type HTMLAttributes, type MouseEvent as ReactMouseEvent } from "react";
 import AccountEditor, { type AccountEditorCodePreview, type AccountIconOption } from "./AccountEditor";
+import AccountUrlFields from "./AccountUrlFields";
 import BulkGroupActions, { AccountSelectionIndicator, ArchiveBulkActions, mouseIsOutsideAccountCodeRow, normalizeGroupName } from "./BulkGroupActions";
 import BulkLogoPicker, { retainedAccountIconBytes, type BulkAccountLogoPatch } from "./BulkLogoPicker";
+import BulkUrlEditor from "./BulkUrlEditor";
 import CardViewMenu, { CARD_VIEW_STORAGE_KEY, parseCardView, readCardViewPreference, writeCardViewPreference, type CardView } from "./CardViewMenu";
 import GroupCustomizationDialog from "./GroupCustomizationDialog";
 import GroupIcon from "./GroupIcon";
@@ -19,7 +21,7 @@ import TransferCenter, { type ImportDecision } from "./TransferCenter";
 import { formatCode, generateTotp, generateTotpTestPreview, isTotpExpiring, isValidBase32, normalizeSecret, parseOtpAuthUri, totpWindow, type TotpAlgorithm, type TotpTestPreview } from "../lib/totp";
 import { changeVaultPassword, claimLegacyVault, deleteVaultAccount, getVaultBootstrap, identifyVault, loginVault, logoutVault, saveVault, setupVault, updateInstanceSettings, VAULT_API_TIMEOUT_MS, VaultApiError, type VaultInstanceSettings } from "../lib/vault-api";
 import { createAuthProof, createEncryptedVault, DEFAULT_VAULT_RESUME_AGE_MS, decryptVaultPayload, encryptVaultPayload, REMEMBERED_VAULT_RESUME_AGE_MS, rotateVaultPassword, unlockVaultHeader, VaultCryptoError, type EncryptedVaultHeader, type VaultPayloadCipher, type VaultRuntime } from "../lib/vault-crypto";
-import { createEmptyVault, MAX_GROUP_CUSTOMIZATIONS, parseAccountUrl, parsePersistedVault, withVaultUpdate, type PersistedVault, type VaultAccount, type VaultGroupColor, type VaultGroupCustomization, type VaultGroupIcon, type VaultMainScreen, type VaultTheme } from "../lib/vault-model";
+import { createEmptyVault, MAX_ACCOUNT_URLS, MAX_GROUP_CUSTOMIZATIONS, parseAccountUrls, parsePersistedVault, withVaultUpdate, type PersistedVault, type VaultAccount, type VaultGroupColor, type VaultGroupCustomization, type VaultGroupIcon, type VaultMainScreen, type VaultTheme } from "../lib/vault-model";
 import { classifyVaultOutbox, clearVaultOutbox, createVaultOutboxRecord, readVaultOutbox, writeVaultOutbox, type VaultOutboxRecord } from "../lib/vault-outbox";
 import { clearVaultResumeSession, readRememberedVaultResumeHint, readVaultResumeSession, saveVaultResumeSession, touchVaultResumeSession, type VaultResumePersistence } from "../lib/vault-resume";
 import { remainingAutoLockMs } from "../lib/auto-lock";
@@ -598,13 +600,15 @@ export default function VaultApp() {
   const [groupDropTarget, setGroupDropTarget] = useState<GroupDropTarget | null>(null);
   const [bulkLogoOpen, setBulkLogoOpen] = useState(false);
   const [bulkLogoReturnFocusTo, setBulkLogoReturnFocusTo] = useState<HTMLButtonElement | null>(null);
+  const [bulkUrlOpen, setBulkUrlOpen] = useState(false);
+  const [bulkUrlReturnFocusTo, setBulkUrlReturnFocusTo] = useState<HTMLButtonElement | null>(null);
   const [customizingGroup, setCustomizingGroup] = useState<string | null>(null);
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [groupCustomizationReturnFocusTo, setGroupCustomizationReturnFocusTo] = useState<HTMLElement | null>(null);
   const [setupLink, setSetupLink] = useState("");
   const [service, setService] = useState("");
   const [identity, setIdentity] = useState("");
-  const [accountUrl, setAccountUrl] = useState("");
+  const [accountUrls, setAccountUrls] = useState<string[]>([""]);
   const [secret, setSecret] = useState("");
   const [newGroup, setNewGroup] = useState<Group>("Personal");
   const [newAlgorithm, setNewAlgorithm] = useState<TotpAlgorithm>("SHA-1");
@@ -1850,6 +1854,8 @@ export default function VaultApp() {
     clearGroupDrag();
     setBulkLogoOpen(false);
     setBulkLogoReturnFocusTo(null);
+    setBulkUrlOpen(false);
+    setBulkUrlReturnFocusTo(null);
     setCustomizingGroup(null);
     setCreatingGroup(false);
     setGroupCustomizationReturnFocusTo(null);
@@ -2047,6 +2053,8 @@ export default function VaultApp() {
     clearGroupDrag();
     setBulkLogoOpen(false);
     setBulkLogoReturnFocusTo(null);
+    setBulkUrlOpen(false);
+    setBulkUrlReturnFocusTo(null);
     for (const timeout of clipboardClearTimersRef.current) window.clearTimeout(timeout);
     clipboardClearTimersRef.current.clear();
     if (vaultRef.current?.settings.clearClipboard) {
@@ -3089,7 +3097,7 @@ export default function VaultApp() {
     return accounts.filter((account) => {
       const matchesView = view === "favorites" ? account.favorite && !account.archived : view === "archive" ? account.archived : !account.archived;
       const matchesGroup = group === "All" || groupKey(account.group) === groupKey(group);
-      const matchesQuery = !normalizedQuery || `${account.service} ${account.identity} ${account.group} ${account.url ?? ""}`.toLowerCase().includes(normalizedQuery);
+      const matchesQuery = !normalizedQuery || `${account.service} ${account.identity} ${account.group} ${account.urls.join(" ")}`.toLowerCase().includes(normalizedQuery);
       return matchesView && matchesGroup && matchesQuery;
     });
   }, [accounts, group, query, view]);
@@ -3122,6 +3130,8 @@ export default function VaultApp() {
     clearSelectedAccountDrag();
     setBulkLogoOpen(false);
     setBulkLogoReturnFocusTo(null);
+    setBulkUrlOpen(false);
+    setBulkUrlReturnFocusTo(null);
     setSidebarMenuTarget(null);
   };
 
@@ -3580,6 +3590,41 @@ export default function VaultApp() {
           ? `${accountIconOptions.find((option) => option.id === patch.iconBrand)?.label ?? serviceBrandById(patch.iconBrand)?.title ?? "catalog"} logo`
           : "automatic logo matching";
     setToast(`${label[0].toUpperCase()}${label.slice(1)} applied to ${changed.length} ${changed.length === 1 ? "account" : "accounts"}.`);
+    return true;
+  };
+
+  const applySelectedAccountUrls = (urls: string[]) => {
+    const blockReason = mutationBlockReason();
+    if (blockReason) {
+      setToast(blockReason === "conflict" || blockReason === "conflict-pending"
+        ? "Resolve the encrypted save conflict before adding URLs."
+        : "Unlock your vault before adding URLs.");
+      return false;
+    }
+    if (selectedVisibleAccountIds.size === 0) {
+      setToast("Select at least one account to add URLs.");
+      return false;
+    }
+
+    const selected = new Set(selectedVisibleAccountIds);
+    const targets = accounts.filter((account) => selected.has(account.id) && !account.archived);
+    if (targets.some((account) => new Set([...account.urls, ...urls]).size > MAX_ACCOUNT_URLS)) {
+      setToast(`An account cannot have more than ${MAX_ACCOUNT_URLS} website URLs.`);
+      return false;
+    }
+    const changed = targets.filter((account) => urls.some((url) => !account.urls.includes(url)));
+    if (changed.length === 0) {
+      setToast("The selected accounts already contain those URLs.");
+      return true;
+    }
+
+    const saved = setAccounts((current) => current.map((account) => (
+      selected.has(account.id) && !account.archived
+        ? { ...account, urls: [...new Set([...account.urls, ...urls])] }
+        : account
+    )));
+    if (!saved) return false;
+    setToast(`${urls.length} ${urls.length === 1 ? "URL" : "URLs"} added to ${changed.length} ${changed.length === 1 ? "account" : "accounts"}.`);
     return true;
   };
 
@@ -4186,13 +4231,13 @@ export default function VaultApp() {
         const importedIconDataUrl = Object.hasOwn(decision.account, "iconDataUrl")
           ? decision.account.iconDataUrl ?? null
           : replacedAccount?.iconDataUrl ?? null;
-        const importedUrl = Object.hasOwn(decision.account, "url")
-          ? decision.account.url ?? null
-          : replacedAccount?.url ?? null;
+        const importedUrls = Object.hasOwn(decision.account, "urls")
+          ? decision.account.urls ?? []
+          : replacedAccount?.urls ?? [];
         const imported: Account = {
           ...decision.account,
           id: crypto.randomUUID(),
-          url: importedUrl,
+          urls: [...importedUrls],
           iconBrand: importedIconDataUrl ? null : importedIconBrand,
           iconDataUrl: importedIconDataUrl,
           color: palette[next.length % palette.length],
@@ -4327,7 +4372,7 @@ export default function VaultApp() {
     setSetupLink("");
     setService("");
     setIdentity("");
-    setAccountUrl("");
+    setAccountUrls([""]);
     setSecret("");
     setNewGroup("Personal");
     setNewAlgorithm("SHA-1");
@@ -4380,11 +4425,11 @@ export default function VaultApp() {
       setFormError("Enter a valid Base32 secret with at least 16 characters.");
       return;
     }
-    let normalizedAccountUrl: string | null;
+    let normalizedAccountUrls: string[];
     try {
-      normalizedAccountUrl = parseAccountUrl(accountUrl, "Website URL");
+      normalizedAccountUrls = parseAccountUrls(accountUrls.filter((url) => url.trim()), "Website URLs");
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "Enter a valid website URL.");
+      setFormError(error instanceof Error ? error.message : "Enter valid website URLs.");
       return;
     }
 
@@ -4393,7 +4438,7 @@ export default function VaultApp() {
       id: crypto.randomUUID(),
       service: service.trim(),
       identity: identity.trim(),
-      url: normalizedAccountUrl,
+      urls: normalizedAccountUrls,
       secret: normalizeSecret(secret),
       group: newGroup,
       color: ADD_ACCOUNT_PALETTE[current.length % ADD_ACCOUNT_PALETTE.length],
@@ -4448,8 +4493,16 @@ export default function VaultApp() {
       onSetFavorite={setSelectedAccountsFavorite}
       onArchive={archiveSelectedAccounts}
       onChangeLogo={(trigger) => {
+        setBulkUrlOpen(false);
+        setBulkUrlReturnFocusTo(null);
         setBulkLogoReturnFocusTo(trigger);
         setBulkLogoOpen(true);
+      }}
+      onAddUrls={(trigger) => {
+        setBulkLogoOpen(false);
+        setBulkLogoReturnFocusTo(null);
+        setBulkUrlReturnFocusTo(trigger);
+        setBulkUrlOpen(true);
       }}
       onMoveToGroup={(groupName) => moveSelectedAccounts(groupName, false)}
       onCreateGroupAndMove={(groupName) => moveSelectedAccounts(groupName, true)}
@@ -5098,19 +5151,7 @@ export default function VaultApp() {
                   <label><span>Group</span><select value={newGroup} onChange={(event) => setNewGroup(event.target.value as Group)}>{entryGroups.map((name) => <option key={name} data-i18n-ignore>{name}</option>)}</select></label>
                 </div>
                 <label><span>Account name</span><input value={identity} onChange={(event) => setIdentity(event.target.value)} placeholder="name@example.com" /></label>
-                <label>
-                  <span>Website URL</span>
-                  <input
-                    type="text"
-                    value={accountUrl}
-                    onChange={(event) => setAccountUrl(event.target.value)}
-                    placeholder="https://example.com"
-                    maxLength={2_048}
-                    autoComplete="url"
-                    inputMode="url"
-                  />
-                  <small>Optional. Used by the Coffer extension to match this account for autofill.</small>
-                </label>
+                <AccountUrlFields urls={accountUrls} onChange={setAccountUrls} />
                 <div className="manual-secret-field">
                   <label htmlFor={newAccountSecretInputId}><span>Base32 secret</span></label>
                   <span className="account-editor-secret-control manual-secret-control">
@@ -5219,6 +5260,17 @@ export default function VaultApp() {
         onClose={() => {
           setBulkLogoOpen(false);
           setBulkLogoReturnFocusTo(null);
+        }}
+      />
+
+      <BulkUrlEditor
+        open={bulkUrlOpen}
+        selectedCount={selectedVisibleAccountIds.size}
+        returnFocusTo={bulkUrlReturnFocusTo}
+        onApply={applySelectedAccountUrls}
+        onClose={() => {
+          setBulkUrlOpen(false);
+          setBulkUrlReturnFocusTo(null);
         }}
       />
 

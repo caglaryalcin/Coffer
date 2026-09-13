@@ -158,7 +158,8 @@ function isExactMatch(left: CofferAccount, right: CofferAccount) {
     (left.algorithm ?? "SHA-1") === (right.algorithm ?? "SHA-1") &&
     (left.digits ?? 6) === (right.digits ?? 6) &&
     (left.period ?? 30) === (right.period ?? 30) &&
-    (left.url ?? null) === (right.url ?? null);
+    (left.urls ?? []).length === (right.urls ?? []).length &&
+    (left.urls ?? []).every((url, index) => url === (right.urls ?? [])[index]);
 }
 
 function downloadText(contents: string, filename: string, type: string) {

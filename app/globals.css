@@ -555,6 +555,21 @@ h1 { margin: 0; font-size: clamp(34px, 4vw, 53px); line-height: .98; letter-spac
 .link-panel textarea { min-height: 92px; resize: vertical; padding: 12px; font-family: var(--font-geist-mono), monospace; font-size: 10px; line-height: 1.5; }
 .manual-form { display: grid; gap: 17px; }
 .manual-form input, .manual-form select { height: 44px; padding: 0 12px; }
+.account-url-fields { min-width: 0; display: grid; gap: 8px; color: #555a50; font-size: var(--type-ui); font-weight: 680; text-align: left; }
+.manual-form .account-url-fields { font-size: 10px; font-weight: 630; }
+.account-url-label { display: flex; align-items: center; gap: 7px; }
+.account-url-help-wrap { position: relative; display: inline-flex; }
+.account-url-help { width: 18px; height: 18px; display: inline-grid; place-items: center; padding: 0; border: 1px solid #bfc4b7; border-radius: 50%; background: transparent; color: #68705f; font-size: 11px; font-weight: 800; line-height: 1; cursor: pointer; }
+.account-url-help:is(:hover, :focus-visible) { border-color: var(--theme-accent); color: var(--theme-accent); outline: none; }
+.account-url-popover { width: min(245px, calc(100vw - 48px)); position: absolute; z-index: 8; left: 50%; bottom: calc(100% + 8px); padding: 9px 11px; border: 1px solid #d4d8cc; border-radius: 10px; background: #fff; color: #555c50; box-shadow: 0 10px 30px rgba(25,28,21,.15); font-size: var(--type-caption); font-weight: 500; line-height: 1.45; transform: translateX(-50%); }
+.account-url-list { display: grid; gap: 8px; }
+.account-url-row { display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 8px; }
+.account-url-row:not(:has(.account-url-remove)) { grid-template-columns: minmax(0, 1fr); }
+.account-url-remove, .account-url-add { border: 1px solid #d3d7cc; border-radius: 11px; background: #fff; color: #63695e; font-weight: 680; cursor: pointer; }
+.account-url-remove { min-height: 44px; padding: 0; font-size: 20px; line-height: 1; }
+.account-url-add { min-height: 38px; justify-self: start; padding: 0 12px; font-size: var(--type-caption); }
+.account-url-remove:is(:hover, :focus-visible), .account-url-add:is(:hover, :focus-visible) { border-color: var(--theme-accent); background: var(--accent-soft); color: var(--theme-accent); outline: none; }
+.account-url-remove:disabled, .account-url-add:disabled { opacity: .48; cursor: wait; }
 .service-entry-control { width: 100%; position: relative; display: block; }
 .service-entry-control .service-logo { width: 34px; height: 34px; position: absolute; z-index: 1; left: 5px; top: 5px; border-radius: 10px; }
 .manual-form .service-entry-input { padding-left: 48px; }
@@ -654,6 +669,12 @@ h1 { margin: 0; font-size: clamp(34px, 4vw, 53px); line-height: .98; letter-spac
 .account-editor-actions button { min-height: 44px; padding: 0 16px; border: 1px solid #d3d6cc; border-radius: 11px; background: white; color: #555b50; font-size: var(--type-ui); font-weight: 680; cursor: pointer; }
 .account-editor-actions button[type="submit"] { border-color: var(--ink); background: var(--ink); color: white; }
 .account-editor-actions button:disabled, .account-editor-close:disabled { opacity: .48; cursor: wait; }
+.bulk-url-editor { width: min(620px, 100%); }
+.bulk-url-editor .account-editor-header p:last-child { margin: 7px 0 0; color: #747970; font-size: var(--type-body); line-height: 1.45; }
+.bulk-url-input { display: grid; gap: 8px; color: #50564c; font-size: var(--type-ui); font-weight: 680; }
+.bulk-url-input textarea { width: 100%; min-height: 142px; padding: 12px 13px; resize: vertical; border: 1px solid #d5d8cf; border-radius: 11px; outline: none; background: white; color: #30352d; font-family: var(--font-geist-mono), monospace; font-size: var(--type-body); line-height: 1.5; }
+.bulk-url-input textarea:focus { border-color: #8fa265; box-shadow: 0 0 0 3px rgba(123,143,78,.14); }
+.bulk-url-input small { color: #7b8176; font-size: var(--type-caption); font-weight: 470; line-height: 1.45; }
 
 .group-customization-backdrop { position: fixed; z-index: 86; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(24,26,23,.62); backdrop-filter: blur(8px); animation: backdrop-in .16s ease both; }
 .group-customization-backdrop-dismiss { width: 100%; height: 100%; position: absolute; z-index: 0; inset: 0; padding: 0; border: 0; background: transparent; cursor: default; }
@@ -1561,6 +1582,19 @@ body.theme-dark { background: #181a1b; color-scheme: dark; }
 .theme-dark .account-editor-form input:focus,
 .theme-dark .account-editor-form select:focus { border-color: var(--theme-accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .theme-dark .account-editor-form input[readonly] { background: var(--surface-hover); color: var(--muted); }
+.theme-dark .account-url-fields,
+.theme-dark .bulk-url-input { color: #d8d3d0; }
+.theme-dark .account-url-help { border-color: var(--line); color: var(--muted); }
+.theme-dark .account-url-help:is(:hover, :focus-visible) { border-color: var(--theme-accent); color: var(--theme-accent); }
+.theme-dark .account-url-popover { border-color: var(--line); background: var(--surface-hover); color: #d8d3d0; box-shadow: 0 12px 34px rgba(0,0,0,.42); }
+.theme-dark .account-url-remove,
+.theme-dark .account-url-add { border-color: var(--line); background: var(--surface-hover); color: #d8d3d0; }
+.theme-dark .account-url-remove:is(:hover, :focus-visible),
+.theme-dark .account-url-add:is(:hover, :focus-visible) { border-color: var(--theme-accent); background: var(--accent-soft); color: var(--theme-accent); }
+.theme-dark .bulk-url-editor .account-editor-header p:last-child,
+.theme-dark .bulk-url-input small { color: var(--muted); }
+.theme-dark .bulk-url-input textarea { border-color: var(--line); background: var(--paper); color: #d8d3d0; }
+.theme-dark .bulk-url-input textarea:focus { border-color: var(--theme-accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .theme-dark .account-editor-secret-control button:hover:not(:disabled) { border-color: var(--theme-accent); background: var(--accent-soft); }
 .theme-dark .account-editor-test-secret:not(:disabled) { border-color: var(--theme-accent); background: var(--accent-soft); color: #e1a0a0; }
 .theme-dark .account-editor-secret-test-feedback { color: var(--muted); }
