@@ -603,7 +603,7 @@ h1 { margin: 0; font-size: clamp(34px, 4vw, 53px); line-height: .98; letter-spac
 .account-editor-icon-picker small, .account-editor-grid label small { color: #7b8176; font-size: var(--type-caption); font-weight: 470; line-height: 1.4; }
 .account-editor-logo-readonly strong { font-size: var(--type-ui); }
 .account-editor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-.account-editor-group, .account-editor-secret, .account-editor-grid > .account-editor-code-panel { grid-column: 1 / -1; }
+.account-editor-group, .account-editor-wide-field, .account-editor-secret, .account-editor-grid > .account-editor-code-panel { grid-column: 1 / -1; }
 .account-editor-form input, .account-editor-form select { width: 100%; min-width: 0; height: 46px; padding: 0 13px; border: 1px solid #d5d8cf; border-radius: 11px; outline: none; background: white; color: #30352d; font-size: var(--type-body); }
 .account-editor-form input:focus, .account-editor-form select:focus { border-color: #8fa265; box-shadow: 0 0 0 3px rgba(123,143,78,.14); }
 .account-editor-form input[readonly] { background: #efefe9; color: #747970; cursor: default; }
@@ -2073,7 +2073,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .account-editor-next-code { grid-column: 1 / -1; grid-row: 2; }
   .account-editor-code-panel > p { grid-row: 3; }
   .account-editor-grid { grid-template-columns: 1fr; }
-  .account-editor-group, .account-editor-secret { grid-column: auto; }
+  .account-editor-group, .account-editor-wide-field, .account-editor-secret { grid-column: auto; }
   .account-editor-icon-row { grid-template-columns: 44px minmax(0, 1fr); }
   .account-editor-icon-row .service-logo { width: 44px; height: 44px; border-radius: 13px; background-size: 27px 27px !important; }
   .account-editor-logo-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 260px; }

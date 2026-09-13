@@ -4,11 +4,12 @@ import {
   type TotpAlgorithm,
   type TotpConfiguration,
 } from "./totp";
-import { parseAccountIconDataUrl, parseLocalIconBrand, type VaultAccount } from "./vault-model";
+import { parseAccountIconDataUrl, parseAccountUrl, parseLocalIconBrand, type VaultAccount } from "./vault-model";
 
 export type AccountEditorValues = {
   service: string;
   identity: string;
+  url: string;
   secret: string;
   iconBrand: string | null;
   iconDataUrl: string | null;
@@ -17,7 +18,8 @@ export type AccountEditorValues = {
   period: number;
 };
 
-export type EditableAccountPatch = AccountEditorValues & {
+export type EditableAccountPatch = Omit<AccountEditorValues, "url"> & {
+  url: string | null;
   letter: string;
 };
 
@@ -111,6 +113,7 @@ export function accountEditorValues(account: VaultAccount): AccountEditorValues 
   return {
     service: account.service,
     identity: account.identity,
+    url: account.url ?? "",
     secret: account.secret,
     iconBrand: account.iconBrand,
     iconDataUrl: account.iconDataUrl,
@@ -126,6 +129,7 @@ export function validateAccountEditorValues(
 ): EditableAccountPatch {
   const service = cleanText(values.service, "Service name", 256);
   const identity = cleanText(values.identity, "Username", 256);
+  const url = parseAccountUrl(values.url, "Website URL");
   const iconBrand = parseLocalIconBrand(values.iconBrand);
   const iconDataUrl = parseAccountIconDataUrl(values.iconDataUrl);
   if (iconBrand && iconDataUrl) {
@@ -139,6 +143,7 @@ export function validateAccountEditorValues(
   return {
     service,
     identity,
+    url,
     secret: parseBase32Secret(normalizeSecret(values.secret)),
     iconBrand,
     iconDataUrl,

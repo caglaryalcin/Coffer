@@ -19,7 +19,7 @@ import TransferCenter, { type ImportDecision } from "./TransferCenter";
 import { formatCode, generateTotp, generateTotpTestPreview, isTotpExpiring, isValidBase32, normalizeSecret, parseOtpAuthUri, totpWindow, type TotpAlgorithm, type TotpTestPreview } from "../lib/totp";
 import { changeVaultPassword, claimLegacyVault, deleteVaultAccount, getVaultBootstrap, identifyVault, loginVault, logoutVault, saveVault, setupVault, updateInstanceSettings, VAULT_API_TIMEOUT_MS, VaultApiError, type VaultInstanceSettings } from "../lib/vault-api";
 import { createAuthProof, createEncryptedVault, DEFAULT_VAULT_RESUME_AGE_MS, decryptVaultPayload, encryptVaultPayload, REMEMBERED_VAULT_RESUME_AGE_MS, rotateVaultPassword, unlockVaultHeader, VaultCryptoError, type EncryptedVaultHeader, type VaultPayloadCipher, type VaultRuntime } from "../lib/vault-crypto";
-import { createEmptyVault, MAX_GROUP_CUSTOMIZATIONS, parsePersistedVault, withVaultUpdate, type PersistedVault, type VaultAccount, type VaultGroupColor, type VaultGroupCustomization, type VaultGroupIcon, type VaultMainScreen, type VaultTheme } from "../lib/vault-model";
+import { createEmptyVault, MAX_GROUP_CUSTOMIZATIONS, parseAccountUrl, parsePersistedVault, withVaultUpdate, type PersistedVault, type VaultAccount, type VaultGroupColor, type VaultGroupCustomization, type VaultGroupIcon, type VaultMainScreen, type VaultTheme } from "../lib/vault-model";
 import { classifyVaultOutbox, clearVaultOutbox, createVaultOutboxRecord, readVaultOutbox, writeVaultOutbox, type VaultOutboxRecord } from "../lib/vault-outbox";
 import { clearVaultResumeSession, readRememberedVaultResumeHint, readVaultResumeSession, saveVaultResumeSession, touchVaultResumeSession, type VaultResumePersistence } from "../lib/vault-resume";
 import { remainingAutoLockMs } from "../lib/auto-lock";
@@ -604,6 +604,7 @@ export default function VaultApp() {
   const [setupLink, setSetupLink] = useState("");
   const [service, setService] = useState("");
   const [identity, setIdentity] = useState("");
+  const [accountUrl, setAccountUrl] = useState("");
   const [secret, setSecret] = useState("");
   const [newGroup, setNewGroup] = useState<Group>("Personal");
   const [newAlgorithm, setNewAlgorithm] = useState<TotpAlgorithm>("SHA-1");
@@ -3088,7 +3089,7 @@ export default function VaultApp() {
     return accounts.filter((account) => {
       const matchesView = view === "favorites" ? account.favorite && !account.archived : view === "archive" ? account.archived : !account.archived;
       const matchesGroup = group === "All" || groupKey(account.group) === groupKey(group);
-      const matchesQuery = !normalizedQuery || `${account.service} ${account.identity} ${account.group}`.toLowerCase().includes(normalizedQuery);
+      const matchesQuery = !normalizedQuery || `${account.service} ${account.identity} ${account.group} ${account.url ?? ""}`.toLowerCase().includes(normalizedQuery);
       return matchesView && matchesGroup && matchesQuery;
     });
   }, [accounts, group, query, view]);
@@ -4185,9 +4186,13 @@ export default function VaultApp() {
         const importedIconDataUrl = Object.hasOwn(decision.account, "iconDataUrl")
           ? decision.account.iconDataUrl ?? null
           : replacedAccount?.iconDataUrl ?? null;
+        const importedUrl = Object.hasOwn(decision.account, "url")
+          ? decision.account.url ?? null
+          : replacedAccount?.url ?? null;
         const imported: Account = {
           ...decision.account,
           id: crypto.randomUUID(),
+          url: importedUrl,
           iconBrand: importedIconDataUrl ? null : importedIconBrand,
           iconDataUrl: importedIconDataUrl,
           color: palette[next.length % palette.length],
@@ -4322,6 +4327,7 @@ export default function VaultApp() {
     setSetupLink("");
     setService("");
     setIdentity("");
+    setAccountUrl("");
     setSecret("");
     setNewGroup("Personal");
     setNewAlgorithm("SHA-1");
@@ -4374,12 +4380,20 @@ export default function VaultApp() {
       setFormError("Enter a valid Base32 secret with at least 16 characters.");
       return;
     }
+    let normalizedAccountUrl: string | null;
+    try {
+      normalizedAccountUrl = parseAccountUrl(accountUrl, "Website URL");
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Enter a valid website URL.");
+      return;
+    }
 
     const addToFavorites = addOriginViewRef.current === "favorites";
     setAccounts((current) => [{
       id: crypto.randomUUID(),
       service: service.trim(),
       identity: identity.trim(),
+      url: normalizedAccountUrl,
       secret: normalizeSecret(secret),
       group: newGroup,
       color: ADD_ACCOUNT_PALETTE[current.length % ADD_ACCOUNT_PALETTE.length],
@@ -5084,6 +5098,19 @@ export default function VaultApp() {
                   <label><span>Group</span><select value={newGroup} onChange={(event) => setNewGroup(event.target.value as Group)}>{entryGroups.map((name) => <option key={name} data-i18n-ignore>{name}</option>)}</select></label>
                 </div>
                 <label><span>Account name</span><input value={identity} onChange={(event) => setIdentity(event.target.value)} placeholder="name@example.com" /></label>
+                <label>
+                  <span>Website URL</span>
+                  <input
+                    type="text"
+                    value={accountUrl}
+                    onChange={(event) => setAccountUrl(event.target.value)}
+                    placeholder="https://example.com"
+                    maxLength={2_048}
+                    autoComplete="url"
+                    inputMode="url"
+                  />
+                  <small>Optional. Used by the Coffer extension to match this account for autofill.</small>
+                </label>
                 <div className="manual-secret-field">
                   <label htmlFor={newAccountSecretInputId}><span>Base32 secret</span></label>
                   <span className="account-editor-secret-control manual-secret-control">

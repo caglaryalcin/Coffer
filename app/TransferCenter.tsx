@@ -157,7 +157,8 @@ function isExactMatch(left: CofferAccount, right: CofferAccount) {
     left.secret === right.secret &&
     (left.algorithm ?? "SHA-1") === (right.algorithm ?? "SHA-1") &&
     (left.digits ?? 6) === (right.digits ?? 6) &&
-    (left.period ?? 30) === (right.period ?? 30);
+    (left.period ?? 30) === (right.period ?? 30) &&
+    (left.url ?? null) === (right.url ?? null);
 }
 
 function downloadText(contents: string, filename: string, type: string) {
@@ -559,7 +560,7 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
       ) : (
         <div className="export-stack">
           <section className="export-card recommended">
-            <div className="export-card-head"><span className="export-icon encrypted" aria-hidden="true"><TransferGlyph kind="coffer" className="transfer-export-glyph" /></span><div><p>RECOMMENDED</p><h2>Coffer backup</h2><span>Create a complete backup containing accounts, groups, favorites, custom logos, and TOTP settings. Add a passphrase for protection, or leave both fields blank.</span></div></div>
+            <div className="export-card-head"><span className="export-icon encrypted" aria-hidden="true"><TransferGlyph kind="coffer" className="transfer-export-glyph" /></span><div><p>RECOMMENDED</p><h2>Coffer backup</h2><span>Create a complete backup containing accounts, website URLs, groups, favorites, custom logos, and TOTP settings. Add a passphrase for protection, or leave both fields blank.</span></div></div>
             <div className="export-fields">
               <label><span>Backup passphrase (optional)</span><input type="password" value={exportPassword} onChange={(event) => { setExportPassword(event.target.value); setUnprotectedBackupConfirm(false); }} placeholder="Leave blank or use 12+ characters" autoComplete="new-password" disabled={busy} /></label>
               <label><span>Confirm passphrase</span><input type="password" value={exportPasswordConfirm} onChange={(event) => { setExportPasswordConfirm(event.target.value); setUnprotectedBackupConfirm(false); }} placeholder="Repeat it if used" autoComplete="new-password" disabled={busy} /></label>
