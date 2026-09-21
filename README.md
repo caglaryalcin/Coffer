@@ -47,22 +47,17 @@ same-origin Coffer web app session.
 Firefox and Chrome extension origins are accepted directly in local
 development and deployed environments.
 
-## Docker Compose
-
-```bash
-docker compose up --build -d
-```
-
-Open [http://localhost:3000](http://localhost:3000). Encrypted vault data is
-stored in `./data` and remains there after `docker compose down`.
-
 ## Docker
+- Docker Hub: `caglaryalcin/coffer`
+- GitHub Container Registry: `ghcr.io/caglaryalcin/coffer`
 
 ```bash
-docker build -t coffer .
 docker volume create coffer-data
-docker run -d --name coffer --init --restart unless-stopped -p 127.0.0.1:3000:3000 -v coffer-data:/app/data coffer
+docker run -d --name coffer --init --restart unless-stopped -p 3000:3000 -v coffer-data:/app/data caglaryalcin/coffer
 ```
+
+To use GitHub Container Registry, replace the image with
+`ghcr.io/caglaryalcin/coffer`.
 
 Open [http://localhost:3000](http://localhost:3000). The `coffer-data` volume
 keeps encrypted vault data across container restarts and replacements.
