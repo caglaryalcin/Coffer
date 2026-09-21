@@ -34,19 +34,6 @@ server. It also supports QR imports, groups, backups, and 2FAS transfers.
 
 ![](https://raw.githubusercontent.com/caglaryalcin/Coffer/refs/heads/main/screenshots/light-dark.png)
 
-## Browser Extension
-
-The Firefox extension lives in a separate repository:
-[caglaryalcin/coffer-extension](https://github.com/caglaryalcin/coffer-extension).
-
-It connects to Coffer through the extension-safe API flow and can fill TOTP
-codes from the popup without opening the Coffer tab. Browser-extension API
-access is limited to unlock/read actions; vault changes still require the
-same-origin Coffer web app session.
-
-Firefox and Chrome extension origins are accepted directly in local
-development and deployed environments.
-
 ## Docker
 - Docker Hub: `caglaryalcin/coffer`
 - GitHub Container Registry: `ghcr.io/caglaryalcin/coffer`
