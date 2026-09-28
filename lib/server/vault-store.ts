@@ -837,6 +837,10 @@ export class VaultStore {
     return Boolean(this.validSession(sessionToken));
   }
 
+  authorizeInstanceAdministration(sessionToken: string): void {
+    this.requireUserSession(sessionToken);
+  }
+
   logout(sessionToken: string): void {
     this.deleteSession(sessionToken);
   }

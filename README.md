@@ -94,10 +94,23 @@ For reverse-proxy deployments, set `COFFER_OIDC_REDIRECT_URI` explicitly or
 enable `COFFER_TRUST_PROXY=1` and ensure the proxy overwrites the forwarded host
 and protocol headers.
 
+After signing in to a vault, the same values can be managed from **Settings →
+OpenID Connect**. Settings saved in the UI take precedence over environment
+variables and are written atomically to
+`COFFER_DATA_DIR/oidc-settings.json` (`/app/data/oidc-settings.json` in the
+container). The data directory is restricted to mode `0700` and the settings
+file to `0600` where the platform supports POSIX permissions. The client secret
+is never returned by the settings API or rendered back into the browser. Keep
+the mounted data volume private, encrypted at the Kubernetes storage layer when
+available, and included in protected backups.
+
 OIDC authenticates the account identity; the vault password still encrypts and
 decrypts data only in the browser. Existing accounts are matched by their
 normalized email address, so users can adopt OIDC without migrating vault data.
 Browser extensions continue to use the existing email-and-vault-password flow.
+OIDC authorization flows and sessions currently live in process memory. Run one
+replica, or configure load-balancer affinity; pod restarts require users to sign
+in to the identity provider again.
 
 For HTTPS behind a reverse proxy, set both `COFFER_TRUST_PROXY=1` and
 `VINEXT_TRUSTED_HOSTS` to the public hostname. The proxy must overwrite and

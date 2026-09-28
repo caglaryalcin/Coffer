@@ -1,12 +1,18 @@
 import { createHash, randomBytes } from "node:crypto";
 import * as oidc from "openid-client";
 import { normalizeVaultIdentifier } from "./vault-store";
+import {
+  OIDC_CALLBACK_PATH,
+  OidcSettingsStoreError,
+  readOidcSettings,
+  type OidcRuntimeSettings,
+} from "./oidc-settings-store";
 
 const FLOW_COOKIE = "coffer_oidc_flow";
 const SESSION_COOKIE = "coffer_oidc_session";
 const FLOW_TTL_MS = 10 * 60 * 1_000;
 const SESSION_TTL_MS = 12 * 60 * 60 * 1_000;
-const CALLBACK_PATH = "/api/auth/oidc/callback";
+const CALLBACK_PATH = OIDC_CALLBACK_PATH;
 
 type OidcConfig = {
   issuer: URL;
@@ -66,7 +72,7 @@ export class OidcError extends Error {
 }
 
 export function oidcEnabled(): boolean {
-  return Boolean(process.env.COFFER_OIDC_ISSUER_URL?.trim());
+  return readOidcSettings().enabled;
 }
 
 export function getOidcPublicState(request: Request): OidcPublicState {
@@ -214,11 +220,37 @@ export function endOidcSession(request: Request): Response {
   });
 }
 
+export async function validateOidcSettings(settings: OidcRuntimeSettings): Promise<void> {
+  if (!settings.enabled) return;
+  await getClient(configFromSettings(settings, true) as OidcConfig);
+}
+
+export function resetOidcRuntimeState(): void {
+  flows.clear();
+  sessions.clear();
+  discovered = null;
+}
+
 function readConfig(throwOnPartial: boolean): OidcConfig | null {
-  const issuerValue = process.env.COFFER_OIDC_ISSUER_URL?.trim() ?? "";
-  const clientId = process.env.COFFER_OIDC_CLIENT_ID?.trim() ?? "";
-  const clientSecret = process.env.COFFER_OIDC_CLIENT_SECRET?.trim() ?? "";
-  if (!issuerValue && !clientId && !clientSecret) return null;
+  try {
+    return configFromSettings(readOidcSettings(), throwOnPartial);
+  } catch (error) {
+    if (error instanceof OidcError) throw error;
+    if (error instanceof OidcSettingsStoreError) {
+      throw new OidcError("invalid_configuration", error.message);
+    }
+    throw error;
+  }
+}
+
+function configFromSettings(
+  settings: OidcRuntimeSettings,
+  throwOnPartial: boolean,
+): OidcConfig | null {
+  if (!settings.enabled) return null;
+  const issuerValue = settings.issuerUrl;
+  const clientId = settings.clientId;
+  const clientSecret = settings.clientSecret;
   if (!issuerValue || !clientId) {
     if (!throwOnPartial) {
       throw new OidcError(
@@ -238,10 +270,10 @@ function readConfig(throwOnPartial: boolean): OidcConfig | null {
   if (issuer.protocol !== "https:" && !isLoopbackHostname(issuer.hostname)) {
     throw new OidcError("invalid_configuration", "The OIDC issuer must use HTTPS.");
   }
-  const scopes = normalizeScopes(process.env.COFFER_OIDC_SCOPES);
-  const configuredRedirectUri = optionalRedirectUri(process.env.COFFER_OIDC_REDIRECT_URI);
+  const scopes = settings.scopes;
+  const configuredRedirectUri = optionalRedirectUri(settings.redirectUri);
   const clientAuthMethod = readClientAuthMethod(
-    process.env.COFFER_OIDC_CLIENT_AUTH_METHOD,
+    settings.clientAuthMethod,
     clientSecret,
   );
   return {
@@ -249,7 +281,7 @@ function readConfig(throwOnPartial: boolean): OidcConfig | null {
     clientId,
     clientSecret,
     clientAuthMethod,
-    providerName: process.env.COFFER_OIDC_PROVIDER_NAME?.trim().slice(0, 80) || "OpenID Connect",
+    providerName: settings.providerName,
     scopes,
     configuredRedirectUri,
   };
@@ -318,13 +350,6 @@ function readVerifiedEmail(claims: Record<string, unknown>): string {
     );
   }
   return normalizeVaultIdentifier(claims.email);
-}
-
-function normalizeScopes(value: string | undefined): string {
-  const scopes = new Set((value ?? "openid email profile").split(/\s+/u).filter(Boolean));
-  scopes.add("openid");
-  scopes.add("email");
-  return [...scopes].join(" ");
 }
 
 function optionalRedirectUri(value: string | undefined): string | null {

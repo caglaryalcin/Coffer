@@ -18,6 +18,27 @@ export type OidcClientState = {
   identity: { email: string; name: string | null } | null;
 };
 
+export type OidcClientAuthMethod = "client_secret_basic" | "client_secret_post" | "none";
+
+export type OidcAdminSettings = {
+  enabled: boolean;
+  issuerUrl: string;
+  clientId: string;
+  clientAuthMethod: OidcClientAuthMethod;
+  providerName: string;
+  scopes: string;
+  redirectUri: string;
+  source: "environment" | "volume" | "none";
+  clientSecretConfigured: boolean;
+};
+
+export type OidcSettingsUpdate = Omit<
+  OidcAdminSettings,
+  "source" | "clientSecretConfigured"
+> & {
+  clientSecret: string | null;
+};
+
 export type VaultBootstrap =
   | ({ authenticated: false } & VaultAccountCreationState)
   | {
@@ -213,6 +234,40 @@ export async function logoutOidc(): Promise<void> {
   if (status !== 204 || body !== null) {
     invalidResponse("The OIDC server returned an invalid sign-out result.", status);
   }
+}
+
+export async function getOidcAdminSettings(): Promise<OidcAdminSettings> {
+  const { body, status } = await postVault({ action: "get_oidc_settings" });
+  return parseOidcAdminSettings(body, status);
+}
+
+export async function updateOidcAdminSettings(
+  input: OidcSettingsUpdate,
+): Promise<OidcAdminSettings> {
+  const { body, status } = await postVault({ action: "update_oidc_settings", ...input });
+  return parseOidcAdminSettings(body, status);
+}
+
+function parseOidcAdminSettings(body: unknown, status: number): OidcAdminSettings {
+  if (
+    !isRecord(body) ||
+    typeof body.enabled !== "boolean" ||
+    typeof body.issuerUrl !== "string" ||
+    typeof body.clientId !== "string" ||
+    !isOidcClientAuthMethod(body.clientAuthMethod) ||
+    typeof body.providerName !== "string" ||
+    typeof body.scopes !== "string" ||
+    typeof body.redirectUri !== "string" ||
+    (body.source !== "environment" && body.source !== "volume" && body.source !== "none") ||
+    typeof body.clientSecretConfigured !== "boolean"
+  ) {
+    invalidResponse("The OIDC server returned invalid settings.", status);
+  }
+  return body as OidcAdminSettings;
+}
+
+function isOidcClientAuthMethod(value: unknown): value is OidcClientAuthMethod {
+  return value === "client_secret_basic" || value === "client_secret_post" || value === "none";
 }
 
 export async function identifyVault(identifier: string): Promise<VaultIdentity> {

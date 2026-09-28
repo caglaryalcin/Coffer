@@ -1004,17 +1004,18 @@ h1 { margin: 0; font-size: clamp(34px, 4vw, 53px); line-height: .98; letter-spac
 .settings-glyph { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 13px; background: #e9eddf; color: #68764b; }
 .settings-glyph-icon { width: 23px; height: 23px; display: block; }
 .security-glyph { background: #e7f2cf; }
+.oidc-glyph { background: #e3edf7; color: #4e7194; }
 .about-glyph { background: var(--accent-soft); color: var(--theme-accent); }
 .session-glyph { background: #f2e8e4; color: #9a6456; }
 .settings-form { display: grid; grid-template-columns: 1fr; gap: 18px; margin-top: 22px; padding-top: 20px; border-top: 1px solid #ecece5; }
 .settings-form label { display: grid; gap: 8px; color: #545a50; font-size: var(--type-ui); font-weight: 650; }
 .settings-form label small { color: #747a6e; font-size: var(--type-caption); font-weight: 480; line-height: 1.45; }
-.settings-form input, .settings-control-row select { width: 100%; height: 46px; padding: 0 13px; border: 1px solid #d9dbd2; border-radius: 11px; outline: none; background: #fafaf7; color: var(--ink); font-size: var(--type-body); }
+.settings-form input, .settings-form select, .settings-control-row select { width: 100%; height: 46px; padding: 0 13px; border: 1px solid #d9dbd2; border-radius: 11px; outline: none; background: #fafaf7; color: var(--ink); font-size: var(--type-body); }
 .settings-language-select { width: 100%; position: relative; }
 .settings-language-select select { padding-left: 48px; }
 .settings-language-flag { width: 24px; height: 16px; position: absolute; z-index: 1; left: 13px; top: 50%; display: block; overflow: hidden; border-radius: 3px; color: var(--ink); pointer-events: none; transform: translateY(-50%); }
 .settings-form input[readonly] { border-color: #e0e1da; background: #efefe9; color: #686d64; cursor: default; caret-color: transparent; }
-.settings-form input:focus, .settings-control-row select:focus { border-color: #94a86a; box-shadow: 0 0 0 3px rgba(184,223,69,.17); }
+.settings-form input:focus, .settings-form select:focus, .settings-control-row select:focus { border-color: #94a86a; box-shadow: 0 0 0 3px rgba(184,223,69,.17); }
 .settings-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; }
 .settings-actions button, .signout-button { min-height: 44px; padding: 0 16px; border: 0; border-radius: 11px; background: var(--ink); color: white; font-size: var(--type-ui); font-weight: 680; cursor: pointer; }
 .settings-error { grid-column: 1 / -1; margin: 0; color: #984738; font-size: var(--type-ui); }
@@ -1060,6 +1061,16 @@ h1 { margin: 0; font-size: clamp(34px, 4vw, 53px); line-height: .98; letter-spac
 .settings-toggle-row input::after { content: ""; width: 20px; height: 20px; position: absolute; left: 3px; top: 3px; border-radius: 50%; background: white; box-shadow: 0 1px 4px rgba(20,22,18,.22); transition: transform .2s; }
 .settings-toggle-row input:checked { background: #6d833d; }
 .settings-toggle-row input:checked::after { transform: translateX(20px); }
+.oidc-settings-form { gap: 16px; }
+.oidc-enabled-row { margin-top: 0; padding-top: 0; border-top: 0; }
+.oidc-settings-meta { color: #666b62; font-size: var(--type-caption); }
+.oidc-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.oidc-field-grid label { min-width: 0; }
+.oidc-redirect-field { grid-column: 1 / -1; }
+.oidc-clear-secret { display: flex !important; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px !important; font-weight: 560 !important; }
+.oidc-clear-secret input { width: 18px; height: 18px; padding: 0; accent-color: var(--theme-accent); }
+.oidc-storage-note { margin: 0; padding: 13px 14px; border-radius: 11px; background: #f1f3ec; color: #62685d; font-size: var(--type-caption); line-height: 1.5; }
+.oidc-storage-note code, .oidc-field-grid small code { overflow-wrap: anywhere; }
 .session-card { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .settings-about { scroll-margin-top: 24px; padding: 0; }
 .settings-about-panel { display: grid; gap: 17px; padding: 23px; border: 1px solid var(--line); border-radius: 20px; background: rgba(255,255,255,.82); }
@@ -1375,6 +1386,7 @@ body.theme-dark { background: #181a1b; color-scheme: dark; }
 .theme-dark .topbar { border-color: var(--line); background: rgba(24,26,27,.94); }
 .theme-dark .search input,
 .theme-dark .settings-form input,
+.theme-dark .settings-form select,
 .theme-dark .settings-control-row select,
 .theme-dark .link-panel textarea,
 .theme-dark .manual-form input,
@@ -1387,6 +1399,7 @@ body.theme-dark { background: #181a1b; color-scheme: dark; }
 .theme-dark .settings-form input[readonly] { border-color: var(--line); background: var(--surface-hover); color: #aaa5a1; }
 .theme-dark .search input:focus,
 .theme-dark .settings-form input:focus,
+.theme-dark .settings-form select:focus,
 .theme-dark .settings-control-row select:focus,
 .theme-dark .link-panel textarea:focus,
 .theme-dark .manual-form input:focus,
@@ -1651,6 +1664,8 @@ body.theme-dark { background: #181a1b; color-scheme: dark; }
 .theme-dark .transfer-form label,
 .theme-dark .export-fields label,
 .theme-dark .settings-form label { color: #d8d3d0; }
+.theme-dark .oidc-settings-meta { color: var(--muted); }
+.theme-dark .oidc-storage-note { background: var(--surface-hover); color: var(--muted); }
 .theme-dark .modal-secondary,
 .theme-dark .file-drop button,
 .theme-dark .transfer-secondary,
@@ -2144,7 +2159,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .qr-scanner-fallback { grid-column: auto; }
   .archive-explainer { grid-template-columns: 40px minmax(0, 1fr); }
   .archive-explainer > span:last-child { grid-column: 2; width: max-content; }
-  .settings-form, .profile-field-grid, .password-change-fields { grid-template-columns: 1fr; }
+  .settings-form, .profile-field-grid, .password-change-fields, .oidc-field-grid { grid-template-columns: 1fr; }
+  .oidc-redirect-field { grid-column: auto; }
   .password-change-row { grid-template-columns: 1fr; }
   .password-change-toggle { width: 100%; }
   .password-change-actions { display: grid; grid-template-columns: 1fr; }

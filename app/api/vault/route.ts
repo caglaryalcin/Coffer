@@ -8,7 +8,20 @@ import {
   VaultStoreError,
 } from "@/lib/server/vault-store";
 import { extensionCorsHeaders, isExtensionRequest } from "@/lib/server/extension-origin";
-import { getOidcIdentity, oidcEnabled } from "@/lib/server/oidc";
+import {
+  getOidcIdentity,
+  oidcEnabled,
+  OidcError,
+  resetOidcRuntimeState,
+  validateOidcSettings,
+} from "@/lib/server/oidc";
+import {
+  OidcSettingsStoreError,
+  prepareOidcSettingsUpdate,
+  publicOidcSettings,
+  writeOidcSettings,
+  type OidcClientAuthMethod,
+} from "@/lib/server/oidc-settings-store";
 import { isIP } from "node:net";
 
 export const runtime = "nodejs";
@@ -80,6 +93,12 @@ export async function POST(request: Request): Promise<Response> {
         break;
       case "update_instance_settings":
         response = await updateInstanceSettings(request, body);
+        break;
+      case "get_oidc_settings":
+        response = getOidcSettings(request, body);
+        break;
+      case "update_oidc_settings":
+        response = await updateOidcSettings(request, body);
         break;
       case "delete_account":
         response = await deleteAccount(request, body);
@@ -220,6 +239,73 @@ async function updateInstanceSettings(request: Request, body: JsonObject): Promi
     sessionToken: sessionToken(request),
     allowAccountCreation: body.allowAccountCreation,
   }));
+}
+
+function getOidcSettings(request: Request, body: JsonObject): Response {
+  requireSameOrigin(request);
+  if (!hasExactKeys(body, ["action"]) || body.action !== "get_oidc_settings") {
+    throw invalidSchema();
+  }
+  store.authorizeInstanceAdministration(sessionToken(request));
+  return json(publicOidcSettings());
+}
+
+async function updateOidcSettings(request: Request, body: JsonObject): Promise<Response> {
+  requireSameOrigin(request);
+  if (!hasExactKeys(body, [
+    "action",
+    "enabled",
+    "issuerUrl",
+    "clientId",
+    "clientSecret",
+    "clientAuthMethod",
+    "providerName",
+    "scopes",
+    "redirectUri",
+  ])) {
+    throw invalidSchema();
+  }
+  if (
+    body.action !== "update_oidc_settings" ||
+    typeof body.enabled !== "boolean" ||
+    typeof body.issuerUrl !== "string" ||
+    typeof body.clientId !== "string" ||
+    (body.clientSecret !== null && typeof body.clientSecret !== "string") ||
+    !isOidcClientAuthMethod(body.clientAuthMethod) ||
+    typeof body.providerName !== "string" ||
+    typeof body.scopes !== "string" ||
+    typeof body.redirectUri !== "string"
+  ) {
+    throw invalidSchema();
+  }
+  store.authorizeInstanceAdministration(sessionToken(request));
+  const settings = prepareOidcSettingsUpdate({
+    enabled: body.enabled,
+    issuerUrl: body.issuerUrl,
+    clientId: body.clientId,
+    clientSecret: body.clientSecret,
+    clientAuthMethod: body.clientAuthMethod,
+    providerName: body.providerName,
+    scopes: body.scopes,
+    redirectUri: body.redirectUri,
+  });
+  try {
+    await validateOidcSettings(settings);
+  } catch (error) {
+    if (error instanceof OidcSettingsStoreError || error instanceof OidcError) throw error;
+    throw new RequestError(
+      400,
+      "oidc_discovery_failed",
+      "Coffer could not discover the OIDC provider. Check the issuer URL and network access.",
+    );
+  }
+  await writeOidcSettings(settings);
+  resetOidcRuntimeState();
+  return json(publicOidcSettings());
+}
+
+function isOidcClientAuthMethod(value: unknown): value is OidcClientAuthMethod {
+  return value === "client_secret_basic" || value === "client_secret_post" || value === "none";
 }
 
 async function claimLegacy(request: Request, body: JsonObject): Promise<Response> {
@@ -583,6 +669,12 @@ function errorResponse(error: unknown): Response {
     return json(
       { error: { code: error.code, message: publicMessage, ...(details ?? {}) } },
       { status: statusByCode[error.code], headers },
+    );
+  }
+  if (error instanceof OidcSettingsStoreError || error instanceof OidcError) {
+    return json(
+      { error: { code: "invalid_oidc_settings", message: error.message } },
+      { status: 400 },
     );
   }
 

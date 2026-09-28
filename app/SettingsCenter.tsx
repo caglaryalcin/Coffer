@@ -2,6 +2,12 @@
 
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import type { VaultProfile } from "../lib/vault-model";
+import {
+  getOidcAdminSettings,
+  updateOidcAdminSettings,
+  type OidcAdminSettings,
+  type OidcClientAuthMethod,
+} from "../lib/vault-api";
 import { languages, useI18n, type CofferLanguage } from "./I18nProvider";
 import { PROFILE_IMAGE_ACCEPT, prepareProfileImage } from "./profile-image";
 
@@ -58,7 +64,40 @@ type PasswordErrorField = "current" | "new" | "confirmation" | "form" | null;
 const MIN_PASSWORD_CHARACTERS = 12;
 const MAX_PASSWORD_CHARACTERS = 256;
 
-type SettingsGlyphKind = "profile" | "language" | "security" | "about" | "session" | "delete";
+type SettingsGlyphKind = "profile" | "language" | "oidc" | "security" | "about" | "session" | "delete";
+
+type OidcSettingsDraft = Pick<
+  OidcAdminSettings,
+  | "enabled"
+  | "issuerUrl"
+  | "clientId"
+  | "clientAuthMethod"
+  | "providerName"
+  | "scopes"
+  | "redirectUri"
+>;
+
+const emptyOidcDraft: OidcSettingsDraft = {
+  enabled: false,
+  issuerUrl: "",
+  clientId: "",
+  clientAuthMethod: "client_secret_basic",
+  providerName: "OpenID Connect",
+  scopes: "openid email profile",
+  redirectUri: "",
+};
+
+function oidcDraftFromSettings(settings: OidcAdminSettings): OidcSettingsDraft {
+  return {
+    enabled: settings.enabled,
+    issuerUrl: settings.issuerUrl,
+    clientId: settings.clientId,
+    clientAuthMethod: settings.clientAuthMethod,
+    providerName: settings.providerName,
+    scopes: settings.scopes,
+    redirectUri: settings.redirectUri,
+  };
+}
 
 function SettingsGlyph({ kind }: { kind: SettingsGlyphKind }) {
   return (
@@ -90,6 +129,13 @@ function SettingsGlyph({ kind }: { kind: SettingsGlyphKind }) {
           <>
             <rect x="5" y="10" width="14" height="11" rx="2.5" />
             <path d="M8 10V7a4 4 0 0 1 8 0v3M12 14.5V17" />
+          </>
+        )}
+        {kind === "oidc" && (
+          <>
+            <circle cx="8" cy="12" r="3.25" />
+            <path d="M11.25 12H21M17.5 12v3M14.5 12v2" />
+            <path d="M4.75 12H3" />
           </>
         )}
         {kind === "about" && (
@@ -192,6 +238,12 @@ export default function SettingsCenter({
   const [passwordErrorField, setPasswordErrorField] = useState<PasswordErrorField>(null);
   const [instanceSettingsBusy, setInstanceSettingsBusy] = useState(false);
   const [instanceSettingsError, setInstanceSettingsError] = useState("");
+  const [oidcSettings, setOidcSettings] = useState<OidcAdminSettings | null>(null);
+  const [oidcDraft, setOidcDraft] = useState<OidcSettingsDraft>(emptyOidcDraft);
+  const [oidcClientSecret, setOidcClientSecret] = useState("");
+  const [oidcClearClientSecret, setOidcClearClientSecret] = useState(false);
+  const [oidcBusy, setOidcBusy] = useState(true);
+  const [oidcError, setOidcError] = useState("");
   const [deleteExpanded, setDeleteExpanded] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
@@ -228,6 +280,28 @@ export default function SettingsCenter({
       deleteToggleRef.current?.focus();
     }
   }, [deleteExpanded]);
+
+  useEffect(() => {
+    let active = true;
+    void getOidcAdminSettings()
+      .then((settings) => {
+        if (!active) return;
+        setOidcSettings(settings);
+        setOidcDraft(oidcDraftFromSettings(settings));
+      })
+      .catch((caught) => {
+        if (!active) return;
+        setOidcError(caught instanceof Error
+          ? caught.message
+          : "Coffer could not load the OIDC settings.");
+      })
+      .finally(() => {
+        if (active) setOidcBusy(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   if (profile.name !== profileNameSource) {
     setProfileNameSource(profile.name);
@@ -442,6 +516,32 @@ export default function SettingsCenter({
     }
   };
 
+  const saveOidcSettings = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (oidcBusy) return;
+    setOidcError("");
+    setOidcBusy(true);
+    try {
+      const clientSecret = oidcClientSecret
+        ? oidcClientSecret
+        : oidcClearClientSecret
+          ? ""
+          : null;
+      const settings = await updateOidcAdminSettings({ ...oidcDraft, clientSecret });
+      setOidcSettings(settings);
+      setOidcDraft(oidcDraftFromSettings(settings));
+      setOidcClientSecret("");
+      setOidcClearClientSecret(false);
+      onNotice(settings.enabled ? "OIDC settings saved and enabled." : "OIDC settings saved and disabled.");
+    } catch (caught) {
+      setOidcError(caught instanceof Error
+        ? caught.message
+        : "Coffer could not save the OIDC settings.");
+    } finally {
+      setOidcBusy(false);
+    }
+  };
+
   return (
     <section className="settings-center" id="settings-root" aria-label="Settings" tabIndex={-1}>
       <div className="settings-layout">
@@ -510,6 +610,147 @@ export default function SettingsCenter({
                 </select>
               </div>
             </div>
+          </section>
+
+          <section className="settings-card" id="oidc-settings" aria-labelledby="oidc-settings-title" tabIndex={-1}>
+            <div className="settings-card-copy">
+              <SettingsGlyph kind="oidc" />
+              <div>
+                <h2 id="oidc-settings-title">OpenID Connect</h2>
+                <p>Configure centralized sign-in for this Coffer instance. Vault passwords continue to protect encrypted data.</p>
+              </div>
+            </div>
+            <form className="settings-form oidc-settings-form" onSubmit={(event) => void saveOidcSettings(event)} aria-busy={oidcBusy}>
+              <div className="settings-toggle-row oidc-enabled-row">
+                <span><label htmlFor="oidc-enabled">Enable OIDC sign-in</label><small>Require web users to authenticate with the configured identity provider.</small></span>
+                <input
+                  id="oidc-enabled"
+                  type="checkbox"
+                  checked={oidcDraft.enabled}
+                  onChange={(event) => setOidcDraft((current) => ({ ...current, enabled: event.target.checked }))}
+                  disabled={oidcBusy}
+                />
+              </div>
+
+              <div className="oidc-settings-meta" role="status">
+                {oidcBusy && !oidcSettings
+                  ? "Loading OIDC settings…"
+                  : oidcSettings?.source === "volume"
+                    ? "Configuration source: persistent Coffer data volume"
+                    : oidcSettings?.source === "environment"
+                      ? "Configuration source: container environment variables"
+                      : "OIDC is not configured yet."}
+              </div>
+
+              <div className="oidc-field-grid">
+                <label>
+                  <span>Issuer URL</span>
+                  <input
+                    type="url"
+                    value={oidcDraft.issuerUrl}
+                    placeholder="https://auth.example.com/realms/coffer"
+                    required={oidcDraft.enabled}
+                    onChange={(event) => setOidcDraft((current) => ({ ...current, issuerUrl: event.target.value }))}
+                    disabled={oidcBusy}
+                    autoComplete="url"
+                  />
+                  <small>The exact HTTPS issuer advertised by the provider discovery document.</small>
+                </label>
+                <label>
+                  <span>Client ID</span>
+                  <input
+                    value={oidcDraft.clientId}
+                    required={oidcDraft.enabled}
+                    onChange={(event) => setOidcDraft((current) => ({ ...current, clientId: event.target.value }))}
+                    disabled={oidcBusy}
+                    autoComplete="off"
+                  />
+                </label>
+                <label>
+                  <span>Client secret</span>
+                  <input
+                    type="password"
+                    value={oidcClientSecret}
+                    placeholder={oidcSettings?.clientSecretConfigured ? "Stored secret — leave blank to keep" : "Enter client secret"}
+                    onChange={(event) => {
+                      setOidcClientSecret(event.target.value);
+                      if (event.target.value) setOidcClearClientSecret(false);
+                    }}
+                    disabled={oidcBusy || oidcClearClientSecret}
+                    autoComplete="new-password"
+                  />
+                  <small>The stored secret is never returned to the browser.</small>
+                </label>
+                <label>
+                  <span>Client authentication</span>
+                  <select
+                    value={oidcDraft.clientAuthMethod}
+                    onChange={(event) => setOidcDraft((current) => ({
+                      ...current,
+                      clientAuthMethod: event.target.value as OidcClientAuthMethod,
+                    }))}
+                    disabled={oidcBusy}
+                  >
+                    <option value="client_secret_basic">client_secret_basic</option>
+                    <option value="client_secret_post">client_secret_post</option>
+                    <option value="none">none (public client)</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Provider name</span>
+                  <input
+                    value={oidcDraft.providerName}
+                    maxLength={80}
+                    onChange={(event) => setOidcDraft((current) => ({ ...current, providerName: event.target.value }))}
+                    disabled={oidcBusy}
+                  />
+                  <small>Shown on the sign-in button.</small>
+                </label>
+                <label>
+                  <span>Scopes</span>
+                  <input
+                    value={oidcDraft.scopes}
+                    onChange={(event) => setOidcDraft((current) => ({ ...current, scopes: event.target.value }))}
+                    disabled={oidcBusy}
+                    autoComplete="off"
+                  />
+                  <small><code>openid</code> and <code>email</code> are always included.</small>
+                </label>
+                <label className="oidc-redirect-field">
+                  <span>Redirect URI</span>
+                  <input
+                    type="url"
+                    value={oidcDraft.redirectUri}
+                    placeholder="https://coffer.example.com/api/auth/oidc/callback"
+                    onChange={(event) => setOidcDraft((current) => ({ ...current, redirectUri: event.target.value }))}
+                    disabled={oidcBusy}
+                    autoComplete="url"
+                  />
+                  <small>Recommended behind Kubernetes Ingress. It must end with <code>/api/auth/oidc/callback</code>.</small>
+                </label>
+              </div>
+
+              {oidcSettings?.clientSecretConfigured && (
+                <label className="oidc-clear-secret">
+                  <input
+                    type="checkbox"
+                    checked={oidcClearClientSecret}
+                    onChange={(event) => {
+                      setOidcClearClientSecret(event.target.checked);
+                      if (event.target.checked) setOidcClientSecret("");
+                    }}
+                    disabled={oidcBusy}
+                  />
+                  <span>Remove the stored client secret when saving</span>
+                </label>
+              )}
+
+              <p className="oidc-storage-note">Settings are written atomically to <code>COFFER_DATA_DIR/oidc-settings.json</code> with owner-only file permissions. Protect and back up the mounted volume.</p>
+              {oidcError && <p className="settings-error" role="alert">{oidcError}</p>}
+              <div className="settings-actions">
+                <button type="submit" disabled={oidcBusy}>{oidcBusy ? "Checking…" : "Save OIDC settings"}</button>
+              </div>
+            </form>
           </section>
 
           <section className="settings-card" id="security-settings" aria-labelledby="security-settings-title" tabIndex={-1}>
