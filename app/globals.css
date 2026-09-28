@@ -907,6 +907,16 @@ h1 { margin: 0; font-size: clamp(34px, 4vw, 53px); line-height: .98; letter-spac
 .auth-form-heading > div { min-width: 0; flex: 1 1 auto; }
 .auth-submit-footer { justify-content: space-between; }
 .auth-submit-footer .local-only-note { flex: 0 1 auto; }
+.oidc-access-panel { display: grid; gap: 22px; }
+.oidc-login-button { width: 100%; min-height: 50px; display: flex; align-items: center; justify-content: center; gap: 10px; text-decoration: none; }
+.oidc-vault-note { margin: -4px 0 0; color: var(--muted); font-size: var(--type-caption); line-height: 1.55; text-align: center; }
+.oidc-identity { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 20px; padding: 13px 14px; border: 1px solid #dfe4d4; border-radius: 12px; background: rgba(237, 242, 223, 0.72); }
+.oidc-identity > div { min-width: 0; }
+.oidc-identity strong, .oidc-identity span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oidc-identity strong { font-size: var(--type-ui); }
+.oidc-identity span { margin-top: 3px; color: var(--muted); font-size: var(--type-caption); }
+.oidc-identity button { flex: 0 0 auto; border: 0; background: transparent; color: var(--theme-accent); font-size: var(--type-caption); font-weight: 700; cursor: pointer; }
+.oidc-identity button:disabled { opacity: .55; cursor: not-allowed; }
 .auth-remember-login { display: flex; align-items: flex-start; gap: 11px; padding: 13px 14px; border: 1px solid #dfe4d4; border-radius: 12px; background: rgba(237, 242, 223, 0.72); color: #4f554b; }
 .auth-remember-login input { width: 18px; height: 18px; flex: 0 0 auto; margin: 2px 0 0; accent-color: #667b35; cursor: pointer; }
 .auth-remember-login > div,
@@ -1713,6 +1723,7 @@ body.theme-dark { background: #181a1b; color-scheme: dark; }
 .theme-dark .password-change-row span,
 .theme-dark .password-change-fields label small { color: var(--muted); }
 .theme-dark .password-change-form { border-color: var(--line); background: rgba(30,32,33,.72); }
+.theme-dark .oidc-identity { border-color: var(--line); background: rgba(30,32,33,.72); }
 .theme-dark .password-change-fields label { color: #d8d3d0; }
 .theme-dark .password-change-toggle,
 .theme-dark .password-change-actions button:not([type="submit"]),

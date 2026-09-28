@@ -11,6 +11,13 @@ export type VaultAccountCreationState = {
   accountCreationEnabled: boolean;
 };
 
+export type OidcClientState = {
+  enabled: boolean;
+  providerName: string | null;
+  authenticated: boolean;
+  identity: { email: string; name: string | null } | null;
+};
+
 export type VaultBootstrap =
   | ({ authenticated: false } & VaultAccountCreationState)
   | {
@@ -174,6 +181,38 @@ export async function getVaultBootstrap(): Promise<VaultBootstrap> {
     legacy: body.legacy === true,
     ...accountCreationState,
   };
+}
+
+export async function getOidcState(): Promise<OidcClientState> {
+  const { body, status } = await requestVault("/api/auth/oidc", {
+    credentials: "same-origin",
+    cache: "no-store",
+  });
+  if (
+    !isRecord(body) ||
+    typeof body.enabled !== "boolean" ||
+    (body.providerName !== null && typeof body.providerName !== "string") ||
+    typeof body.authenticated !== "boolean" ||
+    (body.identity !== null && (
+      !isRecord(body.identity) ||
+      typeof body.identity.email !== "string" ||
+      (body.identity.name !== null && typeof body.identity.name !== "string")
+    ))
+  ) {
+    invalidResponse("The OIDC server returned invalid session data.", status);
+  }
+  return body as OidcClientState;
+}
+
+export async function logoutOidc(): Promise<void> {
+  const { body, status } = await requestVault("/api/auth/oidc", {
+    method: "POST",
+    credentials: "same-origin",
+    cache: "no-store",
+  });
+  if (status !== 204 || body !== null) {
+    invalidResponse("The OIDC server returned an invalid sign-out result.", status);
+  }
 }
 
 export async function identifyVault(identifier: string): Promise<VaultIdentity> {

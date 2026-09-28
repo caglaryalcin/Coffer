@@ -1,6 +1,7 @@
 "use client";
 
 import { type FormEvent, useId, useState } from "react";
+import type { OidcClientState } from "../lib/vault-api";
 
 export type AccessMode = "sign-in" | "create-account";
 
@@ -9,6 +10,7 @@ export type SignInScreenProps = {
   busy: boolean;
   error: string | null;
   accountCreationEnabled: boolean;
+  oidc: OidcClientState;
   onSignIn: (details: {
     email: string;
     password: string;
@@ -20,6 +22,7 @@ export type SignInScreenProps = {
     password: string;
     rememberLogin: boolean;
   }) => Promise<void> | void;
+  onOidcSignOut: () => Promise<void> | void;
 };
 
 export type AccessField = "name" | "email" | "password" | "confirmation";
@@ -101,8 +104,10 @@ export default function SignInScreen({
   busy,
   error,
   accountCreationEnabled,
+  oidc,
   onSignIn,
   onCreateAccount,
+  onOidcSignOut,
 }: SignInScreenProps) {
   const id = useId();
   const [mode, setMode] = useState<AccessMode>("sign-in");
@@ -120,6 +125,8 @@ export default function SignInScreen({
   const activeMode: AccessMode = isCreateAccount ? "create-account" : "sign-in";
   const isBusy = busy || submitting;
   const visibleError = error ?? submissionError;
+  const effectiveEmail = oidc.identity?.email ?? email;
+  const effectiveName = name || oidc.identity?.name || "";
 
   const ids = {
     title: `${id}-title`,
@@ -172,7 +179,7 @@ export default function SignInScreen({
     event.preventDefault();
     if (isBusy || status !== "access") return;
 
-    const fields = { name, email, password, confirmation };
+    const fields = { name: effectiveName, email: effectiveEmail, password, confirmation };
     const nextErrors = validateAccessFields(activeMode, fields);
     setFieldErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
@@ -183,13 +190,13 @@ export default function SignInScreen({
     try {
       if (isCreateAccount) {
         await onCreateAccount({
-          name: name.trim(),
-          email: email.trim(),
+          name: effectiveName.trim(),
+          email: effectiveEmail.trim(),
           password,
           rememberLogin,
         });
       } else {
-        await onSignIn({ email: email.trim(), password, rememberLogin });
+        await onSignIn({ email: effectiveEmail.trim(), password, rememberLogin });
       }
       setPassword("");
       setConfirmation("");
@@ -222,6 +229,47 @@ export default function SignInScreen({
                 : "Checking your encrypted vault session…"}
           </p>
           {error && <div className="transfer-error" role="alert"><span aria-hidden="true">!</span>{error}</div>}
+        </section>
+      </main>
+    );
+  }
+
+  if (oidc.enabled && !oidc.authenticated) {
+    return (
+      <main className="transfer-center auth-screen theme-dark" aria-label="Coffer sign in">
+        <header className="transfer-heading auth-intro">
+          <div className="auth-intro-copy">
+            <div className="auth-brand">
+              <span className="brand-mark" aria-hidden="true">C</span>
+              <span>Coffer</span>
+            </div>
+            <p className="auth-tagline">Your codes. Yours alone.</p>
+          </div>
+        </header>
+        <section
+          className="transfer-panel auth-access-panel oidc-access-panel"
+          style={{ maxWidth: 640, margin: "36px auto 0" }}
+          aria-labelledby={ids.formTitle}
+        >
+          <div className="review-head auth-form-heading">
+            <div>
+              <h2 id={ids.formTitle}>Sign in to Coffer</h2>
+              <p>Continue with your organization&apos;s identity provider.</p>
+            </div>
+          </div>
+          {visibleError && (
+            <div className="transfer-error" id={ids.formError} role="alert">
+              <span aria-hidden="true">!</span>
+              {visibleError}
+            </div>
+          )}
+          <a className="transfer-primary oidc-login-button" href="/api/auth/oidc/login">
+            Continue with {oidc.providerName ?? "OpenID Connect"}
+            <ArrowRightIcon className="auth-submit-icon" />
+          </a>
+          <p className="oidc-vault-note">
+            After signing in, enter your vault password to decrypt your data in this browser.
+          </p>
         </section>
       </main>
     );
@@ -272,6 +320,27 @@ export default function SignInScreen({
         )}
 
         <div id={ids.accessPanel}>
+          {oidc.identity && (
+            <div className="oidc-identity" role="status">
+              <div>
+                <strong>{oidc.identity.name ?? oidc.identity.email}</strong>
+                {oidc.identity.name && <span>{oidc.identity.email}</span>}
+              </div>
+              <button
+                type="button"
+                disabled={isBusy}
+                onClick={() => {
+                  setSubmitting(true);
+                  setSubmissionError(null);
+                  void Promise.resolve(onOidcSignOut())
+                    .catch(() => setSubmissionError("Coffer could not end the identity session."))
+                    .finally(() => setSubmitting(false));
+                }}
+              >
+                Use another account
+              </button>
+            </div>
+          )}
           {isCreateAccount && (
             <div className="review-head auth-form-heading">
               <div>
@@ -298,7 +367,7 @@ export default function SignInScreen({
                   id={ids.name}
                   name="name"
                   type="text"
-                  value={name}
+                  value={effectiveName}
                   maxLength={80}
                   autoComplete="name"
                   disabled={isBusy}
@@ -320,14 +389,14 @@ export default function SignInScreen({
                 id={ids.email}
                 name="email"
                 type="email"
-                value={email}
+                value={effectiveEmail}
                 maxLength={254}
                 inputMode="email"
                 autoCapitalize="none"
                 autoCorrect="off"
                 spellCheck={false}
                 autoComplete={isCreateAccount ? "email" : "username"}
-                disabled={isBusy}
+                disabled={isBusy || Boolean(oidc.identity)}
                 aria-invalid={Boolean(fieldErrors.email)}
                 aria-describedby={describedBy(isCreateAccount ? ids.emailHint : undefined, ids.emailError, fieldErrors.email)}
                 onChange={(event) => {

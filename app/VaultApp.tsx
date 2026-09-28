@@ -19,7 +19,7 @@ import SignInScreen from "./SignInScreen";
 import ThemeToggle from "./ThemeToggle";
 import TransferCenter, { type ImportDecision } from "./TransferCenter";
 import { formatCode, generateTotp, generateTotpTestPreview, isTotpExpiring, isValidBase32, normalizeSecret, parseOtpAuthUri, totpWindow, type TotpAlgorithm, type TotpTestPreview } from "../lib/totp";
-import { changeVaultPassword, claimLegacyVault, deleteVaultAccount, getVaultBootstrap, identifyVault, loginVault, logoutVault, saveVault, setupVault, updateInstanceSettings, VAULT_API_TIMEOUT_MS, VaultApiError, type VaultInstanceSettings } from "../lib/vault-api";
+import { changeVaultPassword, claimLegacyVault, deleteVaultAccount, getOidcState, getVaultBootstrap, identifyVault, loginVault, logoutOidc, logoutVault, saveVault, setupVault, updateInstanceSettings, VAULT_API_TIMEOUT_MS, VaultApiError, type OidcClientState, type VaultInstanceSettings } from "../lib/vault-api";
 import { createAuthProof, createEncryptedVault, DEFAULT_VAULT_RESUME_AGE_MS, decryptVaultPayload, encryptVaultPayload, REMEMBERED_VAULT_RESUME_AGE_MS, rotateVaultPassword, unlockVaultHeader, VaultCryptoError, type EncryptedVaultHeader, type VaultPayloadCipher, type VaultRuntime } from "../lib/vault-crypto";
 import { createEmptyVault, MAX_ACCOUNT_URLS, MAX_GROUP_CUSTOMIZATIONS, parseAccountUrls, parsePersistedVault, withVaultUpdate, type PersistedVault, type VaultAccount, type VaultGroupColor, type VaultGroupCustomization, type VaultGroupIcon, type VaultMainScreen, type VaultTheme } from "../lib/vault-model";
 import { classifyVaultOutbox, clearVaultOutbox, createVaultOutboxRecord, readVaultOutbox, writeVaultOutbox, type VaultOutboxRecord } from "../lib/vault-outbox";
@@ -566,6 +566,12 @@ export default function VaultApp() {
     allowAccountCreation: true,
   });
   const [accountCreationEnabled, setAccountCreationEnabled] = useState(true);
+  const [oidc, setOidc] = useState<OidcClientState>({
+    enabled: false,
+    providerName: null,
+    authenticated: false,
+    identity: null,
+  });
   const [vault, setVault] = useState<PersistedVault | null>(null);
   const [runtime, setRuntime] = useState<VaultRuntime | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
@@ -2580,8 +2586,12 @@ export default function VaultApp() {
     let ownedTransitionEpoch: number | null = null;
     void (async () => {
       try {
-        const bootstrap = await getVaultBootstrap();
+        const [bootstrap, oidcState] = await Promise.all([
+          getVaultBootstrap(),
+          getOidcState(),
+        ]);
         if (!active) return;
+        setOidc(oidcState);
         setInstanceSettings(bootstrap.instanceSettings);
         setAccountCreationEnabled(bootstrap.accountCreationEnabled);
         if (!bootstrap.authenticated) {
@@ -2640,7 +2650,17 @@ export default function VaultApp() {
           bootstrapHeaderRef.current = null;
           revisionRef.current = 0;
           void clearVaultResumeSession().catch(() => undefined);
-          setAuthError(null);
+          const oidcResult = new URLSearchParams(window.location.search).get("oidc");
+          setAuthError(
+            oidcResult === "error"
+              ? "The identity provider could not complete sign-in. Please try again."
+              : null,
+          );
+          if (oidcResult) {
+            const cleanUrl = new URL(window.location.href);
+            cleanUrl.searchParams.delete("oidc");
+            window.history.replaceState(null, "", `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+          }
           setAuthStatus("access");
           return;
         }
@@ -2723,6 +2743,16 @@ export default function VaultApp() {
       }
     };
   }, [beginOpeningSession, openVaultRuntime]);
+
+  const handleOidcSignOut = useCallback(async () => {
+    await logoutOidc();
+    setOidc((current) => ({
+      ...current,
+      authenticated: false,
+      identity: null,
+    }));
+    setAuthError(null);
+  }, []);
 
   const setAccountCreationPreference = useCallback(async (allowAccountCreation: boolean) => {
     const result = await updateInstanceSettings({ allowAccountCreation });
@@ -4468,7 +4498,9 @@ export default function VaultApp() {
         busy={authBusy}
         error={authError}
         accountCreationEnabled={accountCreationEnabled}
+        oidc={oidc}
         onCreateAccount={handleCreateAccount}
+        onOidcSignOut={handleOidcSignOut}
         onSignIn={handleSignIn}
       />
     );

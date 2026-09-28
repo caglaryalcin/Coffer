@@ -3,10 +3,12 @@ import {
   isEncryptedVaultPayload,
   isVaultCryptoHeader,
   MAX_SESSION_TTL_MS,
+  normalizeVaultIdentifier,
   VaultStore,
   VaultStoreError,
 } from "@/lib/server/vault-store";
 import { extensionCorsHeaders, isExtensionRequest } from "@/lib/server/extension-origin";
+import { getOidcIdentity, oidcEnabled } from "@/lib/server/oidc";
 import { isIP } from "node:net";
 
 export const runtime = "nodejs";
@@ -100,7 +102,8 @@ async function identify(request: Request, body: JsonObject): Promise<Response> {
   if (body.action !== "identify" || typeof body.identifier !== "string") {
     throw invalidSchema();
   }
-  return json(await store.identify(body.identifier, clientRateKey(request)));
+  const identifier = accountIdentifierForRequest(request, body.identifier, true);
+  return json(await store.identify(identifier, clientRateKey(request)));
 }
 
 async function setup(request: Request, body: JsonObject): Promise<Response> {
@@ -124,8 +127,9 @@ async function setup(request: Request, body: JsonObject): Promise<Response> {
     throw invalidSchema();
   }
 
+  const identifier = accountIdentifierForRequest(request, body.identifier as string);
   const result = await store.setup({
-    identifier: body.identifier,
+    identifier,
     authProof,
     header: body.header,
     payload: body.payload,
@@ -168,8 +172,11 @@ async function login(request: Request, body: JsonObject): Promise<Response> {
     (hasIdentifier && typeof body.identifier !== "string")
   ) throw invalidSchema();
 
-  const result = hasIdentifier
-    ? await store.login(body.identifier as string, authProof, clientRateKey(request), {
+  const identifier = hasIdentifier
+    ? accountIdentifierForRequest(request, body.identifier as string, true)
+    : undefined;
+  const result = identifier !== undefined
+    ? await store.login(identifier, authProof, clientRateKey(request), {
         sessionTtlMs: sessionTtlMs(rememberLogin),
       })
     : await store.loginWithSession(
@@ -221,7 +228,8 @@ async function claimLegacy(request: Request, body: JsonObject): Promise<Response
   if (body.action !== "claim_legacy" || typeof body.identifier !== "string") {
     throw invalidSchema();
   }
-  return json(await store.claimLegacy(sessionToken(request), body.identifier));
+  const identifier = accountIdentifierForRequest(request, body.identifier);
+  return json(await store.claimLegacy(sessionToken(request), identifier));
 }
 
 async function save(request: Request, body: JsonObject): Promise<Response> {
@@ -516,6 +524,30 @@ function cleanClientIp(value: string | null | undefined): string | null {
 
 function trustProxyHeaders(): boolean {
   return process.env.COFFER_TRUST_PROXY === "1";
+}
+
+function accountIdentifierForRequest(
+  request: Request,
+  suppliedIdentifier: string,
+  allowExtension = false,
+): string {
+  if (!oidcEnabled() || (allowExtension && isExtensionRequest(request))) {
+    return suppliedIdentifier;
+  }
+  const identity = getOidcIdentity(request);
+  if (!identity) {
+    throw new RequestError(401, "oidc_required", "Sign in with the configured identity provider first.");
+  }
+  let supplied: string;
+  try {
+    supplied = normalizeVaultIdentifier(suppliedIdentifier);
+  } catch {
+    throw invalidSchema();
+  }
+  if (supplied !== identity.email) {
+    throw new RequestError(403, "oidc_identity_mismatch", "The account does not match the OIDC identity.");
+  }
+  return identity.email;
 }
 
 function errorResponse(error: unknown): Response {

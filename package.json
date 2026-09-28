@@ -17,6 +17,7 @@
   "dependencies": {
     "hash-wasm": "4.12.0",
     "jsqr": "1.4.0",
+    "openid-client": "6.8.8",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },

@@ -56,17 +56,48 @@ keeps encrypted vault data across container restarts and replacements.
 | `COFFER_DATA_DIR` | `data` (`/app/data` in Docker) | Directory containing encrypted vault files. Mount persistent storage here. |
 | `COFFER_TRUST_PROXY` | `0` | Set to `1` only behind a trusted reverse proxy so Coffer accepts forwarded origin, protocol, and client IP headers. |
 | `VINEXT_TRUSTED_HOSTS` | Empty | Comma-separated public `host[:port]` allowlist, such as `coffer.example.com`. Recommended for HTTPS reverse-proxy deployments. |
+| `COFFER_OIDC_ISSUER_URL` | Empty | OIDC issuer URL. Setting this enables OIDC sign-in. |
+| `COFFER_OIDC_CLIENT_ID` | Empty | OIDC client ID registered for Coffer. |
+| `COFFER_OIDC_CLIENT_SECRET` | Empty | OIDC client secret. May be omitted for a public client that accepts PKCE. |
+| `COFFER_OIDC_CLIENT_AUTH_METHOD` | `client_secret_basic` with a secret; otherwise `none` | Token endpoint authentication: `client_secret_basic`, `client_secret_post`, or `none`. |
+| `COFFER_OIDC_PROVIDER_NAME` | `OpenID Connect` | Provider name shown on the sign-in button. |
+| `COFFER_OIDC_SCOPES` | `openid email profile` | Space-separated OIDC scopes. `openid` and `email` are always requested. |
+| `COFFER_OIDC_REDIRECT_URI` | Derived from request | Explicit callback URL, for example `https://coffer.example.com/api/auth/oidc/callback`. |
 | `HOST` | `0.0.0.0` in Docker | Address the application server listens on. |
 | `PORT` | `3000` | Application server port inside the container. |
 | `NODE_ENV` | `production` in Docker | Node.js runtime mode. |
 | `APP_HOST` | `127.0.0.1` | Docker Compose host address used for the published port. |
 | `APP_PORT` | `3000` | Docker Compose host port. |
 
-`COFFER_DATA_DIR`, `COFFER_TRUST_PROXY`, `VINEXT_TRUSTED_HOSTS`, `HOST`, `PORT`,
-and `NODE_ENV` are container environment variables. `APP_HOST` and `APP_PORT`
-are Docker Compose substitutions. When using Compose, add
-`VINEXT_TRUSTED_HOSTS` to `services.app.environment`; placing it only in `.env`
-does not pass it into the container.
+All `COFFER_*` settings, `VINEXT_TRUSTED_HOSTS`, `HOST`, `PORT`, and `NODE_ENV`
+are container environment variables. `APP_HOST` and `APP_PORT` are Docker
+Compose substitutions. When using Compose, add `VINEXT_TRUSTED_HOSTS` to
+`services.app.environment`; placing it only in `.env` does not pass it into the
+container.
+
+### OpenID Connect
+
+Register Coffer as an OIDC web application using the Authorization Code flow.
+Add this callback URL to the provider:
+
+```text
+https://coffer.example.com/api/auth/oidc/callback
+```
+
+Then configure at least `COFFER_OIDC_ISSUER_URL` and `COFFER_OIDC_CLIENT_ID`.
+Most confidential clients also require `COFFER_OIDC_CLIENT_SECRET`; use
+`COFFER_OIDC_CLIENT_AUTH_METHOD` if the provider requires `client_secret_post`.
+The provider must return an `email` claim, either in the ID token or from
+UserInfo. Identities explicitly marked with `email_verified: false` are
+rejected.
+For reverse-proxy deployments, set `COFFER_OIDC_REDIRECT_URI` explicitly or
+enable `COFFER_TRUST_PROXY=1` and ensure the proxy overwrites the forwarded host
+and protocol headers.
+
+OIDC authenticates the account identity; the vault password still encrypts and
+decrypts data only in the browser. Existing accounts are matched by their
+normalized email address, so users can adopt OIDC without migrating vault data.
+Browser extensions continue to use the existing email-and-vault-password flow.
 
 For HTTPS behind a reverse proxy, set both `COFFER_TRUST_PROXY=1` and
 `VINEXT_TRUSTED_HOSTS` to the public hostname. The proxy must overwrite and
