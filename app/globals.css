@@ -1480,7 +1480,7 @@ body.theme-dark { background: #181a1b; color-scheme: dark; }
 .theme-dark .favorite:hover { background: var(--accent-soft); color: var(--theme-accent); }
 .theme-dark .more-button:hover,
 .theme-dark .more-button[aria-expanded="true"] { background: var(--accent-soft); color: var(--theme-accent); }
-.group-nav-row .group-options-button.more-button:is(:hover, :focus-visible, [aria-expanded="true"]) {
+.group-nav-row:not(.main-screen-default) .group-options-button.more-button:is(:hover, :focus-visible, [aria-expanded="true"]) {
   background: rgba(202, 115, 115, .24);
   color: #f4b5b5;
 }
