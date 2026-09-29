@@ -69,6 +69,9 @@ export default function OverflowingIdentity({
   const viewportRef = useRef<HTMLElement>(null);
   const trackRef = useRef<HTMLSpanElement>(null);
   const animationFrameRef = useRef<number | null>(null);
+  const setViewportRef = useCallback((element: HTMLElement | null) => {
+    viewportRef.current = element;
+  }, []);
   const [metrics, setMetrics] = useState<HorizontalOverflowMetrics>({
     overflowing: false,
     distance: 0,
@@ -155,7 +158,7 @@ export default function OverflowingIdentity({
   if (as === "span") {
     return (
       <span
-        ref={viewportRef}
+        ref={setViewportRef}
         className={classes}
         data-overflowing={metrics.overflowing ? "true" : "false"}
         data-i18n-ignore
@@ -169,7 +172,7 @@ export default function OverflowingIdentity({
 
   return (
     <p
-      ref={viewportRef}
+      ref={setViewportRef}
       className={classes}
       data-overflowing={metrics.overflowing ? "true" : "false"}
       data-i18n-ignore

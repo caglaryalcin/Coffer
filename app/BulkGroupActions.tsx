@@ -8,10 +8,10 @@ export type BulkGroupActionsProps = {
   visibleCount: number;
   allVisibleSelected: boolean;
   allSelectedFavorited: boolean;
+  selectedAccountsHaveUrls: boolean;
   showGroupDragHint?: boolean;
   groups: readonly string[];
   disabled?: boolean;
-  onBeginSelection: () => void;
   onSelectAllVisible: () => void;
   onClearSelection: () => void;
   onExitSelection: () => void;
@@ -19,6 +19,7 @@ export type BulkGroupActionsProps = {
   onArchive: () => boolean | void;
   onChangeLogo: (trigger: HTMLButtonElement) => void;
   onAddUrls: (trigger: HTMLButtonElement) => void;
+  onClearUrls: () => boolean | void;
   onMoveToGroup: (groupName: string) => boolean | void;
   onCreateGroupAndMove: (groupName: string) => boolean | void;
 };
@@ -33,7 +34,6 @@ export type ArchiveBulkActionsProps = {
   visibleCount: number;
   allVisibleSelected: boolean;
   disabled?: boolean;
-  onBeginSelection: () => void;
   onSelectAllVisible: () => void;
   onClearSelection: () => void;
   onExitSelection: () => void;
@@ -55,25 +55,6 @@ export function mouseIsOutsideAccountCodeRow(event: ReactMouseEvent<HTMLElement>
     || event.clientX > bounds.right
     || event.clientY < bounds.top
     || event.clientY > bounds.bottom;
-}
-
-function SelectAccountsIcon() {
-  return (
-    <svg
-      className="bulk-select-icon"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <rect x="3" y="3" width="18" height="18" rx="5" />
-      <path className="bulk-select-icon-check" d="m8 12 2.5 2.5L16.5 8.5" />
-    </svg>
-  );
 }
 
 function uniqueGroupNames(groups: readonly string[]) {
@@ -107,7 +88,6 @@ export function ArchiveBulkActions({
   visibleCount,
   allVisibleSelected,
   disabled = false,
-  onBeginSelection,
   onSelectAllVisible,
   onClearSelection,
   onExitSelection,
@@ -117,21 +97,7 @@ export function ArchiveBulkActions({
   const selectionDisabled = disabled || visibleCount === 0;
   const actionDisabled = disabled || selectedCount === 0;
 
-  if (!active) {
-    return (
-      <div className="bulk-group-launch archive-bulk-launch">
-        <button
-          type="button"
-          className="bulk-select-trigger"
-          onClick={onBeginSelection}
-          disabled={selectionDisabled}
-        >
-          <SelectAccountsIcon />
-          Select accounts
-        </button>
-      </div>
-    );
-  }
+  if (!active) return null;
 
   return (
     <section className="bulk-group-actions archive-bulk-actions" aria-label="Archived account selection actions">
@@ -194,10 +160,10 @@ export default function BulkGroupActions({
   visibleCount,
   allVisibleSelected,
   allSelectedFavorited,
+  selectedAccountsHaveUrls,
   showGroupDragHint = false,
   groups,
   disabled = false,
-  onBeginSelection,
   onSelectAllVisible,
   onClearSelection,
   onExitSelection,
@@ -205,6 +171,7 @@ export default function BulkGroupActions({
   onArchive,
   onChangeLogo,
   onAddUrls,
+  onClearUrls,
   onMoveToGroup,
   onCreateGroupAndMove,
 }: BulkGroupActionsProps) {
@@ -243,21 +210,7 @@ export default function BulkGroupActions({
     finishMove(onCreateGroupAndMove(normalizedNewGroup));
   };
 
-  if (!active) {
-    return (
-      <div className="bulk-group-launch">
-        <button
-          type="button"
-          className="bulk-select-trigger"
-          onClick={onBeginSelection}
-          disabled={selectionDisabled}
-        >
-          <SelectAccountsIcon />
-          Select accounts
-        </button>
-      </div>
-    );
-  }
+  if (!active) return null;
 
   return (
     <section className="bulk-group-actions" aria-label="Account selection actions">
@@ -312,6 +265,14 @@ export default function BulkGroupActions({
             disabled={moveDisabled}
           >
             Add URLs
+          </button>
+          <button
+            type="button"
+            className="bulk-danger-action"
+            onClick={onClearUrls}
+            disabled={moveDisabled || !selectedAccountsHaveUrls}
+          >
+            Clear URLs
           </button>
           {!showGroupDragHint && (
             <button

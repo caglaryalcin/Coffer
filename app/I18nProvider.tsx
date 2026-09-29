@@ -261,6 +261,7 @@ const tr: TranslationDictionary = {
   "Change password": "Parolayı değiştir",
   "Change photo": "Fotoğrafı değiştir",
   "Change selected logos": "Seçili logoları değiştir",
+  "Clear URLs": "URL'leri temizle",
   "Changing password…": "Parola değiştiriliyor…",
   "Checking accounts…": "Hesaplar kontrol ediliyor…",
   "Checking QR scanner support…": "QR tarayıcı desteği kontrol ediliyor…",
@@ -705,6 +706,7 @@ const de: TranslationDictionary = {
   "Change password": "Passwort ändern",
   "Change photo": "Foto ändern",
   "Change selected logos": "Ausgewählte Logos ändern",
+  "Clear URLs": "URLs löschen",
   "Changing password…": "Passwort wird geändert…",
   "Checking accounts…": "Konten werden geprüft…",
   "Checking QR scanner support…": "QR-Scanner-Unterstützung wird geprüft…",
@@ -1172,7 +1174,7 @@ function applyElementAttributes(language: CofferLanguage, element: Element) {
   }
 }
 
-function applyLanguage(language: CofferLanguage, root: ParentNode = document.body) {
+function applyLanguage(language: CofferLanguage, root: Node = document.body) {
   if (root instanceof Element) {
     applyElementAttributes(language, root);
     applyElementTextContent(language, root);

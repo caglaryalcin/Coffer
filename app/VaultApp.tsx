@@ -467,13 +467,14 @@ function groupKey(value: string) {
 }
 
 function defaultMainScreenGroup(vault: PersistedVault): "All" | Group {
-  if (vault.settings.mainScreen.kind === "all") return "All";
+  const mainScreen = vault.settings.mainScreen;
+  if (mainScreen.kind === "all") return "All";
   const groups = orderedVisibleGroupNames(
     vault.accounts,
     vault.groupCustomizations,
     vault.groupOrder,
   );
-  return groups.find((name) => groupKey(name) === groupKey(vault.settings.mainScreen.group)) ?? "All";
+  return groups.find((name) => groupKey(name) === groupKey(mainScreen.group)) ?? "All";
 }
 
 function sidebarMenuTargetKey(target: SidebarMenuTarget) {
@@ -655,8 +656,6 @@ export default function VaultApp() {
   const selectedAccountDragRef = useRef(false);
   const selectedAccountDragOriginRef = useRef<string | null>(null);
   const draggedAccountIdsRef = useRef<Set<string>>(new Set());
-  const suppressSelectedAccountClickRef = useRef(false);
-  const selectedAccountClickResetFrameRef = useRef<number | null>(null);
   const groupDragNameRef = useRef<string | null>(null);
   const suppressGroupClickRef = useRef(false);
   const groupClickResetFrameRef = useRef<number | null>(null);
@@ -690,15 +689,6 @@ export default function VaultApp() {
     setDragOverGroup(null);
     setDragOverPrimaryTarget(null);
     setAccountDropTarget(null);
-    if (suppressSelectedAccountClickRef.current) {
-      if (selectedAccountClickResetFrameRef.current !== null) {
-        window.cancelAnimationFrame(selectedAccountClickResetFrameRef.current);
-      }
-      selectedAccountClickResetFrameRef.current = window.requestAnimationFrame(() => {
-        suppressSelectedAccountClickRef.current = false;
-        selectedAccountClickResetFrameRef.current = null;
-      });
-    }
   }, []);
 
   const clearGroupDrag = useCallback(() => {
@@ -726,9 +716,6 @@ export default function VaultApp() {
   }, []);
 
   useEffect(() => () => {
-    if (selectedAccountClickResetFrameRef.current !== null) {
-      window.cancelAnimationFrame(selectedAccountClickResetFrameRef.current);
-    }
     if (groupClickResetFrameRef.current !== null) {
       window.cancelAnimationFrame(groupClickResetFrameRef.current);
     }
@@ -3147,6 +3134,9 @@ export default function VaultApp() {
   const allSelectedFavorited = selectedVisibleAccountIds.size > 0 && accounts.every(
     (account) => !selectedVisibleAccountIds.has(account.id) || account.favorite,
   );
+  const selectedAccountsHaveUrls = accounts.some((account) => (
+    selectedVisibleAccountIds.has(account.id) && !account.archived && account.urls.length > 0
+  ));
   const selectedLogoPreviewAccount = accounts.find((account) => selectedVisibleAccountIds.has(account.id)) ?? null;
   const selectedLogoSuggestedService = useMemo(
     () => commonLogoSuggestion(accounts, selectedVisibleAccountIds),
@@ -3188,6 +3178,17 @@ export default function VaultApp() {
       else next.add(id);
       return next;
     });
+  };
+
+  const toggleAccountSelectionFromAction = (id: string) => {
+    setAccountMenuId(null);
+    setSidebarMenuTarget(null);
+    if (selectionMode) {
+      toggleAccountSelection(id);
+      return;
+    }
+    setSelectedAccountIds(new Set([id]));
+    setSelectionMode(true);
   };
 
   const isDefaultMainScreen = (target: SidebarMenuTarget) => (
@@ -3658,16 +3659,54 @@ export default function VaultApp() {
     return true;
   };
 
+  const clearSelectedAccountUrls = () => {
+    const blockReason = mutationBlockReason();
+    if (blockReason) {
+      setToast(blockReason === "conflict" || blockReason === "conflict-pending"
+        ? "Resolve the encrypted save conflict before clearing URLs."
+        : "Unlock your vault before clearing URLs.");
+      return false;
+    }
+    if (selectedVisibleAccountIds.size === 0) {
+      setToast("Select at least one account to clear URLs.");
+      return false;
+    }
+
+    const selected = new Set(selectedVisibleAccountIds);
+    const changedIds = new Set(accounts
+      .filter((account) => selected.has(account.id) && !account.archived && account.urls.length > 0)
+      .map((account) => account.id));
+    const changedCount = changedIds.size;
+    if (changedCount === 0) {
+      setToast("The selected accounts do not have website URLs to clear.");
+      return false;
+    }
+
+    const confirmed = window.confirm(
+      `Clear all website URLs from ${changedCount} selected ${changedCount === 1 ? "account" : "accounts"}?`,
+    );
+    if (!confirmed) return false;
+
+    const saved = setAccounts((current) => current.map((account) => (
+      changedIds.has(account.id) && !account.archived
+        ? { ...account, urls: [] }
+        : account
+    )));
+    if (!saved) return false;
+
+    setToast(`Website URLs cleared from ${changedCount} ${changedCount === 1 ? "account" : "accounts"}.`);
+    return true;
+  };
+
   const beginSelectedAccountDrag = (event: ReactDragEvent<HTMLElement>, accountId: string) => {
     const sourceAccount = accounts.find((account) => account.id === accountId);
     if (
-      view !== "all"
+      view === "archive"
       || !sourceAccount
       || sourceAccount.archived
       || selectedAccountDragOriginRef.current !== accountId
     ) {
       event.preventDefault();
-      suppressSelectedAccountClickRef.current = true;
       clearSelectedAccountDrag();
       return;
     }
@@ -3677,11 +3716,6 @@ export default function VaultApp() {
       : new Set([accountId]);
     draggedAccountIdsRef.current = draggedAccountIds;
     setDraggedAccountIds(new Set(draggedAccountIds));
-    if (selectedAccountClickResetFrameRef.current !== null) {
-      window.cancelAnimationFrame(selectedAccountClickResetFrameRef.current);
-      selectedAccountClickResetFrameRef.current = null;
-    }
-    suppressSelectedAccountClickRef.current = true;
     selectedAccountDragRef.current = true;
     event.dataTransfer.effectAllowed = "copyMove";
     event.dataTransfer.setData(SELECTED_ACCOUNT_DRAG_TYPE, "1");
@@ -4513,12 +4547,9 @@ export default function VaultApp() {
       visibleCount={selectableVisibleIds.length}
       allVisibleSelected={allVisibleSelected}
       allSelectedFavorited={allSelectedFavorited}
+      selectedAccountsHaveUrls={selectedAccountsHaveUrls}
       showGroupDragHint={view === "all"}
       groups={groups}
-      onBeginSelection={() => {
-        setAccountMenuId(null);
-        setSelectionMode(true);
-      }}
       onSelectAllVisible={() => setSelectedAccountIds(new Set(selectableVisibleIds))}
       onClearSelection={() => setSelectedAccountIds(new Set())}
       onExitSelection={exitSelectionMode}
@@ -4536,6 +4567,7 @@ export default function VaultApp() {
         setBulkUrlReturnFocusTo(trigger);
         setBulkUrlOpen(true);
       }}
+      onClearUrls={clearSelectedAccountUrls}
       onMoveToGroup={(groupName) => moveSelectedAccounts(groupName, false)}
       onCreateGroupAndMove={(groupName) => moveSelectedAccounts(groupName, true)}
     />
@@ -4547,10 +4579,6 @@ export default function VaultApp() {
       selectedCount={selectedVisibleAccountIds.size}
       visibleCount={selectableVisibleIds.length}
       allVisibleSelected={allVisibleSelected}
-      onBeginSelection={() => {
-        setAccountMenuId(null);
-        setSelectionMode(true);
-      }}
       onSelectAllVisible={() => setSelectedAccountIds(new Set(selectableVisibleIds))}
       onClearSelection={() => setSelectedAccountIds(new Set())}
       onExitSelection={exitSelectionMode}
@@ -5016,7 +5044,7 @@ export default function VaultApp() {
                 const revealNextCode = !locked && isTotpExpiring(remaining);
                 const selected = selectedVisibleAccountIds.has(account.id);
                 const accessibleCurrentCode = currentCode?.replace(/\s/gu, "").split("").join(" ");
-                const draggableAccount = view === "all" && !account.archived;
+                const draggableAccount = view !== "archive" && !account.archived;
                 const reorderTarget = accountDropTarget?.id === account.id ? accountDropTarget : null;
                 const accountCardProps: HTMLAttributes<HTMLElement> = {
                   draggable: draggableAccount,
@@ -5044,21 +5072,6 @@ export default function VaultApp() {
                   onDragLeave: (event) => leaveSelectedAccountCardDropTarget(event, account.id),
                   onDrop: (event) => dropSelectedAccountsOnAccount(event, account.id),
                   onDragEnd: clearSelectedAccountDrag,
-                  ...(selectionMode ? {
-                    role: "button",
-                    tabIndex: 0,
-                    "aria-label": `${selected ? "Deselect" : "Select"} ${account.service} ${account.identity}`,
-                    "aria-pressed": selected,
-                    onClick: () => {
-                      if (!suppressSelectedAccountClickRef.current) toggleAccountSelection(account.id);
-                    },
-                    onKeyDown: (event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        toggleAccountSelection(account.id);
-                      }
-                    },
-                  } : {}),
                 };
                 return <article
                   className={`account-card ${account.archived ? "archived-card" : ""} ${selectionMode ? "selection-mode" : ""} ${selected ? "selected" : ""} ${draggingSelectedAccounts && draggedAccountIds.has(account.id) ? "drag-source" : ""} ${reorderTarget ? `account-drop-${reorderTarget.edge} account-drop-${reorderTarget.axis}` : ""}`}
@@ -5074,29 +5087,35 @@ export default function VaultApp() {
                       iconDataUrl={account.iconDataUrl}
                     />
                     <div className="service-meta" data-i18n-ignore><h2>{account.service}</h2><OverflowingIdentity text={account.identity} /></div>
-                    {selectionMode ? (
-                      <AccountSelectionIndicator selected={selected} />
-                    ) : (
-                      <div className="account-card-actions">
-                        {account.archived && <span className="archived-badge">Archived</span>}
-                        {!account.archived && <button className={`favorite ${account.favorite ? "selected" : ""}`} onClick={() => toggleFavorite(account.id)} aria-label={`${account.favorite ? "Remove" : "Add"} ${account.service} ${account.favorite ? "from" : "to"} favorites`}><HeartIcon className="card-favorite-icon" filled={account.favorite} /></button>}
-                        <div className="account-menu-wrap" onBlur={(event) => {
-                          if (editingAccountId !== account.id && !event.currentTarget.contains(event.relatedTarget)) {
-                            setAccountMenuId(null);
-                          }
-                        }}>
-                          <button className="more-button" aria-haspopup="menu" aria-expanded={accountMenuId === account.id} onClick={() => { setSidebarMenuTarget(null); setAccountMenuId((current) => current === account.id ? null : account.id); }} aria-label={`Open ${account.service} options`}>•••</button>
-                          {accountMenuId === account.id && (
-                            <div className="account-menu" role="menu">
-                              <button role="menuitem" onClick={(event) => openAccountEditor(account.id, event.currentTarget)}>Edit account</button>
-                              {!account.archived && <button role="menuitem" onClick={() => toggleFavorite(account.id)}>{account.favorite ? "Remove from Favorites" : "Add to Favorites"}</button>}
-                              {!account.archived && <button role="menuitem" onClick={() => toggleArchive(account.id)}>Move to Archive</button>}
-                              {account.archived && <button className="danger" role="menuitem" onClick={() => deleteArchivedAccount(account.id)}>Delete permanently</button>}
-                            </div>
-                          )}
-                        </div>
+                    <div className="account-card-actions">
+                      {account.archived && <span className="archived-badge">Archived</span>}
+                      {!account.archived && <button className={`favorite ${account.favorite ? "selected" : ""}`} onClick={() => toggleFavorite(account.id)} aria-label={`${account.favorite ? "Remove" : "Add"} ${account.service} ${account.favorite ? "from" : "to"} favorites`}><HeartIcon className="card-favorite-icon" filled={account.favorite} /></button>}
+                      <button
+                        type="button"
+                        className="account-select-button"
+                        onClick={() => toggleAccountSelectionFromAction(account.id)}
+                        aria-label={`${selected ? "Deselect" : "Select"} ${account.service} ${account.identity}`}
+                        aria-pressed={selected}
+                        title={selected ? "Deselect account" : "Select accounts"}
+                      >
+                        <AccountSelectionIndicator selected={selected} />
+                      </button>
+                      <div className="account-menu-wrap" onBlur={(event) => {
+                        if (editingAccountId !== account.id && !event.currentTarget.contains(event.relatedTarget)) {
+                          setAccountMenuId(null);
+                        }
+                      }}>
+                        <button className="more-button" aria-haspopup="menu" aria-expanded={accountMenuId === account.id} onClick={() => { setSidebarMenuTarget(null); setAccountMenuId((current) => current === account.id ? null : account.id); }} aria-label={`Open ${account.service} options`}>•••</button>
+                        {accountMenuId === account.id && (
+                          <div className="account-menu" role="menu">
+                            <button role="menuitem" onClick={(event) => openAccountEditor(account.id, event.currentTarget)}>Edit account</button>
+                            {!account.archived && <button role="menuitem" onClick={() => toggleFavorite(account.id)}>{account.favorite ? "Remove from Favorites" : "Add to Favorites"}</button>}
+                            {!account.archived && <button role="menuitem" onClick={() => toggleArchive(account.id)}>Move to Archive</button>}
+                            {account.archived && <button className="danger" role="menuitem" onClick={() => deleteArchivedAccount(account.id)}>Delete permanently</button>}
+                          </div>
+                        )}
                       </div>
-                    )}
+                    </div>
                   </div>
                   <div className="code-row">
                     <div className={`code-stack ${!selectionMode && !locked && !revealNextCode ? "copy-current-area" : ""}`}>
