@@ -80,7 +80,7 @@ container.
 Register Coffer as an OIDC web application using the Authorization Code flow.
 Add this callback URL to the provider:
 
-![](https://raw.githubusercontent.com/caglaryalcin/Coffer/refs/heads/main/screenshots/OICD.png)
+![](https://raw.githubusercontent.com/caglaryalcin/Coffer/refs/heads/main/screenshots/OIDC.png)
 
 ```text
 https://coffer.example.com/api/auth/oidc/callback
