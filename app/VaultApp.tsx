@@ -3,6 +3,9 @@
 import { FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type HTMLAttributes, type MouseEvent as ReactMouseEvent } from "react";
 import AccountEditor, { type AccountEditorCodePreview, type AccountIconOption } from "./AccountEditor";
 import AccountUrlFields from "./AccountUrlFields";
+import SavedLogoPicker from "./SavedLogoPicker";
+import { savedCustomLogos, withSelectedAccountLogo } from "../lib/custom-logos";
+import { accountCreationDestination } from "../lib/account-navigation";
 import BulkGroupActions, { AccountSelectionIndicator, ArchiveBulkActions, mouseIsOutsideAccountCodeRow, normalizeGroupName } from "./BulkGroupActions";
 import BulkLogoPicker, { retainedAccountIconBytes, type BulkAccountLogoPatch } from "./BulkLogoPicker";
 import BulkUrlEditor from "./BulkUrlEditor";
@@ -82,7 +85,8 @@ type ReadyVaultSessionPublication = {
 };
 type GroupDropTarget = { name: string; edge: GroupDropEdge };
 type AccountDropTarget = { id: string; edge: AccountDropEdge; axis: "horizontal" | "vertical" };
-type SidebarMenuTarget = { kind: "all" } | { kind: "group"; name: string };
+type MainScreenMenuTarget = { kind: "all" } | { kind: "favorites" } | { kind: "group"; name: string };
+type SidebarMenuTarget = MainScreenMenuTarget | { kind: "archive" };
 type NewAccountSecretTestFeedback =
   | { status: "idle" }
   | { status: "testing" }
@@ -515,7 +519,7 @@ function hierarchicalGroupNames(groupNames: readonly string[]) {
 
 function defaultMainScreenGroup(vault: PersistedVault): "All" | Group {
   const mainScreen = vault.settings.mainScreen;
-  if (mainScreen.kind === "all") return "All";
+  if (mainScreen.kind !== "group") return "All";
   const groups = orderedVisibleGroupNames(
     vault.accounts,
     vault.groupCustomizations,
@@ -525,7 +529,7 @@ function defaultMainScreenGroup(vault: PersistedVault): "All" | Group {
 }
 
 function sidebarMenuTargetKey(target: SidebarMenuTarget) {
-  return target.kind === "all" ? "all" : `group:${groupKey(target.name)}`;
+  return target.kind === "group" ? `group:${groupKey(target.name)}` : target.kind;
 }
 
 function sidebarMenuPositionFromTrigger(target: SidebarMenuTarget, trigger: HTMLElement): SidebarMenuPosition {
@@ -670,6 +674,7 @@ export default function VaultApp() {
   const [newAlgorithm, setNewAlgorithm] = useState<TotpAlgorithm>("SHA-1");
   const [newDigits, setNewDigits] = useState<6 | 8>(6);
   const [newPeriod, setNewPeriod] = useState(30);
+  const [newIconDataUrl, setNewIconDataUrl] = useState<string | null>(null);
   const [formError, setFormError] = useState("");
   const [newAccountSecretTestFeedback, setNewAccountSecretTestFeedback] = useState<NewAccountSecretTestFeedback>({ status: "idle" });
   const searchRef = useRef<HTMLInputElement>(null);
@@ -679,6 +684,7 @@ export default function VaultApp() {
   const manualServiceInputRef = useRef<HTMLInputElement>(null);
   const addTriggerRef = useRef<HTMLElement | null>(null);
   const addOriginViewRef = useRef<View>("all");
+  const addOriginGroupRef = useRef<Group>("All");
   const newAccountSecretTestRequestRef = useRef(0);
   const newAccountSecretTestExpiryTimerRef = useRef<number | null>(null);
   const runtimeRef = useRef<VaultRuntime | null>(null);
@@ -810,6 +816,7 @@ export default function VaultApp() {
   const locked = !signedIn;
   const profile: UserProfile = vault?.profile ?? { name: "Coffer owner", email: "Encrypted vault", avatarDataUrl: null };
   const accounts = vault?.accounts ?? EMPTY_ACCOUNTS;
+  const customLogos = useMemo(() => savedCustomLogos(accounts), [accounts]);
   const groupCustomizations = vault?.groupCustomizations ?? EMPTY_GROUP_CUSTOMIZATIONS;
   const editingAccount = editingAccountId ? accounts.find((account) => account.id === editingAccountId) ?? null : null;
   const autoLockMinutes = vault?.settings.autoLockMinutes ?? 5;
@@ -1042,7 +1049,7 @@ export default function VaultApp() {
 
     setRuntime(publication.runtime);
     setVault(publication.vault);
-    setView("all");
+    setView(publication.vault.settings.mainScreen.kind === "favorites" ? "favorites" : "all");
     setGroup(defaultMainScreenGroup(publication.vault));
     setSidebarMenuTarget(null);
     setSaveConflict(publication.conflict);
@@ -3309,10 +3316,10 @@ export default function VaultApp() {
     setSelectionMode(true);
   };
 
-  const isDefaultMainScreen = (target: SidebarMenuTarget) => (
-    target.kind === "all"
-      ? mainScreen.kind === "all"
-      : mainScreen.kind === "group" && groupKey(mainScreen.group) === groupKey(target.name)
+  const isDefaultMainScreen = (target: MainScreenMenuTarget) => (
+    target.kind === "group"
+      ? mainScreen.kind === "group" && groupKey(mainScreen.group) === groupKey(target.name)
+      : mainScreen.kind === target.kind
   );
 
   const sidebarMenuIsOpen = (target: SidebarMenuTarget) => (
@@ -3332,7 +3339,7 @@ export default function VaultApp() {
     setSidebarMenuTarget(target);
   };
 
-  const setDefaultMainScreen = (target: SidebarMenuTarget) => {
+  const setDefaultMainScreen = (target: MainScreenMenuTarget) => {
     if (target.kind === "group" && !groups.some((name) => groupKey(name) === groupKey(target.name))) {
       setSidebarMenuTarget(null);
       setToast("This group is no longer available.");
@@ -3343,17 +3350,16 @@ export default function VaultApp() {
       return true;
     }
 
-    const nextMainScreen: VaultMainScreen = target.kind === "all"
-      ? { kind: "all" }
-      : { kind: "group", group: target.name };
+    const nextMainScreen: VaultMainScreen = target.kind === "group"
+      ? { kind: "group", group: target.name }
+      : { kind: target.kind };
     const saved = commitVault((current) => withVaultUpdate(current, {
       settings: { ...current.settings, mainScreen: nextMainScreen },
     }));
     if (!saved) return false;
     setSidebarMenuTarget(null);
-    setToast(target.kind === "all"
-      ? "All Cards is now the default main screen."
-      : `${target.name} is now the default main screen.`);
+    const name = target.kind === "group" ? target.name : target.kind === "favorites" ? "Favorites" : "All Cards";
+    setToast(`${name} is now the default main screen.`);
     return true;
   };
 
@@ -3773,11 +3779,7 @@ export default function VaultApp() {
       return true;
     }
 
-    const saved = setAccounts((current) => current.map((account) => (
-      selected.has(account.id) && !account.archived
-        ? { ...account, iconBrand: patch.iconBrand, iconDataUrl: patch.iconDataUrl }
-        : account
-    )));
+    const saved = setAccounts((current) => withSelectedAccountLogo(current, selected, patch));
     if (!saved) return false;
 
     const label = patch.iconDataUrl
@@ -4607,6 +4609,7 @@ export default function VaultApp() {
     setNewAlgorithm("SHA-1");
     setNewDigits(6);
     setNewPeriod(30);
+    setNewIconDataUrl(null);
     setFormError("");
     setAddMode("qr");
   };
@@ -4628,6 +4631,7 @@ export default function VaultApp() {
     }
     addTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     addOriginViewRef.current = view;
+    addOriginGroupRef.current = group;
     setSidebarMenuTarget(null);
     resetForm();
     if (view === "all" && group !== "All") setNewGroup(group);
@@ -4662,27 +4666,34 @@ export default function VaultApp() {
       return;
     }
 
-    const addToFavorites = addOriginViewRef.current === "favorites";
-    setAccounts((current) => [{
-      id: crypto.randomUUID(),
-      service: service.trim(),
-      identity: identity.trim(),
-      urls: normalizedAccountUrls,
-      secret: normalizeSecret(secret),
-      group: newGroup,
-      color: ADD_ACCOUNT_PALETTE[current.length % ADD_ACCOUNT_PALETTE.length],
-      letter: initials(service.trim()),
-      favorite: addToFavorites,
-      archived: false,
-      lastUsed: 0,
-      algorithm: newAlgorithm,
-      digits: newDigits,
-      period: newPeriod,
-      iconBrand: null,
-      iconDataUrl: null,
-    }, ...current]);
-    setView(addToFavorites ? "favorites" : "all");
-    setGroup("All");
+    const destination = accountCreationDestination(addOriginViewRef.current, addOriginGroupRef.current);
+    const addToFavorites = destination.view === "favorites";
+    try {
+      const saved = setAccounts((current) => [{
+        id: crypto.randomUUID(),
+        service: service.trim(),
+        identity: identity.trim(),
+        urls: normalizedAccountUrls,
+        secret: normalizeSecret(secret),
+        group: newGroup,
+        color: ADD_ACCOUNT_PALETTE[current.length % ADD_ACCOUNT_PALETTE.length],
+        letter: initials(service.trim()),
+        favorite: addToFavorites,
+        archived: false,
+        lastUsed: 0,
+        algorithm: newAlgorithm,
+        digits: newDigits,
+        period: newPeriod,
+        iconBrand: null,
+        iconDataUrl: newIconDataUrl,
+      }, ...current]);
+      if (!saved) return;
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "The account could not be saved.");
+      return;
+    }
+    setView(destination.view);
+    setGroup(destination.group);
     setQuery("");
     setToast(addToFavorites
       ? `${service.trim()} added to Favorites.`
@@ -4764,13 +4775,19 @@ export default function VaultApp() {
     exitSelectionMode();
     setAccountMenuId(null);
     setSidebarMenuTarget(null);
-    setView("all");
+    setView(mainScreen.kind === "favorites" ? "favorites" : "all");
     setGroup(vault ? defaultMainScreenGroup(vault) : "All");
   };
   const allCodesTarget: SidebarMenuTarget = { kind: "all" };
   const allCodesActive = view === "all" && group === "All";
   const allCodesDefault = isDefaultMainScreen(allCodesTarget);
   const allCodesMenuOpen = sidebarMenuIsOpen(allCodesTarget);
+  const favoritesTarget: SidebarMenuTarget = { kind: "favorites" };
+  const favoritesDefault = isDefaultMainScreen(favoritesTarget);
+  const favoritesMenuOpen = sidebarMenuIsOpen(favoritesTarget);
+  const archiveTarget: SidebarMenuTarget = { kind: "archive" };
+  const archiveMenuOpen = sidebarMenuIsOpen(archiveTarget);
+  const archivedAccountCount = accounts.filter((account) => account.archived).length;
   const primarySelectionActive = selectionMode && view === "all" && selectedVisibleAccountIds.size > 0;
   const favoriteSelectionReady = primarySelectionActive && canAddAccountIdsToFavorites(selectedVisibleAccountIds);
   const archiveSelectionReady = primarySelectionActive && canArchiveAccountIds(selectedVisibleAccountIds);
@@ -4881,10 +4898,16 @@ export default function VaultApp() {
               </div>
             )}
           </div>
+          <div
+            className={`primary-nav-row favorites-nav-row ${view === "favorites" ? "active" : ""} ${favoritesDefault ? "main-screen-default" : ""} ${favoritesMenuOpen ? "menu-open" : ""} ${favoriteDropReady ? "drop-ready" : ""} ${favoriteDropTarget ? "drop-target" : ""}`}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) setSidebarMenuTarget(null);
+            }}
+          >
           <button
             title={primarySelectionActive ? "Add selected accounts to Favorites" : "Favorites"}
             aria-label={primarySelectionActive ? "Add selected accounts to Favorites" : "Favorites"}
-            className={`nav-item sidebar-favorites-button ${view === "favorites" ? "active" : ""} ${favoriteDropReady ? "drop-ready" : ""} ${favoriteDropTarget ? "drop-target" : ""}`}
+            className="primary-nav-main sidebar-favorites-button"
             onDragEnter={(event) => dragSelectedAccountsOverPrimaryTarget(event, "favorites")}
             onDragOver={(event) => dragSelectedAccountsOverPrimaryTarget(event, "favorites")}
             onDragLeave={(event) => leaveSelectedAccountPrimaryTarget(event, "favorites")}
@@ -4900,9 +4923,37 @@ export default function VaultApp() {
             }}
           ><SidebarFavoritesIcon className="nav-icon heart-icon" filled={view === "favorites"} />Favorites<span className="nav-count">{accounts.filter((account) => account.favorite && !account.archived).length}</span></button>
           <button
+            type="button"
+            className="primary-options-button more-button"
+            onClick={(event) => toggleSidebarMenu(favoritesTarget, event.currentTarget)}
+            aria-haspopup="menu"
+            aria-expanded={favoritesMenuOpen}
+            aria-label="Open Favorites options"
+            title="Favorites options"
+          ><span aria-hidden="true">•••</span></button>
+          {favoritesMenuOpen && (
+            <div className="sidebar-options-menu primary-options-menu" role="menu" style={sidebarMenuStyle}>
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                className={favoritesDefault ? "sidebar-default-option" : undefined}
+                aria-checked={favoritesDefault}
+                disabled={favoritesDefault}
+                onClick={() => setDefaultMainScreen(favoritesTarget)}
+              >{favoritesDefault ? "Default main screen" : "Set default main screen"}</button>
+            </div>
+          )}
+          </div>
+          <div
+            className={`primary-nav-row archive-nav-row ${view === "archive" ? "active" : ""} ${archiveMenuOpen ? "menu-open" : ""} ${archiveDropReady ? "drop-ready" : ""} ${archiveDropTarget ? "drop-target" : ""}`}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) setSidebarMenuTarget(null);
+            }}
+          >
+          <button
             title={primarySelectionActive ? "Move selected accounts to Archive" : "Archive"}
             aria-label={primarySelectionActive ? "Move selected accounts to Archive" : "Archive"}
-            className={`nav-item sidebar-archive-button ${view === "archive" ? "active" : ""} ${archiveDropReady ? "drop-ready" : ""} ${archiveDropTarget ? "drop-target" : ""}`}
+            className="primary-nav-main sidebar-archive-button"
             onDragEnter={(event) => dragSelectedAccountsOverPrimaryTarget(event, "archive")}
             onDragOver={(event) => dragSelectedAccountsOverPrimaryTarget(event, "archive")}
             onDragLeave={(event) => leaveSelectedAccountPrimaryTarget(event, "archive")}
@@ -4917,7 +4968,31 @@ export default function VaultApp() {
               setGroup("All");
               closeMobileSidebar();
             }}
-          ><SidebarArchiveIcon className="nav-icon archive-icon" />Archive<span className="nav-count">{accounts.filter((account) => account.archived).length}</span></button>
+          ><SidebarArchiveIcon className="nav-icon archive-icon" />Archive<span className="nav-count">{archivedAccountCount}</span></button>
+          <button
+            type="button"
+            className="primary-options-button more-button"
+            onClick={(event) => toggleSidebarMenu(archiveTarget, event.currentTarget)}
+            aria-haspopup="menu"
+            aria-expanded={archiveMenuOpen}
+            aria-label="Open Archive options"
+            title="Archive options"
+          ><span aria-hidden="true">•••</span></button>
+          {archiveMenuOpen && (
+            <div className="sidebar-options-menu primary-options-menu" role="menu" style={sidebarMenuStyle}>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={archivedAccountCount === 0}
+                onClick={() => {
+                  setSidebarMenuTarget(null);
+                  setSidebarMenuPosition(null);
+                  restoreAllArchivedAccounts();
+                }}
+              >Restore all codes</button>
+            </div>
+          )}
+          </div>
           <button title="Data and backup" className={`nav-item sidebar-data-backup-button ${view === "transfer" ? "active" : ""}`} onClick={() => { exitSelectionMode(); setView("transfer"); closeMobileSidebar(); }}><DataBackupIcon className="nav-icon transfer-icon" />Data &amp; backup</button>
           <button title="Settings" className={`nav-item sidebar-settings-button ${view === "settings" ? "active" : ""}`} onClick={() => { exitSelectionMode(); setView("settings"); closeMobileSidebar(); }}><SettingsIcon className="nav-icon settings-icon" />Settings</button>
         </nav>
@@ -5356,7 +5431,7 @@ export default function VaultApp() {
           ) : (
             <section className="empty-state">
               <div className="empty-rings"><span /><span /><span /></div>
-              <h2>{view === "archive" ? query.trim() ? "No archived accounts found" : "Archive is empty" : "No codes found"}</h2>
+              <h2>{view === "archive" ? query.trim() ? "No archived accounts found" : "Archive is empty" : "No account found"}</h2>
               <p>{view === "archive" ? query.trim() ? "Try a different search." : "Accounts you archive will appear here." : "Try another search or add a new authenticator account."}</p>
               {view === "archive" ? <button onClick={() => { if (query.trim()) setQuery(""); else setView("all"); }}>{query.trim() ? "Clear search" : "Back to All Cards"}</button> : <button onClick={openAdd}>Add account</button>}
             </section>
@@ -5402,6 +5477,7 @@ export default function VaultApp() {
                     <div className="service-entry-control">
                       <ServiceLogo
                         service={service}
+                        iconDataUrl={newIconDataUrl}
                         fallback={service.trim() ? initials(service) : "?"}
                         color={ADD_ACCOUNT_PALETTE[accounts.length % ADD_ACCOUNT_PALETTE.length]}
                       />
@@ -5411,6 +5487,13 @@ export default function VaultApp() {
                   <label><span>Group</span><select value={newGroup} onChange={(event) => setNewGroup(event.target.value as Group)}>{entryGroups.map((name) => <option key={name} data-i18n-ignore>{name}</option>)}</select></label>
                 </div>
                 <label><span>Account name</span><input value={identity} onChange={(event) => setIdentity(event.target.value)} placeholder="name@example.com" /></label>
+                {customLogos.length > 0 && (
+                  <fieldset className="account-editor-logo-fieldset">
+                    <legend>Choose platform logo</legend>
+                    <SavedLogoPicker logos={customLogos} selected={newIconDataUrl} onSelect={setNewIconDataUrl} />
+                    <button type="button" className="text-button" aria-pressed={newIconDataUrl === null} onClick={() => setNewIconDataUrl(null)}>Use automatic logo</button>
+                  </fieldset>
+                )}
                 <AccountUrlFields urls={accountUrls} onChange={setAccountUrls} />
                 <div className="manual-secret-field">
                   <label htmlFor={newAccountSecretInputId}><span>Base32 secret</span></label>
@@ -5488,6 +5571,7 @@ export default function VaultApp() {
       <AccountEditor
         account={editingAccount}
         brandOptions={accountIconOptions}
+        customLogos={customLogos}
         codePreview={editingCodePreview}
         onClose={() => {
           setEditingAccountId(null);
@@ -5510,6 +5594,7 @@ export default function VaultApp() {
         open={bulkLogoOpen}
         selectedCount={selectedVisibleAccountIds.size}
         brandOptions={accountIconOptions}
+        customLogos={customLogos}
         suggestedService={selectedLogoSuggestedService}
         retainedCustomLogoBytes={retainedCustomLogoBytes}
         previewAccount={selectedLogoPreviewAccount}

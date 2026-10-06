@@ -3,6 +3,9 @@
 import { FormEvent, ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from "react";
 import { ACCOUNT_LOGO_ACCEPT, prepareAccountLogo } from "./account-logo";
 import AccountUrlFields from "./AccountUrlFields";
+import AccountSetupQr from "./AccountSetupQr";
+import SavedLogoPicker from "./SavedLogoPicker";
+import type { SavedCustomLogo } from "../lib/custom-logos";
 import { COFFER_INITIALS_BRAND_ID } from "./ServiceLogo";
 import {
   accountSecretTestReadiness,
@@ -33,6 +36,7 @@ export type AccountEditorCodePreview = {
 export type AccountEditorProps = {
   account: VaultAccount | null;
   brandOptions: readonly AccountIconOption[];
+  customLogos: readonly SavedCustomLogo[];
   codePreview?: AccountEditorCodePreview;
   onClose: () => void;
   onSave: (accountId: string, patch: EditableAccountPatch) => void | Promise<void>;
@@ -126,7 +130,7 @@ export function findAccountIconOptions(
   return results.slice(0, Math.max(1, limit));
 }
 
-function AccountEditorForm({ account, brandOptions, codePreview, onClose, onSave, returnFocusTo, renderIcon }: Omit<AccountEditorProps, "account"> & { account: VaultAccount }) {
+function AccountEditorForm({ account, brandOptions, customLogos, codePreview, onClose, onSave, returnFocusTo, renderIcon }: Omit<AccountEditorProps, "account"> & { account: VaultAccount }) {
   const initial = accountEditorValues(account);
   const iconPickerId = useId();
   const secretInputId = useId();
@@ -396,12 +400,14 @@ function AccountEditorForm({ account, brandOptions, codePreview, onClose, onSave
         </header>
 
         <form className="account-editor-form" onSubmit={save}>
+          <fieldset className="account-editor-logo-fieldset account-editor-section" disabled={busy || logoBusy}>
+            <legend>Platform logo</legend>
           <div className="account-editor-icon-row">
-            {renderIcon?.({ color: account.color, letter: account.letter, service, iconBrand: iconBrand || null, iconDataUrl }) ?? (
+            {renderIcon?.({ color: account.color, letter: account.letter, service, iconBrand: iconBrand || null, iconDataUrl: null }) ?? (
               <span className={`service-logo ${account.color}`} aria-hidden="true">{account.letter}</span>
             )}
             <div className="account-editor-icon-picker">
-              <label htmlFor={`${iconPickerId}-search`}>Platform logo</label>
+              <label htmlFor={`${iconPickerId}-search`}>Search platform logos</label>
               <input
                 id={`${iconPickerId}-search`}
                 type="search"
@@ -411,7 +417,7 @@ function AccountEditorForm({ account, brandOptions, codePreview, onClose, onSave
                 autoComplete="off"
               />
               <small>{iconDataUrl
-                ? "Uploaded logo selected for this account."
+                ? "A custom logo is selected. Choose a platform logo below to replace it."
                 : selectedIcon
                 ? `${selectedIcon.label}${selectedIcon.description ? ` — ${selectedIcon.description}` : ""} selected from Coffer's local catalog.`
                 : visibleCatalogIconCount === 0
@@ -422,29 +428,6 @@ function AccountEditorForm({ account, brandOptions, codePreview, onClose, onSave
             </div>
           </div>
 
-          <fieldset className="account-editor-logo-fieldset" disabled={busy || logoBusy}>
-            <legend>Choose platform logo</legend>
-            <div className="account-editor-custom-logo" aria-busy={logoBusy}>
-              <div>
-                <strong>Custom logo</strong>
-                <small id={`${iconPickerId}-upload-help`}>PNG, JPEG, or WebP up to 5 MB. Fitted to 128 × 128 on this device and stored inside your encrypted vault.</small>
-              </div>
-              <div className="account-editor-custom-logo-actions">
-                <label className="account-editor-logo-upload">
-                  <input
-                    ref={logoInputRef}
-                    type="file"
-                    accept={ACCOUNT_LOGO_ACCEPT}
-                    aria-describedby={`${iconPickerId}-upload-help`}
-                    onChange={uploadLogo}
-                  />
-                  <span>{logoBusy ? "Processing…" : iconDataUrl ? "Replace logo" : "Upload logo"}</span>
-                </label>
-                {iconDataUrl && <button type="button" onClick={removeUploadedLogo}>Remove upload</button>}
-              </div>
-              {logoBusy && <span className="account-editor-logo-status" role="status">Processing logo…</span>}
-              {logoError && <span className="account-editor-logo-error" role="alert">{logoError}</span>}
-            </div>
             <div className="account-editor-logo-grid">
               <label className="account-editor-logo-option">
                 <input
@@ -477,17 +460,63 @@ function AccountEditorForm({ account, brandOptions, codePreview, onClose, onSave
             </div>
           </fieldset>
 
-          <div className="account-editor-grid">
-            <label><span>Service name</span><input ref={serviceInputRef} value={service} onChange={(event) => setService(event.target.value)} maxLength={256} /></label>
-            <label><span>Username</span><input value={identity} onChange={(event) => setIdentity(event.target.value)} maxLength={256} autoComplete="off" /></label>
-            <AccountUrlFields urls={urls} onChange={setUrls} disabled={busy} />
+          <fieldset className="account-editor-logo-fieldset account-editor-section" disabled={busy || logoBusy}>
+            <legend>Custom logo</legend>
+            {iconDataUrl && (
+              <div className="account-editor-custom-logo-preview">
+                {renderIcon?.({ color: account.color, letter: account.letter, service, iconBrand: null, iconDataUrl })}
+                <small>Uploaded logo selected for this account.</small>
+              </div>
+            )}
+            <div className="account-editor-custom-logo" aria-busy={logoBusy}>
+              <div>
+                <strong>Upload logo</strong>
+                <small id={`${iconPickerId}-upload-help`}>PNG, JPEG, or WebP up to 5 MB. Fitted to 128 × 128 on this device and stored inside your encrypted vault.</small>
+              </div>
+              <div className="account-editor-custom-logo-actions">
+                <label className="account-editor-logo-upload">
+                  <input
+                    ref={logoInputRef}
+                    type="file"
+                    accept={ACCOUNT_LOGO_ACCEPT}
+                    aria-describedby={`${iconPickerId}-upload-help`}
+                    onChange={uploadLogo}
+                  />
+                  <span>{logoBusy ? "Processing…" : iconDataUrl ? "Replace logo" : "Upload logo"}</span>
+                </label>
+                {iconDataUrl && <button type="button" onClick={removeUploadedLogo}>Remove upload</button>}
+              </div>
+              {logoBusy && <span className="account-editor-logo-status" role="status">Processing logo…</span>}
+              {logoError && <span className="account-editor-logo-error" role="alert">{logoError}</span>}
+            </div>
+            <SavedLogoPicker logos={customLogos} selected={iconDataUrl} onSelect={(dataUrl) => {
+              logoRequestRef.current += 1;
+              setIconBrand("");
+              setIconDataUrl(dataUrl);
+              setLogoError("");
+            }} />
+          </fieldset>
+
+          <fieldset className="account-editor-section" disabled={busy}>
+            <legend>Account information</legend>
+            <div className="account-editor-grid">
+              <label><span>Service name</span><input ref={serviceInputRef} value={service} onChange={(event) => setService(event.target.value)} maxLength={256} /></label>
+              <label><span>Username</span><input value={identity} onChange={(event) => setIdentity(event.target.value)} maxLength={256} autoComplete="off" /></label>
+              <AccountUrlFields urls={urls} onChange={setUrls} disabled={busy} />
+            </div>
+          </fieldset>
+
+          <fieldset className="account-editor-section" disabled={busy}>
+            <legend>Secret key</legend>
+            <div className="account-editor-authentication-fields">
             <div className="account-editor-secret">
-              <label htmlFor={secretInputId}>Secret key</label>
+              <label className="visually-hidden" htmlFor={secretInputId}>Secret key</label>
               <span className="account-editor-secret-control">
                 <input id={secretInputId} ref={secretInputRef} type={showSecret ? "text" : "password"} value={secret} onChange={(event) => changeSecret(event.target.value)} maxLength={1_280} autoComplete="off" spellCheck={false} aria-describedby={secretTestFeedbackId} />
                 <button type="button" onClick={() => setShowSecret((shown) => !shown)} aria-pressed={showSecret}>{showSecret ? "Hide" : "Show"}</button>
                 <button className="account-editor-test-secret" type="button" onClick={() => void testSecret()} disabled={secretTestDisabled} aria-describedby={secretTestFeedbackId}>{secretTestBusy ? "Testing…" : "Test"}</button>
               </span>
+              {showSecret && <AccountSetupQr issuer={service} account={identity} secret={secret} algorithm={algorithm} digits={digits} period={period} />}
               {secretTestFeedback.status === "success" ? (
                 <p id={secretTestFeedbackId} className="account-editor-secret-test-feedback success" role="status" aria-live="polite" aria-atomic="true">
                   <span>Test code</span>
@@ -533,10 +562,17 @@ function AccountEditorForm({ account, brandOptions, codePreview, onClose, onSave
                 <p>Codes use the saved settings until you save these changes.</p>
               </div>
             )}
-            <label><span>Digits</span><select value={digits} onChange={(event) => changeDigits(Number(event.target.value) as 6 | 8)}><option value="6">6 digits</option><option value="8">8 digits</option></select></label>
-            <label><span>Algorithm</span><select value={algorithm} onChange={(event) => changeAlgorithm(event.target.value as TotpAlgorithm)}><option value="SHA-1">SHA-1</option><option value="SHA-256">SHA-256</option><option value="SHA-512">SHA-512</option></select></label>
-            <label><span>Period</span><span className="account-editor-period"><input type="number" min={1} max={300} step={1} value={period} onChange={(event) => changePeriod(Number(event.target.value))} /><small>seconds</small></span></label>
-          </div>
+            </div>
+          </fieldset>
+
+          <fieldset className="account-editor-section" disabled={busy}>
+            <legend>TOTP settings</legend>
+            <div className="account-editor-grid">
+              <label><span>Digits</span><select value={digits} onChange={(event) => changeDigits(Number(event.target.value) as 6 | 8)}><option value="6">6 digits</option><option value="8">8 digits</option></select></label>
+              <label><span>Algorithm</span><select value={algorithm} onChange={(event) => changeAlgorithm(event.target.value as TotpAlgorithm)}><option value="SHA-1">SHA-1</option><option value="SHA-256">SHA-256</option><option value="SHA-512">SHA-512</option></select></label>
+              <label><span>Period</span><span className="account-editor-period"><input type="number" min={1} max={300} step={1} value={period} onChange={(event) => changePeriod(Number(event.target.value))} /><small>seconds</small></span></label>
+            </div>
+          </fieldset>
 
           {error && <p className="account-editor-error" role="alert">{error}</p>}
           <footer className="account-editor-actions">
@@ -549,7 +585,7 @@ function AccountEditorForm({ account, brandOptions, codePreview, onClose, onSave
   );
 }
 
-export default function AccountEditor({ account, brandOptions, codePreview, onClose, onSave, returnFocusTo, renderIcon }: AccountEditorProps) {
+export default function AccountEditor({ account, brandOptions, customLogos, codePreview, onClose, onSave, returnFocusTo, renderIcon }: AccountEditorProps) {
   if (!account) return null;
-  return <AccountEditorForm key={account.id} account={account} brandOptions={brandOptions} codePreview={codePreview} onClose={onClose} onSave={onSave} returnFocusTo={returnFocusTo} renderIcon={renderIcon} />;
+  return <AccountEditorForm key={account.id} account={account} brandOptions={brandOptions} customLogos={customLogos} codePreview={codePreview} onClose={onClose} onSave={onSave} returnFocusTo={returnFocusTo} renderIcon={renderIcon} />;
 }

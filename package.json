@@ -1,12 +1,13 @@
 {
   "name": "coffer-authenticator",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "private": true,
   "license": "GPL-3.0-only",
   "engines": {
     "node": ">=22.13.0"
   },
   "scripts": {
+    "test": "node scripts/test-account-flows.mjs",
     "brands:generate": "node scripts/generate-service-brands.mjs",
     "prebuild": "npm run brands:generate",
     "dev": "cross-env COFFER_LOCAL_STANDALONE=1 WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
@@ -18,6 +19,7 @@
     "hash-wasm": "4.12.0",
     "jsqr": "1.4.0",
     "openid-client": "6.8.8",
+    "qrcode-generator": "2.0.4",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
@@ -34,6 +36,7 @@
     "@vitejs/plugin-react": "6.1.0",
     "@vitejs/plugin-rsc": "0.5.34",
     "cross-env": "^10.1.0",
+    "esbuild": "0.28.1",
     "eslint": "9.39.4",
     "eslint-plugin-jsx-a11y": "6.10.2",
     "eslint-plugin-react": "7.37.5",

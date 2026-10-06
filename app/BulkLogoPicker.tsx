@@ -11,6 +11,8 @@ import {
   type FormEvent,
 } from "react";
 import { accountEditorReturnFocusTarget } from "../lib/account-editor";
+import type { SavedCustomLogo } from "../lib/custom-logos";
+import SavedLogoPicker from "./SavedLogoPicker";
 import {
   MAX_VAULT_ACCOUNT_ICON_BYTES,
   type VaultAccount,
@@ -35,6 +37,7 @@ export type BulkLogoPickerProps = {
   open: boolean;
   selectedCount: number;
   brandOptions: readonly AccountIconOption[];
+  customLogos: readonly SavedCustomLogo[];
   /** Shared platform used to seed suggestions when the search is empty. */
   suggestedService?: string | null;
   /**
@@ -74,9 +77,23 @@ export function retainedAccountIconBytes(
   );
 }
 
+export function validateBulkCustomLogoCapacity(dataUrl: string, selectedCount: number, retainedCustomLogoBytes: number) {
+  if (!Number.isSafeInteger(selectedCount) || selectedCount < 1) {
+    throw new Error("Select at least one account to change its logo.");
+  }
+  const retainedBytes = Math.max(0, Math.floor(retainedCustomLogoBytes));
+  const copiedBytes = accountIconDataUrlBytes(dataUrl) * selectedCount;
+  if (!Number.isSafeInteger(retainedBytes) || retainedBytes + copiedBytes > MAX_VAULT_ACCOUNT_ICON_BYTES) {
+    throw new Error(
+      `This logo would exceed the encrypted vault's 2 MB custom-logo limit when applied to ${selectedCount} ${selectedCount === 1 ? "account" : "accounts"}.`,
+    );
+  }
+}
+
 function BulkLogoPickerDialog({
   selectedCount,
   brandOptions,
+  customLogos,
   suggestedService,
   retainedCustomLogoBytes,
   previewAccount,
@@ -218,6 +235,22 @@ function BulkLogoPickerDialog({
     if (logoInputRef.current) logoInputRef.current.value = "";
   };
 
+  const chooseSavedLogo = (dataUrl: string) => {
+    logoRequestRef.current += 1;
+    setLogoBusy(false);
+    setLogoError("");
+    setError("");
+    if (logoInputRef.current) logoInputRef.current.value = "";
+    try {
+      validateBulkCustomLogoCapacity(dataUrl, selectedCount, retainedCustomLogoBytes);
+      setChoice("custom");
+      setIconBrand("");
+      setIconDataUrl(dataUrl);
+    } catch (caught) {
+      setLogoError(caught instanceof Error ? caught.message : "The selected logo could not be processed.");
+    }
+  };
+
   const uploadLogo = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0];
     event.currentTarget.value = "";
@@ -231,13 +264,7 @@ function BulkLogoPickerDialog({
     try {
       const nextIconDataUrl = await prepareAccountLogo(file);
       if (logoRequestRef.current !== request) return;
-      const retainedBytes = Math.max(0, Math.floor(retainedCustomLogoBytes));
-      const copiedBytes = accountIconDataUrlBytes(nextIconDataUrl) * selectedCount;
-      if (!Number.isSafeInteger(retainedBytes) || retainedBytes + copiedBytes > MAX_VAULT_ACCOUNT_ICON_BYTES) {
-        throw new Error(
-          `This logo would exceed the encrypted vault's 2 MB custom-logo limit when applied to ${selectedCount} ${selectedCount === 1 ? "account" : "accounts"}.`,
-        );
-      }
+      validateBulkCustomLogoCapacity(nextIconDataUrl, selectedCount, retainedCustomLogoBytes);
       setChoice("custom");
       setIconBrand("");
       setIconDataUrl(nextIconDataUrl);
@@ -255,6 +282,10 @@ function BulkLogoPickerDialog({
     setError("");
     setBusy(true);
     try {
+      if (choice === "custom") {
+        if (!iconDataUrl) throw new Error("Choose an uploaded or saved custom logo.");
+        validateBulkCustomLogoCapacity(iconDataUrl, selectedCount, retainedCustomLogoBytes);
+      }
       const accepted = await onApply({
         iconBrand: choice === "catalog" ? iconBrand : null,
         iconDataUrl: choice === "custom" ? iconDataUrl : null,
@@ -314,16 +345,18 @@ function BulkLogoPickerDialog({
         </header>
 
         <form className="account-editor-form" onSubmit={submit}>
+          <fieldset className="account-editor-logo-fieldset account-editor-section" disabled={unavailable}>
+            <legend>Platform logo</legend>
           <div className="account-editor-icon-row">
             <ServiceLogo
               color={preview.color}
               fallback={preview.letter}
               service={preview.service}
               brandId={previewBrand}
-              iconDataUrl={choice === "custom" ? iconDataUrl : null}
+              iconDataUrl={null}
             />
             <div className="account-editor-icon-picker">
-              <label htmlFor={`${pickerId}-search`}>Platform logo</label>
+              <label htmlFor={`${pickerId}-search`}>Search platform logos</label>
               <input
                 ref={searchInputRef}
                 id={`${pickerId}-search`}
@@ -336,7 +369,7 @@ function BulkLogoPickerDialog({
                 autoComplete="off"
               />
               <small>{choice === "custom"
-                ? "Uploaded logo ready for the selected accounts."
+                ? "A custom logo is selected. Choose a platform logo below to replace it."
                 : selectedOption
                   ? `${selectedOption.label}${selectedOption.description ? ` — ${selectedOption.description}` : ""} selected from Coffer's local catalog.`
                   : query.trim()
@@ -348,32 +381,6 @@ function BulkLogoPickerDialog({
                       : "Automatic matching keeps each account linked to its own service name."}</small>
             </div>
           </div>
-
-          <fieldset className="account-editor-logo-fieldset" disabled={unavailable}>
-            <legend>Choose platform logo</legend>
-            <div className="account-editor-custom-logo" aria-busy={logoBusy}>
-              <div>
-                <strong>Custom logo</strong>
-                <small id={`${pickerId}-upload-help`}>PNG, JPEG, or WebP up to 5 MB. Fitted to 128 × 128 and safely checked against the encrypted vault&apos;s logo limit.</small>
-              </div>
-              <div className="account-editor-custom-logo-actions">
-                <label className="account-editor-logo-upload">
-                  <input
-                    ref={logoInputRef}
-                    type="file"
-                    accept={ACCOUNT_LOGO_ACCEPT}
-                    aria-describedby={`${pickerId}-upload-help`}
-                    onChange={uploadLogo}
-                  />
-                  <span>{logoBusy ? "Processing…" : iconDataUrl ? "Replace logo" : "Upload logo"}</span>
-                </label>
-                {choice === "custom" && (
-                  <button type="button" onClick={automatic}>Remove upload</button>
-                )}
-              </div>
-              {logoBusy && <span className="account-editor-logo-status" role="status">Processing logo…</span>}
-              {logoError && <span className="account-editor-logo-error" role="alert">{logoError}</span>}
-            </div>
 
             <div className="account-editor-logo-grid">
               <label className="account-editor-logo-option">
@@ -413,6 +420,40 @@ function BulkLogoPickerDialog({
                 </label>
               ))}
             </div>
+          </fieldset>
+
+          <fieldset className="account-editor-logo-fieldset account-editor-section" disabled={unavailable}>
+            <legend>Custom logo</legend>
+            {choice === "custom" && iconDataUrl && (
+              <div className="account-editor-custom-logo-preview">
+                <ServiceLogo color={preview.color} fallback={preview.letter} service={preview.service} iconDataUrl={iconDataUrl} />
+                <small>Uploaded logo ready for the selected accounts.</small>
+              </div>
+            )}
+            <div className="account-editor-custom-logo" aria-busy={logoBusy}>
+              <div>
+                <strong>Upload logo</strong>
+                <small id={`${pickerId}-upload-help`}>PNG, JPEG, or WebP up to 5 MB. Fitted to 128 × 128 and safely checked against the encrypted vault&apos;s logo limit.</small>
+              </div>
+              <div className="account-editor-custom-logo-actions">
+                <label className="account-editor-logo-upload">
+                  <input
+                    ref={logoInputRef}
+                    type="file"
+                    accept={ACCOUNT_LOGO_ACCEPT}
+                    aria-describedby={`${pickerId}-upload-help`}
+                    onChange={uploadLogo}
+                  />
+                  <span>{logoBusy ? "Processing…" : iconDataUrl ? "Replace logo" : "Upload logo"}</span>
+                </label>
+                {choice === "custom" && (
+                  <button type="button" onClick={automatic}>Remove upload</button>
+                )}
+              </div>
+              {logoBusy && <span className="account-editor-logo-status" role="status">Processing logo…</span>}
+              {logoError && <span className="account-editor-logo-error" role="alert">{logoError}</span>}
+            </div>
+            <SavedLogoPicker logos={customLogos} selected={choice === "custom" ? iconDataUrl : null} onSelect={chooseSavedLogo} />
           </fieldset>
 
           {error && <p className="account-editor-error" role="alert">{error}</p>}

@@ -63,6 +63,7 @@ export type VaultGroupCustomization = {
 
 export type VaultMainScreen =
   | { kind: "all" }
+  | { kind: "favorites" }
   | { kind: "group"; group: string };
 
 export type VaultAccount = {
@@ -387,9 +388,9 @@ type SupportedVaultPayloadVersion =
 
 function parseMainScreen(value: unknown): VaultMainScreen {
   if (!isRecord(value)) throw new Error("settings.mainScreen is invalid");
-  if (value.kind === "all") {
+  if (value.kind === "all" || value.kind === "favorites") {
     requireExactFields(value, ["kind"], "settings.mainScreen");
-    return { kind: "all" };
+    return { kind: value.kind };
   }
   if (value.kind === "group") {
     requireExactFields(value, ["kind", "group"], "settings.mainScreen");
@@ -607,7 +608,7 @@ function reconcileMainScreen(
   accounts: readonly VaultAccount[],
   groupCustomizations: readonly VaultGroupCustomization[],
 ): VaultMainScreen {
-  if (mainScreen.kind === "all") return mainScreen;
+  if (mainScreen.kind !== "group") return mainScreen;
   const visibleGroups = visibleMainScreenGroupNames(accounts, groupCustomizations);
   const visibleByKey = new Map(visibleGroups.map((name) => [orderedGroupKey(name), name]));
   const group = visibleByKey.get(orderedGroupKey(mainScreen.group));
