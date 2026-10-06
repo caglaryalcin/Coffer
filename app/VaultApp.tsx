@@ -27,7 +27,7 @@ import { clearVaultResumeSession, readRememberedVaultResumeHint, readVaultResume
 import { remainingAutoLockMs } from "../lib/auto-lock";
 import type { EditableAccountPatch } from "../lib/account-editor";
 import { reorderVisibleAccounts, type AccountDropEdge } from "../lib/account-order";
-import { appendGroupToOrder, mergeVisibleGroupOrder, moveGroupName, orderedVisibleGroupNames, removeGroupFromOrder, renameGroupInOrder, type GroupDropEdge } from "../lib/group-order";
+import { appendGroupToOrder, mergeVisibleGroupOrder, moveGroupName, orderedVisibleGroupNames, renameGroupInOrder, type GroupDropEdge } from "../lib/group-order";
 import {
   beginVaultSessionTransition,
   classifyVaultSaveRecovery,
@@ -315,24 +315,6 @@ function RestoreCodesIcon({ className }: { className: string }) {
   );
 }
 
-function SidebarChevronIcon({ className }: { className: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path d="m14.5 6-6 6 6 6" />
-    </svg>
-  );
-}
-
 function resumePersistenceForRememberLogin(rememberLogin: boolean): VaultResumePersistence {
   return rememberLogin ? "remembered" : "session";
 }
@@ -452,6 +434,25 @@ async function settleWithin<T>(
 }
 
 const EMPTY_GROUP_CUSTOMIZATIONS: VaultGroupCustomization[] = [];
+const SIDEBAR_WIDTH_STORAGE_KEY = "coffer:sidebar-width:v1";
+const DEFAULT_SIDEBAR_WIDTH = 248;
+const MIN_SIDEBAR_WIDTH = 210;
+const MAX_SIDEBAR_WIDTH = 420;
+const REMEMBERED_SESSION_DEADLINE_RECHECK_MS = 60 * 60 * 1_000;
+
+function clampSidebarWidth(width: number) {
+  return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(width)));
+}
+
+function readSidebarWidth() {
+  if (typeof window === "undefined") return DEFAULT_SIDEBAR_WIDTH;
+  try {
+    const stored = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
+    return Number.isFinite(stored) && stored > 0 ? clampSidebarWidth(stored) : DEFAULT_SIDEBAR_WIDTH;
+  } catch {
+    return DEFAULT_SIDEBAR_WIDTH;
+  }
+}
 const NEW_GROUP_CUSTOMIZATION: VaultGroupCustomization = { name: "", icon: "folder", color: "rose" };
 const DEFAULT_GROUP_ICONS: readonly VaultGroupIcon[] = ["dot", "folder", "briefcase", "person", "shield", "star", "home", "code"];
 const DEFAULT_GROUP_COLORS: readonly VaultGroupColor[] = ["rose", "amber", "lime", "emerald", "sky", "blue", "violet", "slate"];
@@ -464,6 +465,52 @@ const COMMON_GROUP_STYLES: Readonly<Record<string, Pick<VaultGroupCustomization,
 
 function groupKey(value: string) {
   return normalizeGroupName(value).normalize("NFKC").toLocaleLowerCase("en");
+}
+
+const GROUP_PATH_SEPARATOR = " / ";
+
+function groupParentName(value: string) {
+  const separatorIndex = value.lastIndexOf(GROUP_PATH_SEPARATOR);
+  return separatorIndex < 0 ? null : value.slice(0, separatorIndex);
+}
+
+function groupDisplayName(value: string) {
+  const separatorIndex = value.lastIndexOf(GROUP_PATH_SEPARATOR);
+  return separatorIndex < 0 ? value : value.slice(separatorIndex + GROUP_PATH_SEPARATOR.length);
+}
+
+function groupDepth(value: string) {
+  return value.split(GROUP_PATH_SEPARATOR).length - 1;
+}
+
+function groupIsInBranch(candidate: string, branchRoot: string) {
+  const candidateKey = groupKey(candidate);
+  const rootKey = groupKey(branchRoot);
+  return candidateKey === rootKey || candidateKey.startsWith(`${rootKey}${GROUP_PATH_SEPARATOR}`);
+}
+
+function renameGroupBranchName(candidate: string, previousRoot: string, nextRoot: string) {
+  if (groupKey(candidate) === groupKey(previousRoot)) return nextRoot;
+  const suffix = candidate.split(GROUP_PATH_SEPARATOR).slice(groupDepth(previousRoot) + 1);
+  return [nextRoot, ...suffix].join(GROUP_PATH_SEPARATOR);
+}
+
+function hierarchicalGroupNames(groupNames: readonly string[]) {
+  const available = new Set(groupNames.map(groupKey));
+  const children = new Map<string, string[]>();
+  const roots: string[] = [];
+  for (const name of groupNames) {
+    const parent = groupParentName(name);
+    if (!parent || !available.has(groupKey(parent))) roots.push(name);
+    else children.set(groupKey(parent), [...(children.get(groupKey(parent)) ?? []), name]);
+  }
+  const result: string[] = [];
+  const append = (name: string) => {
+    result.push(name);
+    for (const child of children.get(groupKey(name)) ?? []) append(child);
+  };
+  for (const root of roots) append(root);
+  return result;
 }
 
 function defaultMainScreenGroup(vault: PersistedVault): "All" | Group {
@@ -489,7 +536,7 @@ function sidebarMenuPositionFromTrigger(target: SidebarMenuTarget, trigger: HTML
   const viewportMargin = 8;
   const menuGap = 6;
   const menuWidth = 205;
-  const menuHeight = target.kind === "group" ? 140 : 54;
+  const menuHeight = target.kind === "group" ? 184 : 54;
   const menuLeft = rect.left + (rect.width / 2) - 4;
   const belowTop = rect.bottom + menuGap;
   const fitsBelow = belowTop + menuHeight <= window.innerHeight - viewportMargin;
@@ -585,7 +632,8 @@ export default function VaultApp() {
   const [group, setGroup] = useState<"All" | Group>("All");
   const [view, setView] = useState<View>("all");
   const [cardView, setCardView] = useState<CardView>("default");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
+  const [resizingSidebar, setResizingSidebar] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
@@ -611,6 +659,7 @@ export default function VaultApp() {
   const [bulkUrlReturnFocusTo, setBulkUrlReturnFocusTo] = useState<HTMLButtonElement | null>(null);
   const [customizingGroup, setCustomizingGroup] = useState<string | null>(null);
   const [creatingGroup, setCreatingGroup] = useState(false);
+  const [creatingSubgroupParent, setCreatingSubgroupParent] = useState<string | null>(null);
   const [groupCustomizationReturnFocusTo, setGroupCustomizationReturnFocusTo] = useState<HTMLElement | null>(null);
   const [setupLink, setSetupLink] = useState("");
   const [service, setService] = useState("");
@@ -659,6 +708,7 @@ export default function VaultApp() {
   const groupDragNameRef = useRef<string | null>(null);
   const suppressGroupClickRef = useRef(false);
   const groupClickResetFrameRef = useRef<number | null>(null);
+  const sidebarResizeStartRef = useRef<{ pointerX: number; width: number } | null>(null);
   const sessionGenerationRef = useRef(0);
   const sessionTransitionRef = useRef<VaultSessionTransition>({
     epoch: 0,
@@ -690,6 +740,16 @@ export default function VaultApp() {
     setDragOverPrimaryTarget(null);
     setAccountDropTarget(null);
   }, []);
+
+  const updateSidebarWidth = (width: number) => {
+    const nextWidth = clampSidebarWidth(width);
+    setSidebarWidth(nextWidth);
+    try {
+      window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(nextWidth));
+    } catch {
+      // Sidebar resizing still works when browser storage is unavailable.
+    }
+  };
 
   const clearGroupDrag = useCallback(() => {
     groupDragNameRef.current = null;
@@ -777,6 +837,7 @@ export default function VaultApp() {
     groupCustomizations,
     vault?.groupOrder ?? [],
   ), [accounts, groupCustomizations, vault?.groupOrder]);
+  const sidebarGroups = useMemo(() => hierarchicalGroupNames(groups), [groups]);
   const entryGroups = useMemo(() => {
     const names = new Map<string, string>();
     for (const name of ["Personal", "Work", "Finance", ...groups]) {
@@ -793,7 +854,9 @@ export default function VaultApp() {
   ), [groupCustomizationMap]);
   const activeGroupCustomization = creatingGroup
     ? NEW_GROUP_CUSTOMIZATION
-    : customizingGroup ? customizationForGroup(customizingGroup) : null;
+    : customizingGroup
+      ? { ...customizationForGroup(customizingGroup), name: groupDisplayName(customizingGroup) }
+      : null;
   const editingCodePreview = editingAccount && signedIn
     ? accountCodePreview(editingAccount, tick, codePairs[editingAccount.id])
     : undefined;
@@ -1489,6 +1552,7 @@ export default function VaultApp() {
     isAttemptActive?: () => boolean,
     loginIdentifier?: string,
     resumePersistence: VaultResumePersistence = "session",
+    rememberedSessionExpiresAt?: number,
   ): Promise<PersistedVault> => {
     await prepareOpeningSession(transitionEpoch);
 
@@ -1669,6 +1733,13 @@ export default function VaultApp() {
 
       ensureTransitionActive();
       const mutationVersion = staged ? staged.version : 0;
+      resumePersistenceRef.current = resumePersistence;
+      if (
+        resumePersistence === "remembered" &&
+        rememberedSessionExpiresAt !== undefined
+      ) {
+        resumeAbsoluteExpiresAtRef.current = rememberedSessionExpiresAt;
+      }
       publishReadySession({
         transitionEpoch,
         generation,
@@ -1683,7 +1754,6 @@ export default function VaultApp() {
         saveStatus: nextStatus,
         saveError: nextError,
       });
-      resumePersistenceRef.current = resumePersistence;
       return nextVault;
     } catch (error) {
       const stillOwnsTransition = isVaultSessionTransition(
@@ -2620,6 +2690,7 @@ export default function VaultApp() {
                 () => active,
                 rememberedHint.loginIdentifier,
                 "remembered",
+                resumed.absoluteExpiresAt,
               );
               if (!active) return;
               resumeAvailableRef.current = true;
@@ -2686,6 +2757,7 @@ export default function VaultApp() {
               () => active,
               resumed.loginIdentifier,
               resumed.persistence,
+              resumed.persistence === "remembered" ? resumed.absoluteExpiresAt : undefined,
             );
             if (!active) return;
             resumeAvailableRef.current = true;
@@ -2838,6 +2910,23 @@ export default function VaultApp() {
 
     const evaluateDeadline = () => {
       window.clearTimeout(timeout);
+      if (resumePersistenceRef.current === "remembered") {
+        const absoluteExpiresAt = resumeAbsoluteExpiresAtRef.current;
+        if (absoluteExpiresAt <= 0) {
+          timeout = window.setTimeout(evaluateDeadline, 1_000);
+          return;
+        }
+        const remaining = absoluteExpiresAt - Date.now();
+        if (remaining <= 0) {
+          void lockVault();
+          return;
+        }
+        timeout = window.setTimeout(
+          evaluateDeadline,
+          Math.min(remaining, REMEMBERED_SESSION_DEADLINE_RECHECK_MS),
+        );
+        return;
+      }
       const current = now();
       const lastActivity = lastActivityAtRef.current ?? current;
       lastActivityAtRef.current ??= current;
@@ -2851,6 +2940,11 @@ export default function VaultApp() {
     };
 
     const recordActivity = () => {
+      if (resumePersistenceRef.current === "remembered") {
+        touchOrRestoreResumeSession();
+        evaluateDeadline();
+        return;
+      }
       const current = now();
       const previous = lastActivityAtRef.current ?? current;
       const remaining = remainingAutoLockMs(previous, current, autoLockMinutes);
@@ -2864,6 +2958,10 @@ export default function VaultApp() {
     };
 
     const handleVisibility = () => {
+      if (resumePersistenceRef.current === "remembered") {
+        if (!document.hidden) evaluateDeadline();
+        return;
+      }
       const transition = hiddenLockTransition(
         hiddenLockArmedRef.current,
         document.hidden,
@@ -3144,6 +3242,26 @@ export default function VaultApp() {
   );
   const retainedCustomLogoBytes = retainedAccountIconBytes(accounts, selectedVisibleAccountIds);
 
+  useEffect(() => {
+    const selectAllVisibleAccounts = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLowerCase() !== "a") return;
+      const target = event.target instanceof Element ? event.target : null;
+      const isTyping = Boolean(target?.closest('input, textarea, select, [contenteditable="true"]'));
+      const accountViewOpen = view === "all" || view === "favorites" || view === "archive";
+      if (isTyping || !accountViewOpen || selectableVisibleIds.length === 0) return;
+      if (document.querySelector('[aria-modal="true"]')) return;
+
+      event.preventDefault();
+      setAccountMenuId(null);
+      setSidebarMenuTarget(null);
+      setSelectedAccountIds(new Set(selectableVisibleIds));
+      setSelectionMode(true);
+    };
+
+    window.addEventListener("keydown", selectAllVisibleAccounts);
+    return () => window.removeEventListener("keydown", selectAllVisibleAccounts);
+  }, [selectableVisibleIds, view]);
+
   const exitSelectionMode = () => {
     setSelectionMode(false);
     setSelectedAccountIds(new Set());
@@ -3258,6 +3376,7 @@ export default function VaultApp() {
     setSidebarMenuTarget(null);
     setGroupCustomizationReturnFocusTo(returnTarget);
     setCreatingGroup(false);
+    setCreatingSubgroupParent(null);
     setCustomizingGroup(name);
   };
 
@@ -3279,12 +3398,19 @@ export default function VaultApp() {
     setSidebarMenuTarget(null);
     setGroupCustomizationReturnFocusTo(trigger);
     setCustomizingGroup(null);
+    setCreatingSubgroupParent(null);
     setCreatingGroup(true);
+  };
+
+  const beginSubgroupCreation = (parentName: string, trigger: HTMLElement) => {
+    beginGroupCreation(trigger);
+    setCreatingSubgroupParent(parentName);
   };
 
   const closeGroupCustomization = () => {
     setCustomizingGroup(null);
     setCreatingGroup(false);
+    setCreatingSubgroupParent(null);
     setGroupCustomizationReturnFocusTo(null);
   };
 
@@ -3300,7 +3426,9 @@ export default function VaultApp() {
       return false;
     }
 
-    const normalized = normalizeGroupName(nextCustomization.name);
+    const parentName = creatingGroup ? creatingSubgroupParent : customizingGroup ? groupParentName(customizingGroup) : null;
+    const leafName = normalizeGroupName(nextCustomization.name);
+    const normalized = parentName ? `${parentName}${GROUP_PATH_SEPARATOR}${leafName}` : leafName;
     const normalizedKey = groupKey(normalized);
     if (!normalized || normalized.length > 48 || normalizedKey === "all") {
       setToast("Use a group name between 1 and 48 characters. “All” is reserved.");
@@ -3318,8 +3446,8 @@ export default function VaultApp() {
 
     const currentVault = vaultRef.current;
     if (!currentVault) return false;
-    const currentNameExists = (nameKey: string) => (
-      currentVault.accounts.some((account) => groupKey(account.group) === nameKey) ||
+    const currentVisibleNameExists = (nameKey: string) => (
+      currentVault.accounts.some((account) => !account.archived && groupKey(account.group) === nameKey) ||
       currentVault.groupCustomizations.some((customization) => groupKey(customization.name) === nameKey)
     );
 
@@ -3328,11 +3456,24 @@ export default function VaultApp() {
         setToast("The vault has reached the maximum number of saved groups.");
         return false;
       }
-      if (currentNameExists(normalizedKey)) {
+      if (currentVisibleNameExists(normalizedKey)) {
         setToast("That group already exists.");
         return false;
       }
+      const selectedForNewGroup = selectionMode
+        ? new Set(selectedVisibleAccountIds)
+        : new Set<string>();
+      const movedCount = currentVault.accounts.filter((account) => (
+        selectedForNewGroup.has(account.id) &&
+        !account.archived &&
+        groupKey(account.group) !== normalizedKey
+      )).length;
       const saved = commitVault((current) => withVaultUpdate(current, {
+        accounts: current.accounts.map((account) => (
+          selectedForNewGroup.has(account.id) && !account.archived
+            ? { ...account, group: normalized }
+            : account
+        )),
         groupCustomizations: [...current.groupCustomizations, {
           name: normalized,
           icon: nextCustomization.icon,
@@ -3343,6 +3484,7 @@ export default function VaultApp() {
       if (!saved) return false;
 
       closeGroupCustomization();
+      if (selectionMode) exitSelectionMode();
       setView("all");
       setGroup(normalized);
       window.requestAnimationFrame(() => {
@@ -3350,15 +3492,17 @@ export default function VaultApp() {
           .find((button) => button.dataset.groupName === normalized);
         nextButton?.focus({ preventScroll: true });
       });
-      setToast(`${normalized} group created.`);
+      setToast(movedCount > 0
+        ? `${normalized} group created. ${movedCount} ${movedCount === 1 ? "account" : "accounts"} moved to ${normalized}.`
+        : `${normalized} group created.`);
       return true;
     }
 
-    if (!previousName || !previousKey || !currentNameExists(previousKey)) {
+    if (!previousName || !previousKey || !currentVisibleNameExists(previousKey)) {
       setToast("This group is no longer available.");
       return false;
     }
-    if (normalizedKey !== previousKey && currentNameExists(normalizedKey)) {
+    if (normalizedKey !== previousKey && currentVisibleNameExists(normalizedKey)) {
       setToast("That group already exists.");
       return false;
     }
@@ -3366,16 +3510,20 @@ export default function VaultApp() {
     const saved = commitVault((current) => {
       const nextGroupCustomizations = current.groupCustomizations.filter((customization) => (
         groupKey(customization.name) !== previousKey && groupKey(customization.name) !== normalizedKey
-      ));
+      )).map((customization) => groupIsInBranch(customization.name, previousName)
+        ? { ...customization, name: renameGroupBranchName(customization.name, previousName, normalized) }
+        : customization);
       const mainScreen = current.settings.mainScreen;
       return withVaultUpdate(current, {
         accounts: current.accounts.map((account) => (
-          groupKey(account.group) === previousKey ? { ...account, group: normalized } : account
+          groupIsInBranch(account.group, previousName)
+            ? { ...account, group: renameGroupBranchName(account.group, previousName, normalized) }
+            : account
         )),
         settings: {
           ...current.settings,
-          mainScreen: mainScreen.kind === "group" && groupKey(mainScreen.group) === previousKey
-            ? { kind: "group", group: normalized }
+          mainScreen: mainScreen.kind === "group" && groupIsInBranch(mainScreen.group, previousName)
+            ? { kind: "group", group: renameGroupBranchName(mainScreen.group, previousName, normalized) }
             : mainScreen,
         },
         groupCustomizations: [...nextGroupCustomizations, {
@@ -3383,12 +3531,20 @@ export default function VaultApp() {
           icon: nextCustomization.icon,
           color: nextCustomization.color,
         }],
-        groupOrder: renameGroupInOrder(current.groupOrder, previousName, normalized),
+        groupOrder: renameGroupInOrder(
+          current.groupOrder.map((name) => groupIsInBranch(name, previousName)
+            ? renameGroupBranchName(name, previousName, normalized)
+            : name),
+          previousName,
+          normalized,
+        ),
       });
     });
     if (!saved) return false;
 
-    if (groupKey(group) === previousKey) setGroup(normalized);
+    if (group !== "All" && groupIsInBranch(group, previousName)) {
+      setGroup(renameGroupBranchName(group, previousName, normalized));
+    }
     closeGroupCustomization();
     if (normalized !== previousName) {
       window.requestAnimationFrame(() => {
@@ -3412,13 +3568,11 @@ export default function VaultApp() {
       return "Unlock your vault before deleting groups.";
     }
 
-    const deletedKey = groupKey(deletedName);
     const currentVault = vaultRef.current;
     if (!currentVault) return "Unlock your vault before deleting groups.";
-    if (currentVault.accounts.some((account) => groupKey(account.group) === deletedKey)) {
-      return "Move every active and archived account to another group before deleting this group.";
-    }
-    if (!currentVault.groupCustomizations.some((customization) => groupKey(customization.name) === deletedKey)) {
+    const groupExists = currentVault.accounts.some((account) => groupIsInBranch(account.group, deletedName)) ||
+      currentVault.groupCustomizations.some((customization) => groupIsInBranch(customization.name, deletedName));
+    if (!groupExists) {
       return "This group is no longer available.";
     }
     return null;
@@ -3436,27 +3590,36 @@ export default function VaultApp() {
     const focusGroupName = deletedIndex >= 0
       ? groups[deletedIndex + 1] ?? groups[deletedIndex - 1] ?? null
       : null;
+    const archivedCount = vaultRef.current?.accounts.filter((account) => (
+      groupIsInBranch(account.group, deletedName) && !account.archived
+    )).length ?? 0;
 
     const saved = commitVault((current) => withVaultUpdate(current, {
+      accounts: current.accounts.map((account) => (
+        groupIsInBranch(account.group, deletedName) && !account.archived
+          ? { ...account, archived: true }
+          : account
+      )),
       settings: {
         ...current.settings,
         mainScreen: current.settings.mainScreen.kind === "group" &&
-          groupKey(current.settings.mainScreen.group) === deletedKey
+          groupIsInBranch(current.settings.mainScreen.group, deletedName)
           ? { kind: "all" }
           : current.settings.mainScreen,
       },
       groupCustomizations: current.groupCustomizations.filter(
-        (customization) => groupKey(customization.name) !== deletedKey,
+        (customization) => !groupIsInBranch(customization.name, deletedName),
       ),
-      groupOrder: removeGroupFromOrder(current.groupOrder, deletedName),
+      groupOrder: current.groupOrder.filter((name) => !groupIsInBranch(name, deletedName)),
     }));
     if (!saved) return false;
 
-    if (groupKey(group) === deletedKey) setGroup("All");
+    if (group !== "All" && groupIsInBranch(group, deletedName)) setGroup("All");
     setSidebarMenuTarget(null);
     setSidebarMenuPosition(null);
     setConfirmingSidebarGroupDeletion(null);
     closeGroupCustomization();
+    exitSelectionMode();
     window.requestAnimationFrame(() => {
       const nextGroup = focusGroupName
         ? Array.from(document.querySelectorAll<HTMLButtonElement>(".group-nav-main"))
@@ -3465,7 +3628,9 @@ export default function VaultApp() {
       (nextGroup ?? document.querySelector<HTMLButtonElement>(".primary-nav-main"))
         ?.focus({ preventScroll: true });
     });
-    setToast(`${deletedName} group deleted.`);
+    setToast(archivedCount > 0
+      ? `${deletedName} group deleted. ${archivedCount} ${archivedCount === 1 ? "account" : "accounts"} moved to Archive.`
+      : `${deletedName} group deleted.`);
     return true;
   };
 
@@ -3526,7 +3691,7 @@ export default function VaultApp() {
     const currentVault = vaultRef.current;
     if (!currentVault) return false;
     if (createGroup) {
-      const currentTargetExists = currentVault.accounts.some((account) => groupKey(account.group) === targetGroupKey) ||
+      const currentTargetExists = currentVault.accounts.some((account) => !account.archived && groupKey(account.group) === targetGroupKey) ||
         currentVault.groupCustomizations.some((customization) => groupKey(customization.name) === targetGroupKey);
       if (currentTargetExists) {
         setToast("That group already exists. Choose it from the existing groups list.");
@@ -3539,7 +3704,9 @@ export default function VaultApp() {
     }
     const selected = new Set(accountIds);
     const changed = new Set(accounts
-      .filter((account) => selected.has(account.id) && !account.archived && groupKey(account.group) !== targetGroupKey)
+      .filter((account) => selected.has(account.id) && (
+        account.archived || groupKey(account.group) !== targetGroupKey
+      ))
       .map((account) => account.id));
     const movedCount = changed.size;
     if (movedCount === 0) {
@@ -3549,8 +3716,8 @@ export default function VaultApp() {
     const saved = createGroup
       ? commitVault((current) => withVaultUpdate(current, {
           accounts: current.accounts.map((account) => (
-            changed.has(account.id) && !account.archived
-              ? { ...account, group: targetGroup }
+            changed.has(account.id)
+              ? { ...account, group: targetGroup, archived: false }
               : account
           )),
           groupCustomizations: [
@@ -3560,8 +3727,8 @@ export default function VaultApp() {
           groupOrder: appendGroupToOrder(current.groupOrder, targetGroup),
         }))
       : setAccounts((current) => current.map((account) =>
-        changed.has(account.id) && !account.archived
-          ? { ...account, group: targetGroup }
+        changed.has(account.id)
+          ? { ...account, group: targetGroup, archived: false }
           : account,
       ));
     if (!saved) return false;
@@ -3701,9 +3868,7 @@ export default function VaultApp() {
   const beginSelectedAccountDrag = (event: ReactDragEvent<HTMLElement>, accountId: string) => {
     const sourceAccount = accounts.find((account) => account.id === accountId);
     if (
-      view === "archive"
-      || !sourceAccount
-      || sourceAccount.archived
+      !sourceAccount
       || selectedAccountDragOriginRef.current !== accountId
     ) {
       event.preventDefault();
@@ -3739,7 +3904,7 @@ export default function VaultApp() {
   const canMoveAccountIdsToGroup = (accountIds: ReadonlySet<string>, groupName: string) => {
     const targetGroupKey = groupKey(groupName);
     return accounts.some((account) => (
-      accountIds.has(account.id) && !account.archived && groupKey(account.group) !== targetGroupKey
+      accountIds.has(account.id) && (account.archived || groupKey(account.group) !== targetGroupKey)
     ));
   };
 
@@ -3810,7 +3975,7 @@ export default function VaultApp() {
   };
 
   const dragSelectedAccountsOverAccount = (event: ReactDragEvent<HTMLElement>, targetAccountId: string) => {
-    if (!acceptsSelectedAccountDrag() || draggedAccountIdsRef.current.has(targetAccountId)) {
+    if (view === "archive" || !acceptsSelectedAccountDrag() || draggedAccountIdsRef.current.has(targetAccountId)) {
       setAccountDropTarget(null);
       setDragOverPrimaryTarget(null);
       return;
@@ -3834,7 +3999,7 @@ export default function VaultApp() {
   };
 
   const dropSelectedAccountsOnAccount = (event: ReactDragEvent<HTMLElement>, targetAccountId: string) => {
-    if (!acceptsSelectedAccountDrag() || draggedAccountIdsRef.current.has(targetAccountId)) return;
+    if (view === "archive" || !acceptsSelectedAccountDrag() || draggedAccountIdsRef.current.has(targetAccountId)) return;
     event.preventDefault();
     event.stopPropagation();
     const placement = accountDropTarget?.id === targetAccountId
@@ -4620,7 +4785,10 @@ export default function VaultApp() {
     : undefined;
 
   return (
-    <main className={`app-shell theme-${theme} ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${mobileSidebarOpen ? "mobile-sidebar-open" : ""}`}>
+    <main
+      className={`app-shell theme-${theme} ${mobileSidebarOpen ? "mobile-sidebar-open" : ""} ${resizingSidebar ? "sidebar-resizing" : ""}`}
+      style={{ "--sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}
+    >
       <aside
         ref={mobileSidebarRef}
         className="sidebar"
@@ -4630,17 +4798,41 @@ export default function VaultApp() {
         aria-label="Vault navigation"
         tabIndex={-1}
       >
-        <button
-          type="button"
-          className="sidebar-toggle"
-          onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
-          aria-controls="primary-sidebar"
-          aria-expanded={!sidebarCollapsed}
-          aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          <SidebarChevronIcon className="sidebar-toggle-icon" />
-        </button>
+        <div
+          className="sidebar-resize-handle"
+          role="slider"
+          aria-label="Resize sidebar"
+          aria-orientation="horizontal"
+          aria-valuemin={MIN_SIDEBAR_WIDTH}
+          aria-valuemax={MAX_SIDEBAR_WIDTH}
+          aria-valuenow={sidebarWidth}
+          tabIndex={0}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            sidebarResizeStartRef.current = { pointerX: event.clientX, width: sidebarWidth };
+            event.currentTarget.setPointerCapture(event.pointerId);
+            setResizingSidebar(true);
+          }}
+          onPointerMove={(event) => {
+            const start = sidebarResizeStartRef.current;
+            if (!start || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
+            updateSidebarWidth(start.width + event.clientX - start.pointerX);
+          }}
+          onPointerUp={(event) => {
+            sidebarResizeStartRef.current = null;
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+            setResizingSidebar(false);
+          }}
+          onPointerCancel={() => {
+            sidebarResizeStartRef.current = null;
+            setResizingSidebar(false);
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            event.preventDefault();
+            updateSidebarWidth(sidebarWidth + (event.key === "ArrowRight" ? 10 : -10));
+          }}
+        />
 
         <div className="brand">
           <button type="button" className="brand-home" onClick={() => { showMainScreen(); closeMobileSidebar(); }} aria-label="Go to default main screen" title="Default main screen">
@@ -4736,18 +4928,22 @@ export default function VaultApp() {
             type="button"
             className="group-add-button"
             onClick={(event) => beginGroupCreation(event.currentTarget)}
-            disabled={selectionMode}
-            aria-label="Create group"
+            aria-label={selectionMode && selectedVisibleAccountIds.size > 0
+              ? "Create a group and move selected accounts"
+              : "Create group"}
             aria-haspopup="dialog"
             aria-expanded={creatingGroup}
-            title={selectionMode ? "Finish selecting accounts before creating a group" : "Create group"}
+            title={selectionMode && selectedVisibleAccountIds.size > 0
+              ? "Create a group and move selected accounts"
+              : "Create group"}
           >
             <GroupAddIcon className="group-add-icon" />
           </button>
         </div>
         <nav className="group-nav" aria-labelledby="sidebar-groups-label">
-          {groups.map((name) => {
+          {sidebarGroups.map((name) => {
             const customization = customizationForGroup(name);
+            const depth = groupDepth(name);
             const active = view === "all" && groupKey(group) === groupKey(name);
             const groupTarget: SidebarMenuTarget = { kind: "group", name };
             const groupDefault = isDefaultMainScreen(groupTarget);
@@ -4767,6 +4963,7 @@ export default function VaultApp() {
               <div
                 key={name}
                 className={`group-nav-row ${active ? "active" : ""} ${groupDefault ? "main-screen-default" : ""} ${groupMenuOpen ? "menu-open" : ""} ${dropReady ? "drop-ready" : ""} ${dropTarget ? "drop-target" : ""} ${groupDragSource ? "group-drag-source" : ""} ${reorderBefore ? "reorder-before" : ""} ${reorderAfter ? "reorder-after" : ""}`}
+                style={{ "--group-depth": depth } as React.CSSProperties}
                 onBlur={(event) => {
                   if (!event.currentTarget.contains(event.relatedTarget)) {
                     setSidebarMenuTarget(null);
@@ -4791,7 +4988,7 @@ export default function VaultApp() {
                   className="group-nav-main"
                   data-group-name={name}
                   data-group-dragging={groupDragSource || undefined}
-                  draggable={!selectionMode && groups.length > 1}
+                  draggable={!selectionMode && depth === 0 && groups.length > 1}
                   aria-pressed={active}
                   aria-label={selectionMoveReady ? `Move selected accounts to ${name}` : name}
                   title={selectionMoveReady
@@ -4834,7 +5031,7 @@ export default function VaultApp() {
                     color={customization.color}
                   />
                   <span className="group-label">
-                    <span className="group-name" data-i18n-ignore>{name}</span>
+                    <span className="group-name" data-i18n-ignore>{groupDisplayName(name)}</span>
                     <span className="group-count">{counts[name]}</span>
                   </span>
                 </button>
@@ -4857,6 +5054,13 @@ export default function VaultApp() {
                       onClick={(event) => beginGroupCustomization(name, event.currentTarget)}
                     >
                       Edit
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={(event) => beginSubgroupCreation(name, event.currentTarget)}
+                    >
+                      Create subgroup
                     </button>
                     <button
                       type="button"
@@ -5034,7 +5238,7 @@ export default function VaultApp() {
 
           {visibleAccounts.length > 0 ? (
             <section className="account-grid" data-card-view={cardView} aria-label="Authenticator accounts">
-              <span className="visually-hidden" id="account-drag-instructions">With a mouse, hold outside the code row and drag an account onto another card to reorder it, or onto Favorites, Archive, or a sidebar group. Dragging a selected account moves the selection together. Keyboard and touch users can select accounts and choose the sidebar destination.</span>
+              <span className="visually-hidden" id="account-drag-instructions">With a mouse, hold outside the code row and drag an account onto another card to reorder it, or onto Favorites, Archive, or a sidebar group. Dropping an archived account onto a group restores it there. Dragging a selected account moves the selection together. Keyboard and touch users can select accounts and choose the sidebar destination.</span>
               {visibleAccounts.map((account) => {
                 const { current: currentCode, next: nextCode, remaining } = accountCodePreview(
                   account,
@@ -5044,13 +5248,17 @@ export default function VaultApp() {
                 const revealNextCode = !locked && isTotpExpiring(remaining);
                 const selected = selectedVisibleAccountIds.has(account.id);
                 const accessibleCurrentCode = currentCode?.replace(/\s/gu, "").split("").join(" ");
-                const draggableAccount = view !== "archive" && !account.archived;
+                const draggableAccount = true;
                 const reorderTarget = accountDropTarget?.id === account.id ? accountDropTarget : null;
                 const accountCardProps: HTMLAttributes<HTMLElement> = {
                   draggable: draggableAccount,
                   "aria-describedby": draggableAccount ? "account-drag-instructions" : undefined,
                   title: draggableAccount
-                    ? selectionMode && selected
+                    ? account.archived
+                      ? selectionMode && selected
+                        ? "Hold and drag outside the code area to restore selected accounts to a sidebar group"
+                        : "Hold and drag outside the code area to restore this account to a sidebar group"
+                      : selectionMode && selected
                       ? "Hold and drag outside the code area to reorder or move selected accounts to Favorites, Archive, or a group"
                       : "Hold and drag outside the code area to reorder this account or move it to Favorites, Archive, or a group"
                     : undefined,
@@ -5111,6 +5319,7 @@ export default function VaultApp() {
                             <button role="menuitem" onClick={(event) => openAccountEditor(account.id, event.currentTarget)}>Edit account</button>
                             {!account.archived && <button role="menuitem" onClick={() => toggleFavorite(account.id)}>{account.favorite ? "Remove from Favorites" : "Add to Favorites"}</button>}
                             {!account.archived && <button role="menuitem" onClick={() => toggleArchive(account.id)}>Move to Archive</button>}
+                            {account.archived && <button role="menuitem" onClick={() => toggleArchive(account.id)}>Restore</button>}
                             {account.archived && <button className="danger" role="menuitem" onClick={() => deleteArchivedAccount(account.id)}>Delete permanently</button>}
                           </div>
                         )}
@@ -5269,12 +5478,10 @@ export default function VaultApp() {
         group={activeGroupCustomization}
         mode={creatingGroup ? "create" : "edit"}
         existingNames={groups}
+        parentGroup={creatingSubgroupParent}
         onCancel={closeGroupCustomization}
         onSave={saveGroupCustomization}
         onDelete={creatingGroup ? undefined : deleteGroupCustomization}
-        deleteDisabledReason={customizingGroup && accounts.some(
-          (account) => groupKey(account.group) === groupKey(customizingGroup),
-        ) ? "Move every active and archived account to another group before deleting this group." : undefined}
         returnFocusTo={groupCustomizationReturnFocusTo}
       />
 

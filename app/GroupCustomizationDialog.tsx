@@ -21,13 +21,13 @@ export type GroupCustomizationDialogProps = {
   open: boolean;
   group: GroupCustomizationValue | null;
   mode?: "create" | "edit";
+  parentGroup?: string | null;
   existingNames: readonly string[];
   busy?: boolean;
   returnFocusTo?: HTMLElement | null;
   onCancel: () => void;
   onSave: (value: GroupCustomizationValue) => boolean | void | Promise<boolean | void>;
   onDelete?: () => boolean | void | Promise<boolean | void>;
-  deleteDisabledReason?: string;
 };
 
 export const GROUP_ICON_OPTIONS = [
@@ -110,13 +110,13 @@ function focusableElements(dialog: HTMLElement | null) {
 function GroupCustomizationDialogContent({
   group,
   mode = "edit",
+  parentGroup = null,
   existingNames,
   busy = false,
   returnFocusTo,
   onCancel,
   onSave,
   onDelete,
-  deleteDisabledReason,
 }: Omit<GroupCustomizationDialogProps, "open" | "group"> & { group: GroupCustomizationValue }) {
   const titleId = useId();
   const descriptionId = useId();
@@ -232,7 +232,7 @@ function GroupCustomizationDialogContent({
   };
 
   const deleteGroup = async () => {
-    if (!onDelete || deleteDisabledReason || isBusy || submitInFlightRef.current) return;
+    if (!onDelete || isBusy || submitInFlightRef.current) return;
     if (!confirmingDelete) {
       setError("");
       setConfirmingDelete(true);
@@ -281,11 +281,13 @@ function GroupCustomizationDialogContent({
       >
         <header className="group-customization-header" data-mode={mode}>
           <div>
-            <p className="eyebrow"><span /> {mode === "create" ? "NEW GROUP" : "GROUP DETAILS"}</p>
+            <p className="eyebrow"><span /> {mode === "create" ? parentGroup ? "NEW SUBGROUP" : "NEW GROUP" : "GROUP DETAILS"}</p>
             {mode === "create" && (
               <>
-                <h2 id={titleId}>Create group</h2>
-                <p id={descriptionId}>Name this empty group and choose how it appears in the sidebar.</p>
+                <h2 id={titleId}>{parentGroup ? "Create subgroup" : "Create group"}</h2>
+                <p id={descriptionId}>{parentGroup
+                  ? <>Create a subgroup inside <strong data-i18n-ignore>{parentGroup}</strong>.</>
+                  : "Name this empty group and choose how it appears in the sidebar."}</p>
               </>
             )}
           </div>
@@ -308,7 +310,7 @@ function GroupCustomizationDialogContent({
               color={color}
             />
             <label htmlFor={nameId}>
-              <span>Group name</span>
+              <span>{parentGroup ? "Subgroup name" : "Group name"}</span>
               <input
                 ref={nameInputRef}
                 id={nameId}
@@ -318,7 +320,7 @@ function GroupCustomizationDialogContent({
                   if (error) setError("");
                 }}
                 required
-                maxLength={48}
+                maxLength={Math.max(1, 48 - (parentGroup ? parentGroup.length + 3 : 0))}
                 autoComplete="off"
                 placeholder={mode === "create" ? "e.g. Clients" : undefined}
                 disabled={isBusy}
@@ -372,11 +374,9 @@ function GroupCustomizationDialogContent({
 
           {onDelete && (
             <p className={`group-customization-delete-note ${confirmingDelete ? "confirming" : ""}`}>
-              {deleteDisabledReason
-                ? deleteDisabledReason
-                : confirmingDelete
-                  ? "Delete this empty group? This cannot be undone. Accounts are never deleted with a group."
-                  : "This group is empty. Delete it when you no longer need it."}
+              {confirmingDelete
+                ? "Delete this group? Its accounts will be moved to Archive. This cannot be undone."
+                : "Delete this group and move its accounts to Archive."}
             </p>
           )}
 
@@ -388,11 +388,11 @@ function GroupCustomizationDialogContent({
                 type="button"
                 className="group-customization-delete-action"
                 onClick={() => void deleteGroup()}
-                disabled={isBusy || Boolean(deleteDisabledReason)}
+                disabled={isBusy}
               >{deleting ? "Deleting…" : confirmingDelete ? "Confirm delete" : "Delete group"}</button>
             )}
             <button type="button" onClick={close} disabled={isBusy}>Cancel</button>
-            <button type="submit" disabled={isBusy}>{saving || busy ? "Saving…" : mode === "create" ? "Create group" : "Save changes"}</button>
+            <button type="submit" disabled={isBusy}>{saving || busy ? "Saving…" : mode === "create" ? parentGroup ? "Create subgroup" : "Create group" : "Save changes"}</button>
           </footer>
         </form>
       </section>

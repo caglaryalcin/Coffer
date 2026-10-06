@@ -30,9 +30,13 @@ select { caret-color: auto; }
 button, a { -webkit-tap-highlight-color: transparent; }
 button { color: inherit; }
 
-.app-shell { min-height: 100vh; display: grid; grid-template-columns: 248px minmax(0, 1fr); transition: grid-template-columns .22s ease; }
+.app-shell { min-height: 100vh; display: grid; grid-template-columns: var(--sidebar-width, 248px) minmax(0, 1fr); }
 .app-shell.sidebar-collapsed { grid-template-columns: 82px minmax(0, 1fr); }
-.sidebar { position: fixed; z-index: 20; inset: 0 auto 0 0; width: 248px; display: flex; flex-direction: column; padding: 28px 18px 20px; background: var(--ink); color: #f8f8f2; transition: width .22s ease, padding .22s ease; }
+.sidebar { position: fixed; z-index: 20; inset: 0 auto 0 0; width: var(--sidebar-width, 248px); display: flex; flex-direction: column; padding: 28px 18px 20px; background: var(--ink); color: #f8f8f2; }
+.sidebar-resize-handle { width: 10px; position: absolute; z-index: 5; top: 0; right: -5px; bottom: 0; padding: 0; border: 0; outline: none; background: transparent; cursor: col-resize; touch-action: none; }
+.sidebar-resize-handle::after { content: ""; width: 2px; position: absolute; top: 0; right: 4px; bottom: 0; background: transparent; transition: background .15s ease; }
+.sidebar-resize-handle:is(:hover, :focus-visible)::after, .sidebar-resizing .sidebar-resize-handle::after { background: var(--theme-accent); }
+.sidebar-resizing, .sidebar-resizing * { cursor: col-resize !important; user-select: none !important; }
 .sidebar-collapsed .sidebar { width: 82px; padding-inline: 12px; }
 .sidebar-toggle { width: 44px; height: 44px; position: absolute; z-index: 2; top: 23px; right: -22px; display: grid; place-items: center; padding: 0; border: 1px solid #413f3f; border-radius: 12px; background: #202326; color: #d8d3d0; box-shadow: 7px 7px 16px rgba(18, 20, 22, .34); cursor: pointer; }
 .sidebar-toggle:hover { border-color: var(--theme-accent); background: var(--accent-soft); }
@@ -61,7 +65,8 @@ button { color: inherit; }
 .primary-nav-main { width: 100%; min-width: 0; min-height: 44px; display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 0 5px 0 10px; border: 0; border-radius: 10px; background: transparent; color: inherit; font-size: 15px; font-weight: 620; text-align: left; cursor: pointer; }
 .primary-nav-main:is(:hover, :focus-visible, :active) { background: transparent; color: inherit; }
 .primary-options-button { border-radius: 10px; }
-.nav-item { width: 100%; min-height: 44px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border: 0; border-radius: 12px; background: transparent; color: #aeb1a9; font-size: 14px; font-weight: 590; text-align: left; cursor: pointer; }
+.nav-item { width: 100%; min-height: 44px; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 0 12px; border: 0; border-radius: 12px; background: transparent; color: #aeb1a9; font-size: 14px; font-weight: 590; text-align: left; cursor: pointer; }
+.nav-item .nav-icon { width: 20px; height: 20px; justify-self: center; }
 .nav-item:hover { background: var(--accent-soft); color: white; }
 .nav-item.active { background: var(--accent-soft, #30332d); color: white; }
 .nav-item.active .nav-icon { color: var(--lime); }
@@ -132,7 +137,7 @@ button { color: inherit; }
 .group-add-button:disabled { opacity: .4; cursor: not-allowed; }
 .group-nav-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: center; min-height: 44px; border-radius: 10px; color: #aeb1a9; }
 .group-nav-row:hover, .group-nav-row.active, .group-nav-row.menu-open { background: var(--accent-soft); color: white; }
-.group-nav-main { min-width: 0; min-height: 44px; display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: center; gap: 9px; padding: 0 5px 0 10px; border: 0; border-radius: 10px; background: transparent; color: inherit; font-size: 15px; font-weight: 620; text-align: left; cursor: pointer; }
+.group-nav-main { min-width: 0; min-height: 44px; display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: center; gap: 9px; padding: 0 5px 0 calc(10px + (var(--group-depth, 0) * 18px)); border: 0; border-radius: 10px; background: transparent; color: inherit; font-size: 15px; font-weight: 620; text-align: left; cursor: pointer; }
 .group-nav-main[draggable="true"] { user-select: none; cursor: grab; }
 .group-nav-main[data-group-dragging="true"] { cursor: grabbing; }
 .group-options-button span { display: block; font-size: 11px; font-weight: 800; letter-spacing: .04em; line-height: 1; transform: translateY(-1px); }
@@ -165,9 +170,9 @@ button { color: inherit; }
   background: rgba(202, 115, 115, .22);
   color: #f4b5b5;
 }
-.group-label { min-width: 0; display: grid; grid-template-columns: minmax(0, 88px) auto; align-items: center; justify-content: start; gap: 8px; }
-.group-name { min-width: 0; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
-.group-count { justify-self: start; color: #676b63; text-align: left; }
+.group-label { width: 100%; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+.group-name { min-width: 0; overflow: hidden; font-size: 15px; line-height: 20px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.group-count { justify-self: end; color: #676b63; font-size: 15px; line-height: 20px; text-align: right; }
 .group-symbol,
 .group-customization-preview,
 .group-customization-option-icon {
@@ -183,8 +188,8 @@ button { color: inherit; }
   color: var(--group-accent);
 }
 .group-symbol {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   justify-self: center;
   border: 0;
   border-radius: 0;
@@ -2064,6 +2069,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
     transition-delay: 0s;
   }
   .sidebar-toggle { display: none; }
+  .sidebar-resize-handle { display: none; }
   .mobile-sidebar-backdrop { display: block; position: fixed; z-index: 40; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; background: rgba(12, 14, 13, .62); cursor: pointer; }
   .icon-button.mobile-sidebar-trigger { display: grid; }
   .mobile-sidebar-trigger > span { width: 19px; height: 14px; position: relative; display: block; border-top: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; }
