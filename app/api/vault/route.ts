@@ -88,6 +88,9 @@ export async function POST(request: Request): Promise<Response> {
       case "save":
         response = await save(request, body);
         break;
+      case "save_from_extension":
+        response = await saveFromExtension(request, body);
+        break;
       case "change_password":
         response = await changePassword(request, body);
         break;
@@ -341,6 +344,46 @@ async function save(request: Request, body: JsonObject): Promise<Response> {
   return json(result);
 }
 
+async function saveFromExtension(request: Request, body: JsonObject): Promise<Response> {
+  if (!isExtensionRequest(request)) {
+    throw new RequestError(403, "invalid_origin", "A browser-extension request is required.");
+  }
+  if (!hasExactKeys(body, [
+    "action",
+    "identifier",
+    "authProof",
+    "vaultId",
+    "expectedRevision",
+    "payload",
+  ])) {
+    throw invalidSchema();
+  }
+  const authProof = decodeFixedAuthProof(body.authProof);
+  if (
+    body.action !== "save_from_extension" ||
+    typeof body.identifier !== "string" ||
+    !authProof ||
+    typeof body.vaultId !== "string" ||
+    !isRevision(body.expectedRevision) ||
+    !isEncryptedVaultPayload(body.payload)
+  ) {
+    throw invalidSchema();
+  }
+
+  const identifier = accountIdentifierForRequest(request, body.identifier, true);
+  const loginResult = await store.login(identifier, authProof, clientRateKey(request));
+  try {
+    return json(await store.save({
+      sessionToken: loginResult.sessionToken,
+      vaultId: body.vaultId,
+      expectedRevision: body.expectedRevision,
+      payload: body.payload,
+    }));
+  } finally {
+    store.logout(loginResult.sessionToken);
+  }
+}
+
 async function changePassword(request: Request, body: JsonObject): Promise<Response> {
   requireSameOrigin(request);
   if (!hasExactKeys(body, [
@@ -505,7 +548,9 @@ function requireSameOrExtensionOrigin(request: Request): void {
 }
 
 function withExtensionCors(request: Request, response: Response, action: string | null): Response {
-  if (action !== "identify" && action !== "login") return response;
+  if (action !== "identify" && action !== "login" && action !== "save_from_extension") {
+    return response;
+  }
   const corsHeaders = extensionCorsHeaders(request, "POST, OPTIONS");
   if (!corsHeaders) return response;
   const headers = new Headers(corsHeaders);
