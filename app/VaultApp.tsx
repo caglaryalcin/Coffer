@@ -1,6 +1,8 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type HTMLAttributes, type MouseEvent as ReactMouseEvent } from "react";
+import OtpSettingsFields from "./OtpSettingsFields";
+import { advanceHotpAccount } from "../lib/hotp";
 import AccountEditor, { type AccountEditorCodePreview, type AccountIconOption } from "./AccountEditor";
 import AccountUrlFields from "./AccountUrlFields";
 import SavedLogoPicker from "./SavedLogoPicker";
@@ -21,7 +23,7 @@ import SettingsCenter, { type UserProfile, type UserProfilePatch } from "./Setti
 import SignInScreen from "./SignInScreen";
 import ThemeToggle from "./ThemeToggle";
 import TransferCenter, { type ImportDecision } from "./TransferCenter";
-import { formatCode, generateTotp, generateTotpTestPreview, isTotpExpiring, isValidBase32, normalizeSecret, parseOtpAuthUri, totpWindow, type TotpAlgorithm, type TotpTestPreview } from "../lib/totp";
+import { formatCode, generateAccountCode, generateTotpTestPreview, isTotpExpiring, isValidBase32, normalizeSecret, parseOtpAuthUri, totpWindow, type OtpType, type TotpAlgorithm, type TotpTestPreview } from "../lib/totp";
 import { changeVaultPassword, claimLegacyVault, deleteVaultAccount, getOidcState, getVaultBootstrap, identifyVault, loginVault, logoutOidc, logoutVault, saveVault, setupVault, updateInstanceSettings, VAULT_API_TIMEOUT_MS, VaultApiError, type OidcClientState, type VaultInstanceSettings } from "../lib/vault-api";
 import { createAuthProof, createEncryptedVault, DEFAULT_VAULT_RESUME_AGE_MS, decryptVaultPayload, encryptVaultPayload, REMEMBERED_VAULT_RESUME_AGE_MS, rotateVaultPassword, unlockVaultHeader, VaultCryptoError, type EncryptedVaultHeader, type VaultPayloadCipher, type VaultRuntime } from "../lib/vault-crypto";
 import { createEmptyVault, MAX_ACCOUNT_URLS, MAX_GROUP_CUSTOMIZATIONS, parseAccountUrls, parsePersistedVault, withVaultUpdate, type PersistedVault, type VaultAccount, type VaultGroupColor, type VaultGroupCustomization, type VaultGroupIcon, type VaultMainScreen, type VaultTheme } from "../lib/vault-model";
@@ -584,7 +586,7 @@ const SETTINGS_MENU_ITEMS = [
 
 function totpConfigKey(account: Account) {
   let hash = 2_166_136_261;
-  const configuration = `${account.secret}\0${account.algorithm}\0${account.digits}\0${account.period}`;
+  const configuration = `${account.secret}\0${account.algorithm}\0${account.digits}\0${account.period}\0${account.otpType}\0${account.counter}`;
   for (const character of configuration) {
     hash ^= character.codePointAt(0) ?? 0;
     hash = Math.imul(hash, 16_777_619);
@@ -593,6 +595,10 @@ function totpConfigKey(account: Account) {
 }
 
 function accountCodePreview(account: Account, timestamp: number, storedPair?: GeneratedCodePair): AccountEditorCodePreview {
+  if (account.otpType === "hotp") return {
+    current: storedPair?.configKey === totpConfigKey(account) && storedPair.counter === account.counter ? storedPair.current : null,
+    next: null, remaining: 0, period: account.period,
+  };
   const window = totpWindow(timestamp, account.period);
   const pairMatchesConfig = storedPair?.configKey === totpConfigKey(account);
   return {
@@ -671,6 +677,10 @@ export default function VaultApp() {
   const [accountUrls, setAccountUrls] = useState<string[]>([""]);
   const [secret, setSecret] = useState("");
   const [newGroup, setNewGroup] = useState<Group>("Personal");
+  const [newOtpType, setNewOtpType] = useState<OtpType>("totp");
+  const [newCounter, setNewCounter] = useState(0);
+  const [advancingHotpId, setAdvancingHotpId] = useState<string | null>(null);
+  const hotpAdvanceInProgressRef = useRef(false);
   const [newAlgorithm, setNewAlgorithm] = useState<TotpAlgorithm>("SHA-1");
   const [newDigits, setNewDigits] = useState<6 | 8>(6);
   const [newPeriod, setNewPeriod] = useState(30);
@@ -1049,6 +1059,7 @@ export default function VaultApp() {
 
     setRuntime(publication.runtime);
     setVault(publication.vault);
+    setAdvancingHotpId(null);
     setView(publication.vault.settings.mainScreen.kind === "favorites" ? "favorites" : "all");
     setGroup(defaultMainScreenGroup(publication.vault));
     setSidebarMenuTarget(null);
@@ -1908,6 +1919,7 @@ export default function VaultApp() {
     setSaveStatus("saved");
     setSaveError(null);
     setCodePairs({});
+    setAdvancingHotpId(null);
     setQuery("");
     setGroup("All");
     setView("all");
@@ -1935,6 +1947,8 @@ export default function VaultApp() {
     resetNewAccountSecretTest();
     setSecret("");
     setNewGroup("Personal");
+    setNewOtpType("totp");
+    setNewCounter(0);
     setNewAlgorithm("SHA-1");
     setNewDigits(6);
     setNewPeriod(30);
@@ -2117,6 +2131,7 @@ export default function VaultApp() {
     lastResumeTouchAtRef.current = 0;
     setAuthStatus("locking");
     setCodePairs({});
+    setAdvancingHotpId(null);
     setSelectionMode(false);
     setSelectedAccountIds(new Set());
     clearSelectedAccountDrag();
@@ -2140,6 +2155,8 @@ export default function VaultApp() {
     resetNewAccountSecretTest();
     setSecret("");
     setNewGroup("Personal");
+    setNewOtpType("totp");
+    setNewCounter(0);
     setNewAlgorithm("SHA-1");
     setNewDigits(6);
     setNewPeriod(30);
@@ -3009,7 +3026,7 @@ export default function VaultApp() {
 
   const accountCodeConfigurationKey = accounts.map(totpConfigKey).join("|");
   const codeWindowKey = accounts
-    .map((account) => `${totpConfigKey(account)}:${totpWindow(tick, account.period).counter}`)
+    .map((account) => `${totpConfigKey(account)}:${account.otpType === "hotp" ? account.counter : totpWindow(tick, account.period).counter}`)
     .join("|");
 
   useEffect(() => {
@@ -3020,11 +3037,11 @@ export default function VaultApp() {
     Promise.all(accounts.map(async (account) => {
       const window = totpWindow(generatedAt, account.period);
       const [current, next] = await Promise.all([
-        generateTotp(account.secret, window.currentTimestamp, account.digits, account.period, account.algorithm),
-        generateTotp(account.secret, window.nextTimestamp, account.digits, account.period, account.algorithm),
+        generateAccountCode(account, window.currentTimestamp),
+        account.otpType === "hotp" ? Promise.resolve("") : generateAccountCode(account, window.nextTimestamp),
       ]);
       return [account.id, {
-        counter: window.counter,
+        counter: account.otpType === "hotp" ? account.counter : window.counter,
         configKey: totpConfigKey(account),
         current: formatCode(current),
         next: formatCode(next),
@@ -4261,15 +4278,55 @@ export default function VaultApp() {
     return true;
   };
 
+  const advanceHotp = async (account: Account) => {
+    if (hotpAdvanceInProgressRef.current || locked || mutationBlockReason() || saveStatus !== "saved" || savedVersionRef.current < mutationVersionRef.current) {
+      setToast("Wait until the encrypted vault is saved before advancing the HOTP counter.");
+      return;
+    }
+    const generation = sessionGenerationRef.current;
+    hotpAdvanceInProgressRef.current = true;
+    setAdvancingHotpId(account.id);
+    try {
+      const target = vaultRef.current?.accounts.find((entry) => entry.id === account.id);
+      if (!target || target.archived) throw new Error("This HOTP account is no longer available.");
+      const next = advanceHotpAccount(target, account.counter);
+      const committed = setAccounts((current) => current.map((entry) => entry.id === next.id ? next : entry));
+      if (!committed) return;
+      const version = mutationVersionRef.current;
+      await stagePendingVaults();
+      await flushVaultSaves();
+      if (generation !== sessionGenerationRef.current || sessionTransitionRef.current.phase !== "ready") return;
+      setToast(savedVersionRef.current >= version
+        ? "HOTP counter advanced and saved."
+        : "The HOTP counter is pending. Retry the encrypted save before using the new code.");
+    } catch (error) {
+      if (generation === sessionGenerationRef.current) setToast(error instanceof Error ? error.message : "The HOTP counter could not be saved.");
+    } finally {
+      hotpAdvanceInProgressRef.current = false;
+      if (generation === sessionGenerationRef.current) setAdvancingHotpId(null);
+    }
+  };
+
   const copyCode = async (account: Account) => {
     if (locked) {
       setToast("Unlock your vault to copy a code.");
       return;
     }
+    if (account.otpType === "hotp" && (saveStatus !== "saved" || hotpAdvanceInProgressRef.current)) {
+      setToast("Wait until the encrypted vault is saved before copying an HOTP code.");
+      return;
+    }
+    const latest = vaultRef.current?.accounts.find((entry) => entry.id === account.id);
+    if (!latest) return;
+    if (latest.otpType === "hotp" && (savedVersionRef.current < mutationVersionRef.current || mutationBlockReason())) {
+      setToast("Wait until the encrypted vault is saved before copying an HOTP code.");
+      return;
+    }
+    account = latest;
     const sessionGeneration = sessionGenerationRef.current;
     let code: string;
     try {
-      code = await generateTotp(account.secret, Date.now(), account.digits, account.period, account.algorithm);
+      code = await generateAccountCode(account);
     } catch {
       setToast("This code could not be generated.");
       return;
@@ -4282,7 +4339,9 @@ export default function VaultApp() {
       currentAccount.secret !== account.secret ||
       currentAccount.algorithm !== account.algorithm ||
       currentAccount.digits !== account.digits ||
-      currentAccount.period !== account.period
+      currentAccount.period !== account.period ||
+      currentAccount.otpType !== account.otpType ||
+      currentAccount.counter !== account.counter
     ) return;
     try {
       await navigator.clipboard.writeText(code);
@@ -4474,6 +4533,8 @@ export default function VaultApp() {
           color: palette[next.length % palette.length],
           letter: initials(decision.account.service),
           lastUsed: 0,
+          otpType: decision.account.otpType ?? "totp",
+          counter: decision.account.counter ?? 0,
           algorithm: decision.account.algorithm ?? "SHA-1",
           digits: decision.account.digits ?? 6,
           period: decision.account.period ?? 30,
@@ -4494,6 +4555,8 @@ export default function VaultApp() {
       setService(parsed.issuer || "Imported account");
       setIdentity(parsed.account);
       setSecret(parsed.secret);
+      setNewOtpType(parsed.otpType ?? "totp");
+      setNewCounter(parsed.counter ?? 0);
       setNewAlgorithm(parsed.algorithm);
       setNewDigits(parsed.digits);
       setNewPeriod(parsed.period);
@@ -4518,21 +4581,6 @@ export default function VaultApp() {
     setSecret(value);
   };
 
-  const changeNewAccountAlgorithm = (value: TotpAlgorithm) => {
-    resetNewAccountSecretTest();
-    setNewAlgorithm(value);
-  };
-
-  const changeNewAccountDigits = (value: 6 | 8) => {
-    resetNewAccountSecretTest();
-    setNewDigits(value);
-  };
-
-  const changeNewAccountPeriod = (value: number) => {
-    resetNewAccountSecretTest();
-    setNewPeriod(value);
-  };
-
   const testNewAccountSecret = async () => {
     if (!newAccountSecretTestReady || newAccountSecretTestBusy) return;
 
@@ -4546,6 +4594,8 @@ export default function VaultApp() {
 
     const configuration = {
       secret: normalizeSecret(secret),
+      otpType: newOtpType,
+      counter: newCounter,
       algorithm: newAlgorithm,
       digits: newDigits,
       period: newPeriod,
@@ -4554,6 +4604,10 @@ export default function VaultApp() {
     function publishPreview(preview: TotpTestPreview) {
       if (newAccountSecretTestRequestRef.current !== request) return;
 
+      if (!Number.isFinite(preview.expiresAt)) {
+        setNewAccountSecretTestFeedback({ status: "success", preview, remainingSeconds: 0 });
+        return;
+      }
       const millisecondsRemaining = preview.expiresAt - Date.now();
       if (millisecondsRemaining <= 0) {
         void refreshPreview();
@@ -4606,6 +4660,8 @@ export default function VaultApp() {
     setAccountUrls([""]);
     setSecret("");
     setNewGroup("Personal");
+    setNewOtpType("totp");
+    setNewCounter(0);
     setNewAlgorithm("SHA-1");
     setNewDigits(6);
     setNewPeriod(30);
@@ -4681,6 +4737,8 @@ export default function VaultApp() {
         favorite: addToFavorites,
         archived: false,
         lastUsed: 0,
+        otpType: newOtpType,
+        counter: newCounter,
         algorithm: newAlgorithm,
         digits: newDigits,
         period: newPeriod,
@@ -5315,12 +5373,15 @@ export default function VaultApp() {
             <section className="account-grid" data-card-view={cardView} aria-label="Authenticator accounts">
               <span className="visually-hidden" id="account-drag-instructions">With a mouse, hold outside the code row and drag an account onto another card to reorder it, or onto Favorites, Archive, or a sidebar group. Dropping an archived account onto a group restores it there. Dragging a selected account moves the selection together. Keyboard and touch users can select accounts and choose the sidebar destination.</span>
               {visibleAccounts.map((account) => {
-                const { current: currentCode, next: nextCode, remaining } = accountCodePreview(
+                const { current: generatedCurrentCode, next: nextCode, remaining } = accountCodePreview(
                   account,
                   tick,
                   codePairs[account.id],
                 );
-                const revealNextCode = !locked && isTotpExpiring(remaining);
+                const hotp = account.otpType === "hotp";
+                const hotpPending = hotp && (saveStatus !== "saved" || advancingHotpId === account.id);
+                const currentCode = hotpPending ? null : generatedCurrentCode;
+                const revealNextCode = !hotp && !locked && isTotpExpiring(remaining);
                 const selected = selectedVisibleAccountIds.has(account.id);
                 const accessibleCurrentCode = currentCode?.replace(/\s/gu, "").split("").join(" ");
                 const draggableAccount = true;
@@ -5410,6 +5471,7 @@ export default function VaultApp() {
                           type="button"
                           className={`code ${revealNextCode ? "expiring-code" : ""}`}
                           onClick={() => copyCode(account)}
+                          disabled={hotpPending || locked || !currentCode}
                           aria-label={accessibleCurrentCode ? `Copy ${account.service} ${account.identity} code ${accessibleCurrentCode}` : `Copy ${account.service} ${account.identity} code when ready`}
                         ><span className="code-value" data-digits={account.digits} aria-hidden="true">{locked ? "••• •••" : currentCode ?? "--- ---"}</span></button>
                       )}
@@ -5419,7 +5481,10 @@ export default function VaultApp() {
                       <span className="next-code-label" aria-hidden="true">Next</span>
                       <span className="next-code-value" aria-hidden="true">{locked ? "••• •••" : nextCode ?? "--- ---"}</span>
                     </div>
-                    <div className={`countdown ${revealNextCode ? "urgent" : ""}`} style={{ "--progress": `${(remaining / account.period) * 360}deg` } as React.CSSProperties}><span>{locked ? "—" : remaining}</span></div>
+                    {hotp ? <div className="hotp-controls">
+                      <small><span>Counter</span> <span data-i18n-ignore>{account.counter}</span></small>
+                      <button type="button" className="hotp-next-button" onClick={() => void advanceHotp(account)} disabled={locked || selectionMode || account.archived || saveStatus !== "saved" || Boolean(advancingHotpId)} title="Save the next HOTP counter before using the new code">Next code</button>
+                    </div> : <div className={`countdown ${revealNextCode ? "urgent" : ""}`} style={{ "--progress": `${(remaining / account.period) * 360}deg` } as React.CSSProperties}><span>{locked ? "—" : remaining}</span></div>}
                   </div>
                 </article>;
               })}
@@ -5524,11 +5589,11 @@ export default function VaultApp() {
                         <strong aria-hidden="true">{newAccountSecretTestFeedback.preview.code}</strong>
                         <span className="visually-hidden">Draft code {newAccountSecretTestFeedback.preview.code.replace(/\s/gu, "").split("").join(" ")}</span>
                       </p>
-                      <span
+                      {newOtpType !== "hotp" && <span
                         className={`countdown manual-secret-test-countdown ${isTotpExpiring(newAccountSecretTestFeedback.remainingSeconds) ? "urgent" : ""}`}
                         style={{ "--progress": `${(newAccountSecretTestFeedback.remainingSeconds / newPeriod) * 360}deg` } as React.CSSProperties}
                         aria-hidden="true"
-                      ><span>{newAccountSecretTestFeedback.remainingSeconds}</span></span>
+                      ><span>{newAccountSecretTestFeedback.remainingSeconds}</span></span>}
                     </div>
                   ) : newAccountSecretTestFeedback.status === "error" ? (
                     <p id={newAccountSecretTestFeedbackId} className="account-editor-secret-test-feedback error" role="alert">Coffer could not generate a test code. Check the secret and TOTP settings, then try again.</p>
@@ -5544,9 +5609,14 @@ export default function VaultApp() {
                   <small id={newAccountSecretStorageHintId} className="manual-secret-storage-hint">Encrypted in this browser before the vault is saved.</small>
                 </div>
                 <div className="field-row advanced-fields">
-                  <label><span>Algorithm</span><select value={newAlgorithm} onChange={(event) => changeNewAccountAlgorithm(event.target.value as TotpAlgorithm)}><option>SHA-1</option><option>SHA-256</option><option>SHA-512</option></select></label>
-                  <label><span>Digits</span><select value={newDigits} onChange={(event) => changeNewAccountDigits(Number(event.target.value) as 6 | 8)}><option value="6">6 digits</option><option value="8">8 digits</option></select></label>
-                  <label><span>Period</span><select value={newPeriod} onChange={(event) => changeNewAccountPeriod(Number(event.target.value))}><option value="30">30 seconds</option><option value="60">60 seconds</option></select></label>
+                  <OtpSettingsFields values={{ otpType: newOtpType, counter: newCounter, algorithm: newAlgorithm, digits: newDigits, period: newPeriod }} onChange={(values) => {
+                    resetNewAccountSecretTest();
+                    setNewOtpType(values.otpType);
+                    setNewCounter(values.counter);
+                    setNewAlgorithm(values.algorithm);
+                    setNewDigits(values.digits);
+                    setNewPeriod(values.period);
+                  }} />
                 </div>
                 {formError && <p className="form-error" role="alert">{formError}</p>}
                 <div className="modal-actions"><button type="button" className="modal-secondary" onClick={closeAdd}>Cancel</button><button className="modal-primary" type="submit" disabled={newAccountSecretTestBusy}>Add account <span>→</span></button></div>

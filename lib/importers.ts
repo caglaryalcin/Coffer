@@ -1,5 +1,5 @@
 import type { CofferAccount, CofferTotpAlgorithm } from "./backup";
-import { parseBase32Secret, parseOtpAuthUri } from "./totp";
+import { parseBase32Secret, parseOtpAuthUri, validateOtpSettings, type OtpType, type OtpDigits } from "./totp";
 
 export const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024;
 export const MAX_IMPORT_ACCOUNTS = 1_000;
@@ -55,17 +55,18 @@ function parseTotpRecord(value: unknown): CofferAccount {
   if (requiredFields.some((field) => !Object.hasOwn(value, field))) throw new Error("Account entry is incomplete");
   if (typeof value.otp_type !== "string") throw new Error("OTP type is invalid");
   const type = value.otp_type.toLowerCase();
-  if (type !== "totp") throw new Error(`${type.toUpperCase()} accounts are not supported yet`);
+  if (!["totp", "hotp"].includes(type)) throw new Error(`${type.toUpperCase()} accounts are not supported`);
 
   const service = safeText(value.service, "Service");
   const identity = safeText(value.account, "Account");
   if (typeof value.secret !== "string") throw new Error("Secret is not valid Base32");
   const secret = parseBase32Secret(value.secret);
-  const digits = value.digits;
-  const period = value.period;
+  const digits = value.digits as OtpDigits;
+  const period = type === "hotp" ? 30 : value.period;
   if (digits !== 6 && digits !== 8) throw new Error("Digit count is not supported");
   if (typeof period !== "number" || !Number.isInteger(period) || period < 1 || period > 300) throw new Error("Period is outside the supported range");
-  if (value.counter !== null) throw new Error("Counter must be null for a TOTP account");
+  if (type !== "hotp" && value.counter !== null) throw new Error("Counter must be null for a time-based account");
+  const settings = validateOtpSettings({ secret, otpType: type as OtpType, counter: type === "hotp" ? value.counter as number : 0, algorithm: parseAlgorithm(value.algorithm), digits, period });
 
   return {
     service,
@@ -74,9 +75,7 @@ function parseTotpRecord(value: unknown): CofferAccount {
     group: "Imported",
     favorite: false,
     archived: false,
-    algorithm: parseAlgorithm(value.algorithm),
-    digits,
-    period,
+    ...settings,
   };
 }
 
@@ -134,6 +133,8 @@ export function parseOtpAuthList(input: string): ImportBatch {
             group: "Imported",
             favorite: false,
             archived: false,
+            otpType: parsed.otpType ?? "totp",
+            counter: parsed.counter ?? 0,
             algorithm: parsed.algorithm,
             digits: parsed.digits,
             period: parsed.period,

@@ -164,7 +164,7 @@ export function totpUriFromValues(values: readonly (string | undefined)[]): stri
       const parsed = new URL(value);
       if (
         parsed.protocol === "otpauth:" &&
-        parsed.hostname === "totp" &&
+        ["totp", "hotp"].includes(parsed.hostname) &&
         parsed.username === "" &&
         parsed.password === "" &&
         parsed.port === ""
@@ -469,7 +469,7 @@ export default function QrScanner({ onDetected, onFallback }: QrScannerProps) {
               return;
             }
             if (result.qrFound) {
-              setError("A QR code was found, but it is not a TOTP authenticator setup code.");
+              setError("A QR code was found, but it is not a supported authenticator setup code.");
             }
           } catch {
             if (!mountedRef.current || generation !== scanGenerationRef.current) return;
@@ -558,7 +558,7 @@ export default function QrScanner({ onDetected, onFallback }: QrScannerProps) {
       if (!mountedRef.current || generation !== imageGenerationRef.current) return;
       if (!result.uri) {
         setError(result.qrFound
-          ? "A QR code was found, but it is not a TOTP authenticator setup code."
+          ? "A QR code was found, but it is not a supported authenticator setup code."
           : "No QR code was found in that image. Try a sharper, well-lit image.");
         return;
       }
@@ -602,7 +602,7 @@ export default function QrScanner({ onDetected, onFallback }: QrScannerProps) {
           playsInline
           hidden={cameraPhase === "idle"}
         />
-        {cameraPhase === "scanning" && <p role="status">Looking for a TOTP setup code…</p>}
+        {cameraPhase === "scanning" && <p role="status">Looking for an authenticator setup code…</p>}
         {cameraBusy && <p role="status">Waiting for camera access…</p>}
       </div>
 

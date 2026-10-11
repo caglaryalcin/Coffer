@@ -155,6 +155,8 @@ function isSameIdentity(left: CofferAccount, right: CofferAccount) {
 function isExactMatch(left: CofferAccount, right: CofferAccount) {
   return isSameIdentity(left, right) &&
     left.secret === right.secret &&
+    (left.otpType ?? "totp") === (right.otpType ?? "totp") &&
+    (left.counter ?? 0) === (right.counter ?? 0) &&
     (left.algorithm ?? "SHA-1") === (right.algorithm ?? "SHA-1") &&
     (left.digits ?? 6) === (right.digits ?? 6) &&
     (left.period ?? 30) === (right.period ?? 30) &&
@@ -452,6 +454,8 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
     const activeAccounts = portableAccounts.filter((account) => !account.archived);
     if (plainFormat === "otp") {
       const links = activeAccounts.map((account) => createOtpAuthUri({
+        otpType: account.otpType,
+        counter: account.counter,
         issuer: account.service,
         account: account.identity,
         secret: account.secret,

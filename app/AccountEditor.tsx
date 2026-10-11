@@ -3,6 +3,7 @@
 import { FormEvent, ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from "react";
 import { ACCOUNT_LOGO_ACCEPT, prepareAccountLogo } from "./account-logo";
 import AccountUrlFields from "./AccountUrlFields";
+import OtpSettingsFields from "./OtpSettingsFields";
 import AccountSetupQr from "./AccountSetupQr";
 import SavedLogoPicker from "./SavedLogoPicker";
 import type { SavedCustomLogo } from "../lib/custom-logos";
@@ -14,7 +15,7 @@ import {
   validateAccountEditorValues,
   type EditableAccountPatch,
 } from "../lib/account-editor";
-import { generateTotpTestPreview, isTotpExpiring, type TotpAlgorithm, type TotpTestPreview } from "../lib/totp";
+import { generateTotpTestPreview, isTotpExpiring, type OtpType, type TotpAlgorithm, type TotpTestPreview } from "../lib/totp";
 import type { VaultAccount } from "../lib/vault-model";
 
 export type AccountIconOption = {
@@ -131,7 +132,7 @@ export function findAccountIconOptions(
 }
 
 function AccountEditorForm({ account, brandOptions, customLogos, codePreview, onClose, onSave, returnFocusTo, renderIcon }: Omit<AccountEditorProps, "account"> & { account: VaultAccount }) {
-  const initial = accountEditorValues(account);
+  const initial = useMemo(() => accountEditorValues(account), [account]);
   const iconPickerId = useId();
   const secretInputId = useId();
   const secretTestFeedbackId = useId();
@@ -142,6 +143,8 @@ function AccountEditorForm({ account, brandOptions, customLogos, codePreview, on
   const [iconBrand, setIconBrand] = useState(initial.iconBrand ?? "");
   const [iconDataUrl, setIconDataUrl] = useState(initial.iconDataUrl);
   const [iconQuery, setIconQuery] = useState("");
+  const [otpType, setOtpType] = useState<OtpType>(initial.otpType);
+  const [counter, setCounter] = useState(initial.counter);
   const [algorithm, setAlgorithm] = useState<TotpAlgorithm>(initial.algorithm);
   const [digits, setDigits] = useState<6 | 8>(initial.digits);
   const [period, setPeriod] = useState(initial.period);
@@ -170,7 +173,7 @@ function AccountEditorForm({ account, brandOptions, customLogos, codePreview, on
     );
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    serviceInputRef.current?.focus({ preventScroll: true });
+    secretInputRef.current?.focus({ preventScroll: true });
     const secretInput = secretInputRef.current;
     const opener = openerRef.current;
 
@@ -256,6 +259,8 @@ function AccountEditorForm({ account, brandOptions, customLogos, codePreview, on
         secret,
         iconBrand: iconBrand || null,
         iconDataUrl,
+        otpType,
+        counter,
         algorithm,
         digits,
         period,
@@ -320,13 +325,15 @@ function AccountEditorForm({ account, brandOptions, customLogos, codePreview, on
     return findAccountIconOptions(brandOptions, logoSearch, iconBrand || null);
   }, [brandOptions, iconBrand, logoSearch]);
   const visibleCatalogIconCount = visibleIconOptions.filter((option) => option.id !== COFFER_INITIALS_BRAND_ID).length;
-  const codeExpiring = Boolean(codePreview && isTotpExpiring(codePreview.remaining));
+  const codeExpiring = Boolean(account.otpType !== "hotp" && codePreview && isTotpExpiring(codePreview.remaining));
   const secretTestReadiness = useMemo(() => accountSecretTestReadiness(initial.secret, {
     secret,
+    otpType,
+    counter,
     algorithm,
     digits,
     period,
-  }), [algorithm, digits, initial.secret, period, secret]);
+  }, initial), [algorithm, digits, initial, period, secret, otpType, counter]);
   const secretTestBusy = secretTestFeedback.status === "testing";
   const secretTestDisabled = busy || logoBusy || secretTestBusy || secretTestReadiness.status !== "ready";
   const secretTestHint = secretTestFeedback.status === "testing"
@@ -340,21 +347,6 @@ function AccountEditorForm({ account, brandOptions, customLogos, codePreview, on
   const changeSecret = (value: string) => {
     resetSecretTest();
     setSecret(value);
-  };
-
-  const changeAlgorithm = (value: TotpAlgorithm) => {
-    resetSecretTest();
-    setAlgorithm(value);
-  };
-
-  const changeDigits = (value: 6 | 8) => {
-    resetSecretTest();
-    setDigits(value);
-  };
-
-  const changePeriod = (value: number) => {
-    resetSecretTest();
-    setPeriod(value);
   };
 
   const testSecret = async () => {
@@ -378,11 +370,13 @@ function AccountEditorForm({ account, brandOptions, customLogos, codePreview, on
       if (Date.now() >= preview.expiresAt) throw new Error("The generated code expired before it could be shown.");
 
       setSecretTestFeedback({ status: "success", preview });
-      const expiryTimer = window.setTimeout(() => {
-        if (secretTestRequestRef.current === request) setSecretTestFeedback({ status: "idle" });
-        if (secretTestExpiryTimerRef.current === expiryTimer) secretTestExpiryTimerRef.current = null;
-      }, Math.max(0, preview.expiresAt - Date.now()));
-      secretTestExpiryTimerRef.current = expiryTimer;
+      if (Number.isFinite(preview.expiresAt)) {
+        const expiryTimer = window.setTimeout(() => {
+          if (secretTestRequestRef.current === request) setSecretTestFeedback({ status: "idle" });
+          if (secretTestExpiryTimerRef.current === expiryTimer) secretTestExpiryTimerRef.current = null;
+        }, Math.max(0, preview.expiresAt - Date.now()));
+        secretTestExpiryTimerRef.current = expiryTimer;
+      }
     } catch {
       if (secretTestRequestRef.current === request) setSecretTestFeedback({ status: "error" });
     }
@@ -400,6 +394,88 @@ function AccountEditorForm({ account, brandOptions, customLogos, codePreview, on
         </header>
 
         <form className="account-editor-form" onSubmit={save}>
+          <fieldset className="account-editor-section" disabled={busy}>
+            <legend>Secret key</legend>
+            <div className="account-editor-authentication-fields">
+            <div className="account-editor-secret">
+              <label className="visually-hidden" htmlFor={secretInputId}>Secret key</label>
+              <span className="account-editor-secret-control">
+                <input id={secretInputId} ref={secretInputRef} type={showSecret ? "text" : "password"} value={secret} onChange={(event) => changeSecret(event.target.value)} maxLength={1_280} autoComplete="off" spellCheck={false} aria-describedby={secretTestFeedbackId} />
+                <button type="button" onClick={() => setShowSecret((shown) => !shown)} aria-pressed={showSecret}>{showSecret ? "Hide" : "Show"}</button>
+                <button className="account-editor-test-secret" type="button" onClick={() => void testSecret()} disabled={secretTestDisabled} aria-describedby={secretTestFeedbackId}>{secretTestBusy ? "Testing…" : "Test"}</button>
+              </span>
+              {showSecret && <AccountSetupQr issuer={service} account={identity} secret={secret} algorithm={algorithm} digits={digits} period={period} otpType={otpType} counter={counter} />}
+              {secretTestFeedback.status === "success" ? (
+                <p id={secretTestFeedbackId} className="account-editor-secret-test-feedback success" role="status" aria-live="polite" aria-atomic="true">
+                  <span>Test code</span>
+                  <strong aria-hidden="true">{secretTestFeedback.preview.code}</strong>
+                  <span className="visually-hidden">Draft code {secretTestFeedback.preview.code.replace(/\s/gu, "").split("").join(" ")}</span>
+                  <small>Generated locally from the unsaved secret. Nothing was saved. Compare it with the service before saving.</small>
+                </p>
+              ) : secretTestFeedback.status === "error" ? (
+                <p id={secretTestFeedbackId} className="account-editor-secret-test-feedback error" role="alert">Coffer could not generate a test code. Check the secret and TOTP settings, then try again.</p>
+              ) : (
+                <p
+                  id={secretTestFeedbackId}
+                  className="account-editor-secret-test-feedback"
+                  role={secretTestBusy ? "status" : undefined}
+                  aria-live={secretTestBusy ? "polite" : undefined}
+                  aria-atomic={secretTestBusy ? "true" : undefined}
+                >{secretTestHint}</p>
+              )}
+            </div>
+            {codePreview && (
+              <div className="account-editor-code-panel" role="group" aria-label={`Live codes for ${account.service}`}>
+                <div className={`account-editor-current-code ${codeExpiring ? "expiring" : ""}`}>
+                  <span aria-hidden="true">Current</span>
+                  <strong aria-hidden="true">{codePreview.current ?? "--- ---"}</strong>
+                  <span className="visually-hidden">{codePreview.current
+                    ? `Current code ${codePreview.current.replace(/\s/gu, "").split("").join(" ")}`
+                    : "Current code loading"}</span>
+                </div>
+                {account.otpType !== "hotp" && <div className={`account-editor-next-code ${codeExpiring ? "visible" : ""}`} aria-hidden={!codeExpiring}>
+                  <span aria-hidden="true">Next</span>
+                  <strong aria-hidden="true">{codePreview.next ?? "--- ---"}</strong>
+                  <span className="visually-hidden">{codePreview.next
+                    ? `Next code ${codePreview.next.replace(/\s/gu, "").split("").join(" ")}`
+                    : "Next code loading"}</span>
+                </div>}
+                {account.otpType === "hotp" ? <p className="hotp-counter"><span>Counter</span> {account.counter}</p> : <div
+                  className={`countdown ${codeExpiring ? "urgent" : ""}`}
+                  style={{ "--progress": `${(codePreview.remaining / codePreview.period) * 360}deg` } as CSSProperties}
+                >
+                  <span aria-hidden="true">{codePreview.remaining}</span>
+                  <span className="visually-hidden">{codePreview.remaining} seconds remaining</span>
+                </div>}
+                <p>Codes use the saved settings until you save these changes.</p>
+              </div>
+            )}
+            </div>
+          </fieldset>
+
+          <fieldset className="account-editor-section" disabled={busy}>
+            <legend>{otpType === "hotp" ? "HOTP settings" : "TOTP settings"}</legend>
+            <div className="account-editor-grid">
+              <OtpSettingsFields values={{ otpType, counter, algorithm, digits, period }} onChange={(values) => {
+                resetSecretTest();
+                setOtpType(values.otpType);
+                setCounter(values.counter);
+                setAlgorithm(values.algorithm);
+                setDigits(values.digits);
+                setPeriod(values.period);
+              }} />
+            </div>
+          </fieldset>
+
+          <fieldset className="account-editor-section" disabled={busy}>
+            <legend>Account information</legend>
+            <div className="account-editor-grid">
+              <label><span>Service name</span><input ref={serviceInputRef} value={service} onChange={(event) => setService(event.target.value)} maxLength={256} /></label>
+              <label><span>Username</span><input value={identity} onChange={(event) => setIdentity(event.target.value)} maxLength={256} autoComplete="off" /></label>
+              <AccountUrlFields urls={urls} onChange={setUrls} disabled={busy} />
+            </div>
+          </fieldset>
+
           <fieldset className="account-editor-logo-fieldset account-editor-section" disabled={busy || logoBusy}>
             <legend>Platform logo</legend>
           <div className="account-editor-icon-row">
@@ -495,83 +571,6 @@ function AccountEditorForm({ account, brandOptions, customLogos, codePreview, on
               setIconDataUrl(dataUrl);
               setLogoError("");
             }} />
-          </fieldset>
-
-          <fieldset className="account-editor-section" disabled={busy}>
-            <legend>Account information</legend>
-            <div className="account-editor-grid">
-              <label><span>Service name</span><input ref={serviceInputRef} value={service} onChange={(event) => setService(event.target.value)} maxLength={256} /></label>
-              <label><span>Username</span><input value={identity} onChange={(event) => setIdentity(event.target.value)} maxLength={256} autoComplete="off" /></label>
-              <AccountUrlFields urls={urls} onChange={setUrls} disabled={busy} />
-            </div>
-          </fieldset>
-
-          <fieldset className="account-editor-section" disabled={busy}>
-            <legend>Secret key</legend>
-            <div className="account-editor-authentication-fields">
-            <div className="account-editor-secret">
-              <label className="visually-hidden" htmlFor={secretInputId}>Secret key</label>
-              <span className="account-editor-secret-control">
-                <input id={secretInputId} ref={secretInputRef} type={showSecret ? "text" : "password"} value={secret} onChange={(event) => changeSecret(event.target.value)} maxLength={1_280} autoComplete="off" spellCheck={false} aria-describedby={secretTestFeedbackId} />
-                <button type="button" onClick={() => setShowSecret((shown) => !shown)} aria-pressed={showSecret}>{showSecret ? "Hide" : "Show"}</button>
-                <button className="account-editor-test-secret" type="button" onClick={() => void testSecret()} disabled={secretTestDisabled} aria-describedby={secretTestFeedbackId}>{secretTestBusy ? "Testing…" : "Test"}</button>
-              </span>
-              {showSecret && <AccountSetupQr issuer={service} account={identity} secret={secret} algorithm={algorithm} digits={digits} period={period} />}
-              {secretTestFeedback.status === "success" ? (
-                <p id={secretTestFeedbackId} className="account-editor-secret-test-feedback success" role="status" aria-live="polite" aria-atomic="true">
-                  <span>Test code</span>
-                  <strong aria-hidden="true">{secretTestFeedback.preview.code}</strong>
-                  <span className="visually-hidden">Draft code {secretTestFeedback.preview.code.replace(/\s/gu, "").split("").join(" ")}</span>
-                  <small>Generated locally from the unsaved secret. Nothing was saved. Compare it with the service before saving.</small>
-                </p>
-              ) : secretTestFeedback.status === "error" ? (
-                <p id={secretTestFeedbackId} className="account-editor-secret-test-feedback error" role="alert">Coffer could not generate a test code. Check the secret and TOTP settings, then try again.</p>
-              ) : (
-                <p
-                  id={secretTestFeedbackId}
-                  className="account-editor-secret-test-feedback"
-                  role={secretTestBusy ? "status" : undefined}
-                  aria-live={secretTestBusy ? "polite" : undefined}
-                  aria-atomic={secretTestBusy ? "true" : undefined}
-                >{secretTestHint}</p>
-              )}
-            </div>
-            {codePreview && (
-              <div className="account-editor-code-panel" role="group" aria-label={`Live codes for ${account.service}`}>
-                <div className={`account-editor-current-code ${codeExpiring ? "expiring" : ""}`}>
-                  <span aria-hidden="true">Current</span>
-                  <strong aria-hidden="true">{codePreview.current ?? "--- ---"}</strong>
-                  <span className="visually-hidden">{codePreview.current
-                    ? `Current code ${codePreview.current.replace(/\s/gu, "").split("").join(" ")}`
-                    : "Current code loading"}</span>
-                </div>
-                <div className={`account-editor-next-code ${codeExpiring ? "visible" : ""}`} aria-hidden={!codeExpiring}>
-                  <span aria-hidden="true">Next</span>
-                  <strong aria-hidden="true">{codePreview.next ?? "--- ---"}</strong>
-                  <span className="visually-hidden">{codePreview.next
-                    ? `Next code ${codePreview.next.replace(/\s/gu, "").split("").join(" ")}`
-                    : "Next code loading"}</span>
-                </div>
-                <div
-                  className={`countdown ${codeExpiring ? "urgent" : ""}`}
-                  style={{ "--progress": `${(codePreview.remaining / codePreview.period) * 360}deg` } as CSSProperties}
-                >
-                  <span aria-hidden="true">{codePreview.remaining}</span>
-                  <span className="visually-hidden">{codePreview.remaining} seconds remaining</span>
-                </div>
-                <p>Codes use the saved settings until you save these changes.</p>
-              </div>
-            )}
-            </div>
-          </fieldset>
-
-          <fieldset className="account-editor-section" disabled={busy}>
-            <legend>TOTP settings</legend>
-            <div className="account-editor-grid">
-              <label><span>Digits</span><select value={digits} onChange={(event) => changeDigits(Number(event.target.value) as 6 | 8)}><option value="6">6 digits</option><option value="8">8 digits</option></select></label>
-              <label><span>Algorithm</span><select value={algorithm} onChange={(event) => changeAlgorithm(event.target.value as TotpAlgorithm)}><option value="SHA-1">SHA-1</option><option value="SHA-256">SHA-256</option><option value="SHA-512">SHA-512</option></select></label>
-              <label><span>Period</span><span className="account-editor-period"><input type="number" min={1} max={300} step={1} value={period} onChange={(event) => changePeriod(Number(event.target.value))} /><small>seconds</small></span></label>
-            </div>
           </fieldset>
 
           {error && <p className="account-editor-error" role="alert">{error}</p>}

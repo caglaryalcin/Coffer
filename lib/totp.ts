@@ -1,10 +1,15 @@
 export type TotpAlgorithm = "SHA-1" | "SHA-256" | "SHA-512";
+export type OtpType = "totp" | "hotp";
+export type OtpDigits = 6 | 8;
+export const MAX_HOTP_COUNTER = Number.MAX_SAFE_INTEGER;
 
 export type TotpConfiguration = Readonly<{
   secret: string;
   algorithm: TotpAlgorithm;
-  digits: 6 | 8;
+  digits: OtpDigits;
   period: number;
+  otpType?: OtpType;
+  counter?: number;
 }>;
 
 export type TotpTestPreview = Readonly<{
@@ -18,8 +23,10 @@ export type ParsedOtpAuth = {
   account: string;
   secret: string;
   algorithm: TotpAlgorithm;
-  digits: 6 | 8;
+  digits: OtpDigits;
   period: number;
+  otpType?: OtpType;
+  counter?: number;
 };
 
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -87,14 +94,8 @@ function base32ToBytes(secret: string) {
   return bytes;
 }
 
-export async function generateTotp(
-  secret: string,
-  timestamp = Date.now(),
-  digits = 6,
-  period = 30,
-  algorithm: TotpAlgorithm = "SHA-1",
-) {
-  const { counter } = totpWindow(timestamp, period);
+async function generateOtpBinary(secret: string, counter: number, algorithm: TotpAlgorithm) {
+  validateHotpCounter(counter);
   const message = new ArrayBuffer(8);
   const view = new DataView(message);
   view.setUint32(0, Math.floor(counter / 0x100000000), false);
@@ -114,7 +115,49 @@ export async function generateTotp(
     ((digest[offset + 1] & 0xff) << 16) |
     ((digest[offset + 2] & 0xff) << 8) |
     (digest[offset + 3] & 0xff);
+  return binary;
+}
+
+export function validateHotpCounter(value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`Counter must be a whole number between 0 and ${MAX_HOTP_COUNTER}.`);
+  }
+  return value;
+}
+
+export function validateOtpSettings(values: TotpConfiguration) {
+  const otpType = values.otpType ?? "totp";
+  if (!["totp", "hotp"].includes(otpType)) throw new Error("Choose a supported OTP type.");
+  if (!["SHA-1", "SHA-256", "SHA-512"].includes(values.algorithm)) throw new Error("Choose a supported OTP algorithm.");
+  if (values.digits !== 6 && values.digits !== 8) throw new Error("Digit count must be 6 or 8.");
+  if (!Number.isInteger(values.period) || values.period < 1 || values.period > 300) {
+    throw new Error("Period must be a whole number between 1 and 300 seconds.");
+  }
+  const counter = otpType === "hotp" ? validateHotpCounter(values.counter) : 0;
+  if (otpType !== "hotp" && values.counter !== undefined && values.counter !== 0) throw new Error("Only HOTP accounts may have a counter.");
+  return { otpType, counter, algorithm: values.algorithm, digits: values.digits, period: otpType === "hotp" ? 30 : values.period };
+}
+
+export function normalizeAccountSecret(secret: string) {
+  return parseBase32Secret(normalizeSecret(secret));
+}
+
+export async function generateHotp(secret: string, counter: number, digits = 6, algorithm: TotpAlgorithm = "SHA-1") {
+  if (digits !== 6 && digits !== 8) throw new Error("HOTP requires 6 or 8 digits.");
+  const binary = await generateOtpBinary(secret, counter, algorithm);
   return String(binary % 10 ** digits).padStart(digits, "0");
+}
+
+export async function generateTotp(secret: string, timestamp = Date.now(), digits = 6, period = 30, algorithm: TotpAlgorithm = "SHA-1") {
+  if (!Number.isInteger(period) || period < 1 || period > 300 || !Number.isFinite(timestamp) || timestamp < 0) throw new Error("Invalid TOTP time or period.");
+  return generateHotp(secret, totpWindow(timestamp, period).counter, digits, algorithm);
+}
+
+export async function generateAccountCode(configuration: TotpConfiguration, timestamp = Date.now()) {
+  const settings = validateOtpSettings(configuration);
+  const secret = normalizeAccountSecret(configuration.secret);
+  if (settings.otpType === "hotp") return generateHotp(secret, settings.counter, settings.digits, settings.algorithm);
+  return generateTotp(secret, timestamp, settings.digits, settings.period, settings.algorithm);
 }
 
 export function totpWindow(timestamp: number, period: number) {
@@ -139,17 +182,11 @@ export async function generateTotpTestPreview(
   timestamp = Date.now(),
 ): Promise<TotpTestPreview> {
   const { nextTimestamp } = totpWindow(timestamp, configuration.period);
-  const code = await generateTotp(
-    configuration.secret,
-    timestamp,
-    configuration.digits,
-    configuration.period,
-    configuration.algorithm,
-  );
+  const code = await generateAccountCode(configuration, timestamp);
   return {
     code: formatCode(code),
     generatedAt: timestamp,
-    expiresAt: nextTimestamp,
+    expiresAt: configuration.otpType === "hotp" ? Number.POSITIVE_INFINITY : nextTimestamp,
   };
 }
 
@@ -157,8 +194,8 @@ export function parseOtpAuthUri(value: string): ParsedOtpAuth {
   const input = value.trim();
   if (input.length === 0 || input.length > 8_192) throw new Error("The setup link is empty or too long");
   const url = new URL(input);
-  if (url.protocol !== "otpauth:" || url.hostname !== "totp") {
-    throw new Error("Use a valid otpauth://totp setup link");
+  if (url.protocol !== "otpauth:" || !["totp", "hotp"].includes(url.hostname)) {
+    throw new Error("Use a valid TOTP or HOTP otpauth:// setup link");
   }
 
   const getSingleParameter = (name: string) => {
@@ -168,6 +205,13 @@ export function parseOtpAuthUri(value: string): ParsedOtpAuth {
   };
 
   const label = decodeURIComponent(url.pathname.replace(/^\//, ""));
+  const encoder = getSingleParameter("encoder");
+  if (encoder !== undefined) throw new Error("The setup link uses an unsupported encoder");
+  const otpType: OtpType = url.hostname === "hotp" ? "hotp" : "totp";
+  const counterParameter = getSingleParameter("counter");
+  if (otpType === "hotp" && (counterParameter === undefined || !/^\d+$/u.test(counterParameter))) throw new Error("HOTP setup links require a valid counter");
+  if (otpType !== "hotp" && counterParameter !== undefined) throw new Error("Only HOTP setup links may specify a counter");
+  const counter = otpType === "hotp" ? validateHotpCounter(Number(counterParameter)) : 0;
   const separator = label.indexOf(":");
   const issuerFromLabel = separator >= 0 ? label.slice(0, separator).replace(/ +$/u, "") : "";
   const account = (separator >= 0 ? label.slice(separator + 1) : label).replace(/^ +/u, "");
@@ -196,22 +240,24 @@ export function parseOtpAuthUri(value: string): ParsedOtpAuth {
     throw new Error("The setup link uses an invalid digit count");
   }
   const rawDigits = Number(digitsParameter ?? "6");
-  const digits = rawDigits === 8 ? 8 : rawDigits === 6 ? 6 : null;
+  const digits: OtpDigits | null = rawDigits === 8 ? 8 : rawDigits === 6 ? 6 : null;
   const periodParameter = getSingleParameter("period");
   if (periodParameter !== undefined && !/^\d+$/u.test(periodParameter)) {
     throw new Error("The setup link uses an invalid period");
   }
-  const period = Number(periodParameter ?? "30");
+  const period = otpType === "hotp" ? 30 : Number(periodParameter ?? "30");
   const canonicalSecret = parseBase32Secret(secret);
 
   if (!account || issuer.length > 256 || account.length > 256 || hasControlCharacters(`${issuer}${account}`) || !digits || !Number.isInteger(period) || period < 1 || period > 300) {
-    throw new Error("The setup link is missing an account or valid TOTP settings");
+    throw new Error("The setup link is missing an account or valid OTP settings");
   }
 
-  return { issuer, account, secret: canonicalSecret, algorithm, digits, period };
+  validateOtpSettings({ secret: canonicalSecret, algorithm, digits, period, otpType, counter });
+  return { issuer, account, secret: canonicalSecret, algorithm, digits, period, ...(otpType !== "totp" ? { otpType, counter } : {}) };
 }
 
 export function createOtpAuthUri(account: ParsedOtpAuth) {
+  const settings = validateOtpSettings(account);
   if (!account.issuer.trim() || !account.account.trim() || !isValidBase32(account.secret)) {
     throw new Error("Cannot export an incomplete authenticator account");
   }
@@ -224,5 +270,9 @@ export function createOtpAuthUri(account: ParsedOtpAuth) {
     digits: String(account.digits),
     period: String(account.period),
   });
-  return `otpauth://totp/${label}?${params.toString()}`;
+  if (settings.otpType === "hotp") {
+    params.delete("period");
+    params.set("counter", String(settings.counter));
+  }
+  return `otpauth://${settings.otpType === "hotp" ? "hotp" : "totp"}/${label}?${params.toString()}`;
 }

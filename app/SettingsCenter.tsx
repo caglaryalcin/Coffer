@@ -885,7 +885,7 @@ export default function SettingsCenter({
 
           <section className="settings-about" id="about-settings" aria-labelledby="about-title" tabIndex={-1}>
             <div className="settings-about-panel">
-              <div className="settings-card-copy"><SettingsGlyph kind="about" /><div><h2 id="about-title">About</h2><p className="settings-about-description">Coffer is a multi-user, self-hosted authenticator vault for encrypted TOTP accounts, QR imports, local service logos, groups, and portable backups.</p></div></div>
+              <div className="settings-card-copy"><SettingsGlyph kind="about" /><div><h2 id="about-title">About</h2><p className="settings-about-description">Coffer is a multi-user, self-hosted authenticator vault for encrypted TOTP and HOTP accounts, QR imports, local service logos, groups, and portable backups.</p></div></div>
               <p className="settings-about-stack"><strong>Stack:</strong> React 19 + Vinext + Vite 8 + TypeScript 5 + Tailwind CSS 4, Web Crypto (AES-256-GCM and HMAC-SHA-256) + Argon2id, Node.js 22, and Docker.</p>
               <p className="settings-about-author">
                 <strong>Author:</strong>

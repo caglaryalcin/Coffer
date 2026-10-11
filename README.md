@@ -8,7 +8,7 @@
 
 # Coffer
 
-Coffer is a self-hosted, multi-user authenticator vault. It generates TOTP
+Coffer is a self-hosted, multi-user authenticator vault. It generates TOTP and HOTP
 codes in the browser and encrypts each user's vault before storing it on the
 server. It also supports QR imports, groups, backups, and 2FAS transfers.
 
@@ -17,7 +17,10 @@ server. It also supports QR imports, groups, backups, and 2FAS transfers.
 ## Features
 
 - Multi-user, browser-encrypted vaults
-- TOTP generation with QR and manual account setup
+- TOTP and HOTP generation with QR and manual account setup
+- HOTP counters advance explicitly with Next code and are saved in the encrypted vault before copying; copying alone does not advance them
+- HOTP import/export through Coffer backups, 2FAS, 2FAuth imports, and OTPAuth links (counter range: 0–9,007,199,254,740,991)
+- Existing TOTP vaults and backups remain supported; Steam Guard is not supported
 
 ![](https://raw.githubusercontent.com/caglaryalcin/Coffer/refs/heads/main/screenshots/qr.png)
 

@@ -87,6 +87,11 @@ for (const algorithm of ["SHA-1", "SHA-256", "SHA-512"]) {
 assert.throws(() => createAccountQr({ issuer: "Test", account: "a", secret: "INVALID!", algorithm: "SHA-1", digits: 6, period: 30 }));
 assert.throws(() => createAccountQr({ issuer: "Test", account: "a", secret: "JBSWY3DPEHPK3PXP", algorithm: "SHA-1", digits: 6, period: 0 }));
 console.log("PASS: QR round-trip preserves secret, Unicode labels, algorithms, digits, and period; invalid settings are rejected");
+const hotpQrAccount = {
+  issuer: "Counter", account: "qr@example.com", secret: "JBSWY3DPEHPK3PXP",
+  algorithm: "SHA-1", digits: 6, period: 30, otpType: "hotp", counter: 42,
+};
+assert.deepEqual(parseOtpAuthUri(decodeQr(createAccountQr(hotpQrAccount))), hotpQrAccount);
 
 const editorBundle = await build({
   stdin: {
@@ -132,13 +137,29 @@ const markup = editorModule.exports.renderEditor({
   codePreview: { current: "123 456", next: "654 321", remaining: 20, period: 30 },
 });
 assert.deepEqual([...markup.matchAll(/<legend[^>]*>(.*?)<\/legend>/gu)].map((match) => match[1]), [
-  "Platform logo", "Custom logo", "Account information", "Secret key", "TOTP settings",
+  "Secret key", "TOTP settings", "Account information", "Platform logo", "Custom logo",
 ]);
 assert.match(markup, /type="password"/u);
 assert.match(markup, /Live codes for Test/u);
 assert.match(markup, /Website URLs/u);
 assert.doesNotMatch(markup, /Account import QR code/u);
 console.log("PASS: Account Details renders separate framed sections with all fields and keeps QR hidden initially");
+const hotpMarkup = editorModule.exports.renderEditor({
+  account: {
+    id: "hotp-card", service: "Counter", identity: "hotp@example.com", urls: [],
+    secret: "JBSWY3DPEHPK3PXP", group: "Personal", color: "ink", letter: "C",
+    favorite: false, archived: false, lastUsed: 0, algorithm: "SHA-1", digits: 6, period: 30,
+    iconBrand: null, iconDataUrl: null, otpType: "hotp", counter: 42,
+  },
+  brandOptions: [], customLogos: [], onClose: () => {}, onSave: () => {},
+  codePreview: { current: "123 456", next: null, remaining: 0, period: 30 },
+});
+assert.deepEqual([...hotpMarkup.matchAll(/<legend[^>]*>(.*?)<\/legend>/gu)].map((match) => match[1]), [
+  "Secret key", "HOTP settings", "Account information", "Platform logo", "Custom logo",
+]);
+assert.match(hotpMarkup, /Counter/u);
+assert.doesNotMatch(hotpMarkup, /class="countdown/u);
+assert.doesNotMatch(hotpMarkup, /value="steam"/u);
 
 const settingsMarkup = editorModule.exports.renderSettings({
   profile: { name: "Test", email: "test@example.com", avatarDataUrl: null },

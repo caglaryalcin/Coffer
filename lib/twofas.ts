@@ -1,6 +1,6 @@
 import type { CofferAccount, CofferTotpAlgorithm } from "./backup";
 import type { ImportBatch, ImportItem } from "./importers";
-import { createOtpAuthUri, parseBase32Secret } from "./totp";
+import { createOtpAuthUri, parseBase32Secret, parseOtpAuthUri, validateOtpSettings, type OtpType, type OtpDigits } from "./totp";
 
 export const TWOFAS_SCHEMA_VERSION = 4 as const;
 export const TWOFAS_BACKUP_KDF_ITERATIONS = 10_000 as const;
@@ -353,24 +353,19 @@ function parseService(
 
   const tokenType = optionalText(entry.otp.tokenType, `${field}.otp.tokenType`, 32);
   const link = optionalText(entry.otp.link, `${field}.otp.link`, 8_192);
-  if (tokenType === null && link?.toLowerCase().startsWith("otpauth://hotp/")) {
-    throw new Error("HOTP accounts are not supported");
-  }
-  const normalizedType = tokenType?.toUpperCase() ?? "TOTP";
-  if (normalizedType === "HOTP") throw new Error("HOTP accounts are not supported");
-  if (normalizedType === "STEAM") throw new Error("Steam accounts are not supported");
-  if (normalizedType !== "TOTP") throw new Error(`${normalizedType} accounts are not supported`);
-  // 2FAS treats tokenType as authoritative and defaults a missing value to
-  // TOTP. Some official backups retain a counter on those TOTP records, so it
-  // must not be used to infer HOTP. An explicit HOTP type or HOTP URI is still
-  // rejected above because Coffer does not model counter-based tokens.
-
-  const rawDigits = entry.otp.digits ?? 6;
-  if (rawDigits !== 6 && rawDigits !== 8) throw new Error("Digit count is not supported");
-  const rawPeriod = entry.otp.period ?? 30;
-  if (!Number.isInteger(rawPeriod) || (rawPeriod as number) < 1 || (rawPeriod as number) > 300) {
-    throw new Error("Period is outside the supported range");
-  }
+  const linkedUrl = link ? (() => { try { return new URL(link); } catch { return null; } })() : null;
+  if (linkedUrl?.hostname === "steam" || linkedUrl?.searchParams.get("encoder") === "steam") throw new Error("Steam accounts are not supported");
+  const linked = link ? (() => { try { return parseOtpAuthUri(link); } catch { return null; } })() : null;
+  const otpType = (tokenType?.toLowerCase() ?? linked?.otpType ?? (link?.toLowerCase().startsWith("otpauth://hotp/") ? "hotp" : "totp")) as OtpType;
+  if ((otpType as string) === "steam") throw new Error("Steam accounts are not supported");
+  if (!["totp", "hotp"].includes(otpType)) throw new Error("OTP type is not supported");
+  // An incidental counter on a TOTP record never changes its token type.
+  const settings = validateOtpSettings({
+    secret, otpType, counter: otpType === "hotp" ? (entry.otp.counter ?? linked?.counter) as number : 0,
+    algorithm: parseAlgorithm(entry.otp.algorithm),
+    digits: (entry.otp.digits ?? 6) as OtpDigits,
+    period: otpType === "hotp" ? 30 : (entry.otp.period ?? 30) as number,
+  });
 
   const issuer = optionalText(entry.otp.issuer, `${field}.otp.issuer`, MAX_SERVICE_CHARACTERS);
   const account = optionalText(entry.otp.account, `${field}.otp.account`, MAX_IDENTITY_CHARACTERS);
@@ -396,9 +391,7 @@ function parseService(
     group,
     favorite: false,
     archived: false,
-    algorithm: parseAlgorithm(entry.otp.algorithm),
-    digits: rawDigits,
-    period: rawPeriod as number,
+    ...settings,
   };
 }
 
@@ -435,8 +428,10 @@ export async function parseTwoFasBackup(input: string, password?: string): Promi
 
 function validateExportAccount(account: CofferAccount, index: number): CofferAccount & {
   algorithm: CofferTotpAlgorithm;
-  digits: 6 | 8;
+  digits: OtpDigits;
   period: number;
+  otpType: OtpType;
+  counter: number;
 } {
   if (!isRecord(account)) throw new Error(`accounts[${index}] must be an object`);
   const service = safeText(account.service, `accounts[${index}].service`, MAX_SERVICE_CHARACTERS);
@@ -449,12 +444,12 @@ function validateExportAccount(account: CofferAccount, index: number): CofferAcc
     throw new Error(`accounts[${index}].algorithm is not supported by 2FAS TOTP backups`);
   }
   const digits = account.digits ?? 6;
-  if (digits !== 6 && digits !== 8) throw new Error(`accounts[${index}].digits is not supported by 2FAS TOTP backups`);
+  const settings = validateOtpSettings({ secret, otpType: account.otpType, counter: account.counter, algorithm, digits, period: account.period ?? 30 });
   const period = account.period ?? 30;
-  if (!Number.isInteger(period) || ![10, 30, 60, 90].includes(period)) {
+  if (settings.otpType === "totp" && (!Number.isInteger(period) || ![10, 30, 60, 90].includes(period))) {
     throw new Error(`accounts[${index}].period must be 10, 30, 60, or 90 seconds for 2FAS`);
   }
-  return { ...account, service, identity, group, secret, algorithm, digits, period };
+  return { ...account, service, identity, group, secret, ...settings };
 }
 
 function randomUuid(): string {
@@ -505,6 +500,8 @@ function makeServices(
     serviceTypeID: null,
     otp: {
       link: createOtpAuthUri({
+        otpType: account.otpType,
+        counter: account.counter,
         issuer: account.service,
         account: account.identity,
         secret: account.secret,
@@ -518,8 +515,8 @@ function makeServices(
       digits: account.digits,
       period: account.period,
       algorithm: exportAlgorithm(account.algorithm),
-      counter: null,
-      tokenType: "TOTP",
+      counter: account.otpType === "hotp" ? account.counter : null,
+      tokenType: account.otpType.toUpperCase(),
       source: "Link",
     },
     order: { position },
@@ -555,7 +552,7 @@ async function encryptValue(plaintext: Uint8Array, key: CryptoKey, iv: Uint8Arra
   );
 }
 
-/** Creates a password-protected 2FAS schema v4 backup containing representable TOTP accounts. */
+/** Creates a password-protected 2FAS schema v4 backup containing representable OTP accounts. */
 export async function createTwoFasBackup(accounts: readonly CofferAccount[], password: string): Promise<string> {
   if (!Array.isArray(accounts)) throw new Error("accounts must be an array");
   if (accounts.length > MAX_ACCOUNTS) throw new Error("A 2FAS backup cannot contain more than 1,000 accounts");

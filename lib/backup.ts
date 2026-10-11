@@ -1,3 +1,4 @@
+import { validateOtpSettings, type OtpType, type OtpDigits } from "./totp";
 import {
   MAX_VAULT_ACCOUNT_ICON_BYTES,
   parseAccountIconDataUrl,
@@ -10,7 +11,8 @@ export const COFFER_BACKUP_FORMAT = "coffer-backup" as const;
 export const LEGACY_COFFER_BACKUP_VERSION = 1 as const;
 export const PRE_ACCOUNT_URL_COFFER_BACKUP_VERSION = 2 as const;
 export const PRE_MULTIPLE_ACCOUNT_URL_COFFER_BACKUP_VERSION = 3 as const;
-export const COFFER_BACKUP_VERSION = 4 as const;
+export const PRE_OTP_TYPE_COFFER_BACKUP_VERSION = 4 as const;
+export const COFFER_BACKUP_VERSION = 5 as const;
 export const COFFER_BACKUP_KDF_ITERATIONS = 600_000 as const;
 
 export const MAX_BACKUP_FILE_BYTES = 5 * 1024 * 1024;
@@ -45,7 +47,9 @@ export type CofferAccount = {
   favorite: boolean;
   archived: boolean;
   algorithm?: CofferTotpAlgorithm;
-  digits?: 6 | 8;
+  digits?: OtpDigits;
+  otpType?: OtpType;
+  counter?: number;
   period?: number;
   /** A bundled local brand id. Missing keeps legacy backups backward compatible. */
   iconBrand?: string | null;
@@ -63,6 +67,8 @@ export function projectCofferAccount(account: CofferAccount): CofferAccount {
     group: account.group,
     favorite: account.favorite,
     archived: account.archived,
+    otpType: account.otpType ?? "totp",
+    counter: account.counter ?? 0,
     algorithm: account.algorithm ?? "SHA-1",
     digits: account.digits ?? 6,
     period: account.period ?? 30,
@@ -110,6 +116,7 @@ type SupportedCofferBackupVersion =
   | typeof LEGACY_COFFER_BACKUP_VERSION
   | typeof PRE_ACCOUNT_URL_COFFER_BACKUP_VERSION
   | typeof PRE_MULTIPLE_ACCOUNT_URL_COFFER_BACKUP_VERSION
+  | typeof PRE_OTP_TYPE_COFFER_BACKUP_VERSION
   | typeof COFFER_BACKUP_VERSION;
 
 function cryptoApi(): Crypto {
@@ -194,7 +201,9 @@ function validateAccount(
 
   const requiredKeys = ["service", "identity", "secret", "group", "favorite", "archived"];
   const optionalKeys = version === COFFER_BACKUP_VERSION
-    ? ["algorithm", "digits", "period", "iconBrand", "iconDataUrl", "urls"]
+    ? ["algorithm", "digits", "period", "iconBrand", "iconDataUrl", "urls", "otpType", "counter"]
+    : version === PRE_OTP_TYPE_COFFER_BACKUP_VERSION
+      ? ["algorithm", "digits", "period", "iconBrand", "iconDataUrl", "urls"]
     : version === PRE_MULTIPLE_ACCOUNT_URL_COFFER_BACKUP_VERSION
       ? ["algorithm", "digits", "period", "iconBrand", "iconDataUrl", "url"]
       : version === PRE_ACCOUNT_URL_COFFER_BACKUP_VERSION
@@ -258,6 +267,17 @@ function validateAccount(
     throw new Error(`${field} cannot use both iconBrand and iconDataUrl`);
   }
 
+  if (Object.hasOwn(value, "otpType") && value.otpType !== "totp" && value.otpType !== "hotp") throw new Error(`${field}.otpType is invalid`);
+  const settings = validateOtpSettings({
+    secret: account.secret, otpType: value.otpType as OtpType | undefined,
+    counter: value.counter as number | undefined, algorithm: account.algorithm ?? "SHA-1",
+    digits: account.digits ?? 6, period: account.period ?? 30,
+  });
+  if (version === COFFER_BACKUP_VERSION) {
+    account.otpType = settings.otpType;
+    account.counter = settings.counter;
+    if (settings.otpType === "hotp") account.period = settings.period;
+  }
   return account;
 }
 
@@ -315,6 +335,7 @@ function validatePlainEnvelope(value: unknown): PlainBackupEnvelope {
     value.version !== LEGACY_COFFER_BACKUP_VERSION &&
     value.version !== PRE_ACCOUNT_URL_COFFER_BACKUP_VERSION &&
     value.version !== PRE_MULTIPLE_ACCOUNT_URL_COFFER_BACKUP_VERSION &&
+    value.version !== PRE_OTP_TYPE_COFFER_BACKUP_VERSION &&
     value.version !== COFFER_BACKUP_VERSION
   ) {
     throw new Error("Unsupported Coffer backup version");
@@ -341,6 +362,7 @@ function validateEncryptedEnvelope(value: unknown): EncryptedBackupEnvelope {
     value.version !== LEGACY_COFFER_BACKUP_VERSION &&
     value.version !== PRE_ACCOUNT_URL_COFFER_BACKUP_VERSION &&
     value.version !== PRE_MULTIPLE_ACCOUNT_URL_COFFER_BACKUP_VERSION &&
+    value.version !== PRE_OTP_TYPE_COFFER_BACKUP_VERSION &&
     value.version !== COFFER_BACKUP_VERSION
   ) {
     throw new Error("Unsupported Coffer backup version");

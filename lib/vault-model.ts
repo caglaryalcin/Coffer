@@ -1,4 +1,4 @@
-import { parseBase32Secret, type TotpAlgorithm } from "./totp";
+import { parseBase32Secret, validateOtpSettings, type OtpType, type OtpDigits, type TotpAlgorithm } from "./totp";
 
 export const VAULT_PAYLOAD_FORMAT = "coffer-vault" as const;
 export const LEGACY_VAULT_PAYLOAD_VERSION = 1 as const;
@@ -11,7 +11,8 @@ export const PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION = 7 as const;
 export const PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION = 8 as const;
 export const PRE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION = 9 as const;
 export const PRE_MULTIPLE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION = 10 as const;
-export const VAULT_PAYLOAD_VERSION = 11 as const;
+export const PRE_OTP_TYPE_VAULT_PAYLOAD_VERSION = 11 as const;
+export const VAULT_PAYLOAD_VERSION = 12 as const;
 export const MAX_VAULT_ACCOUNTS = 5_000;
 export const MAX_PROFILE_AVATAR_BYTES = 512 * 1024;
 export const ACCOUNT_ICON_SIZE = 128;
@@ -79,7 +80,9 @@ export type VaultAccount = {
   favorite: boolean;
   lastUsed: number;
   algorithm: TotpAlgorithm;
-  digits: 6 | 8;
+  digits: OtpDigits;
+  otpType: OtpType;
+  counter: number;
   period: number;
   archived: boolean;
   /** A local bundled brand id. Null keeps automatic service-name detection. */
@@ -130,7 +133,8 @@ const LEGACY_ACCOUNT_FIELDS = ["id", "service", "identity", "secret", "group", "
 const BRAND_ACCOUNT_FIELDS = [...LEGACY_ACCOUNT_FIELDS, "iconBrand"] as const;
 const ICON_ACCOUNT_FIELDS = [...BRAND_ACCOUNT_FIELDS, "iconDataUrl"] as const;
 const SINGLE_URL_ACCOUNT_FIELDS = [...ICON_ACCOUNT_FIELDS, "url"] as const;
-const ACCOUNT_FIELDS = [...ICON_ACCOUNT_FIELDS, "urls"] as const;
+const PRE_OTP_ACCOUNT_FIELDS = [...ICON_ACCOUNT_FIELDS, "urls"] as const;
+const ACCOUNT_FIELDS = [...PRE_OTP_ACCOUNT_FIELDS, "otpType", "counter"] as const;
 const GROUP_CUSTOMIZATION_FIELDS = ["name", "icon", "color"] as const;
 const GROUP_ICONS = [
   "dot",
@@ -361,6 +365,7 @@ function parseProfile(value: unknown, version: SupportedVaultPayloadVersion): Va
     version === PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION ||
     version === PRE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
     version === PRE_MULTIPLE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
+    version === PRE_OTP_TYPE_VAULT_PAYLOAD_VERSION ||
     version === VAULT_PAYLOAD_VERSION;
   requireExactFields(value, supportsCustomization ? PROFILE_FIELDS : LEGACY_PROFILE_FIELDS, "profile");
   const name = requireText(value.name, "profile.name", 80);
@@ -384,6 +389,7 @@ type SupportedVaultPayloadVersion =
   | typeof PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION
   | typeof PRE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION
   | typeof PRE_MULTIPLE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION
+  | typeof PRE_OTP_TYPE_VAULT_PAYLOAD_VERSION
   | typeof VAULT_PAYLOAD_VERSION;
 
 function parseMainScreen(value: unknown): VaultMainScreen {
@@ -410,6 +416,7 @@ function parseSettings(value: unknown, version: SupportedVaultPayloadVersion): V
       : version === PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION ||
           version === PRE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
           version === PRE_MULTIPLE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
+          version === PRE_OTP_TYPE_VAULT_PAYLOAD_VERSION ||
           version === VAULT_PAYLOAD_VERSION
         ? SETTINGS_FIELDS
         : PRE_MAIN_SCREEN_SETTINGS_FIELDS;
@@ -427,6 +434,7 @@ function parseSettings(value: unknown, version: SupportedVaultPayloadVersion): V
   const mainScreen = version === PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION ||
     version === PRE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
     version === PRE_MULTIPLE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
+    version === PRE_OTP_TYPE_VAULT_PAYLOAD_VERSION ||
     version === VAULT_PAYLOAD_VERSION
     ? parseMainScreen(value.mainScreen)
     : { kind: "all" } as const;
@@ -452,6 +460,7 @@ function parseAccount(value: unknown, index: number, version: SupportedVaultPayl
     version === PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION ||
     version === PRE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
     version === PRE_MULTIPLE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
+    version === PRE_OTP_TYPE_VAULT_PAYLOAD_VERSION ||
     version === VAULT_PAYLOAD_VERSION;
   const supportsAccountIcons =
     version === PRE_GROUP_ORDER_VAULT_PAYLOAD_VERSION ||
@@ -459,13 +468,15 @@ function parseAccount(value: unknown, index: number, version: SupportedVaultPayl
     version === PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION ||
     version === PRE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
     version === PRE_MULTIPLE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
+    version === PRE_OTP_TYPE_VAULT_PAYLOAD_VERSION ||
     version === VAULT_PAYLOAD_VERSION;
   const supportsSingleAccountUrl = version === PRE_MULTIPLE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION;
-  const supportsMultipleAccountUrls = version === VAULT_PAYLOAD_VERSION;
+  const supportsMultipleAccountUrls = version === PRE_OTP_TYPE_VAULT_PAYLOAD_VERSION ||
+    version === VAULT_PAYLOAD_VERSION;
   requireExactFields(
     value,
     supportsMultipleAccountUrls
-      ? ACCOUNT_FIELDS
+      ? version === VAULT_PAYLOAD_VERSION ? ACCOUNT_FIELDS : PRE_OTP_ACCOUNT_FIELDS
       : supportsSingleAccountUrl
         ? SINGLE_URL_ACCOUNT_FIELDS
       : supportsAccountIcons
@@ -478,11 +489,16 @@ function parseAccount(value: unknown, index: number, version: SupportedVaultPayl
   const algorithm = value.algorithm;
   const digits = value.digits;
   const period = value.period;
+  const otpType = version === VAULT_PAYLOAD_VERSION ? value.otpType as OtpType : "totp";
+  const counter = version === VAULT_PAYLOAD_VERSION ? value.counter as number : 0;
+  if (otpType !== "totp" && otpType !== "hotp") throw new Error(`${path}.otpType is invalid`);
+  if (version === VAULT_PAYLOAD_VERSION && (typeof counter !== "number" || !Number.isSafeInteger(counter) || counter < 0)) throw new Error(`${path}.counter is invalid`);
   const color = value.color;
   const lastUsed = value.lastUsed;
   if (algorithm !== "SHA-1" && algorithm !== "SHA-256" && algorithm !== "SHA-512") throw new Error(`${path}.algorithm is invalid`);
   if (digits !== 6 && digits !== 8) throw new Error(`${path}.digits is invalid`);
   if (typeof period !== "number" || !Number.isInteger(period) || period < 1 || period > 300) throw new Error(`${path}.period is invalid`);
+  validateOtpSettings({ secret: "", algorithm, digits, period, otpType, counter });
   if (color !== "ink" && color !== "orange" && color !== "blue" && color !== "violet" && color !== "green") throw new Error(`${path}.color is invalid`);
   if (typeof lastUsed !== "number" || !Number.isSafeInteger(lastUsed) || lastUsed < 0) throw new Error(`${path}.lastUsed is invalid`);
   if (typeof value.favorite !== "boolean" || typeof value.archived !== "boolean") throw new Error(`${path} flags are invalid`);
@@ -512,6 +528,8 @@ function parseAccount(value: unknown, index: number, version: SupportedVaultPayl
     algorithm,
     digits,
     period,
+    otpType,
+    counter,
     archived: value.archived,
     iconBrand,
     iconDataUrl,
@@ -677,6 +695,7 @@ export function parsePersistedVault(value: unknown): PersistedVault {
       value.version !== PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION &&
       value.version !== PRE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION &&
       value.version !== PRE_MULTIPLE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION &&
+      value.version !== PRE_OTP_TYPE_VAULT_PAYLOAD_VERSION &&
       value.version !== VAULT_PAYLOAD_VERSION
     )
   ) {
@@ -690,12 +709,14 @@ export function parsePersistedVault(value: unknown): PersistedVault {
     sourceVersion === PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION ||
     sourceVersion === PRE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
     sourceVersion === PRE_MULTIPLE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
+    sourceVersion === PRE_OTP_TYPE_VAULT_PAYLOAD_VERSION ||
     sourceVersion === VAULT_PAYLOAD_VERSION;
   const supportsGroupOrder =
     sourceVersion === PRE_MAIN_SCREEN_VAULT_PAYLOAD_VERSION ||
     sourceVersion === PRE_GROUP_STYLE_EXPANSION_VAULT_PAYLOAD_VERSION ||
     sourceVersion === PRE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
     sourceVersion === PRE_MULTIPLE_ACCOUNT_URL_VAULT_PAYLOAD_VERSION ||
+    sourceVersion === PRE_OTP_TYPE_VAULT_PAYLOAD_VERSION ||
     sourceVersion === VAULT_PAYLOAD_VERSION;
   requireExactFields(
     value,
