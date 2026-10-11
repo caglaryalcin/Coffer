@@ -41,7 +41,27 @@ export type VaultGroupIcon =
   | "import"
   | "ai"
   | "drive"
-  | "forum";
+  | "forum"
+  | "globe"
+  | "key"
+  | "lock"
+  | "cloud"
+  | "server"
+  | "database"
+  | "terminal"
+  | "smartphone"
+  | "gamepad"
+  | "music"
+  | "camera"
+  | "video"
+  | "calendar"
+  | "bookmark"
+  | "link"
+  | "wifi"
+  | "tools"
+  | "layers"
+  | "coffee"
+  | "users";
 export type VaultGroupColor =
   | "rose"
   | "amber"
@@ -157,6 +177,26 @@ const GROUP_ICONS = [
   "ai",
   "drive",
   "forum",
+  "globe",
+  "key",
+  "lock",
+  "cloud",
+  "server",
+  "database",
+  "terminal",
+  "smartphone",
+  "gamepad",
+  "music",
+  "camera",
+  "video",
+  "calendar",
+  "bookmark",
+  "link",
+  "wifi",
+  "tools",
+  "layers",
+  "coffee",
+  "users",
 ] as const satisfies readonly VaultGroupIcon[];
 const GROUP_COLORS = [
   "rose",

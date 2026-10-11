@@ -441,6 +441,7 @@ async function settleWithin<T>(
 
 const EMPTY_GROUP_CUSTOMIZATIONS: VaultGroupCustomization[] = [];
 const SIDEBAR_WIDTH_STORAGE_KEY = "coffer:sidebar-width:v1";
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "coffer:sidebar-collapsed:v1";
 const DEFAULT_SIDEBAR_WIDTH = 248;
 const MIN_SIDEBAR_WIDTH = 210;
 const MAX_SIDEBAR_WIDTH = 420;
@@ -457,6 +458,14 @@ function readSidebarWidth() {
     return Number.isFinite(stored) && stored > 0 ? clampSidebarWidth(stored) : DEFAULT_SIDEBAR_WIDTH;
   } catch {
     return DEFAULT_SIDEBAR_WIDTH;
+  }
+}
+function readSidebarCollapsed() {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
+  } catch {
+    return false;
   }
 }
 const NEW_GROUP_CUSTOMIZATION: VaultGroupCustomization = { name: "", icon: "folder", color: "rose" };
@@ -643,6 +652,7 @@ export default function VaultApp() {
   const [view, setView] = useState<View>("all");
   const [cardView, setCardView] = useState<CardView>("default");
   const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
   const [resizingSidebar, setResizingSidebar] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -4861,9 +4871,37 @@ export default function VaultApp() {
 
   return (
     <main
-      className={`app-shell theme-${theme} ${mobileSidebarOpen ? "mobile-sidebar-open" : ""} ${resizingSidebar ? "sidebar-resizing" : ""}`}
+      className={`app-shell theme-${theme} ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${mobileSidebarOpen ? "mobile-sidebar-open" : ""} ${resizingSidebar ? "sidebar-resizing" : ""}`}
       style={{ "--sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}
     >
+      <button
+        type="button"
+        className="sidebar-toggle"
+        onClick={() => {
+          const nextCollapsed = !sidebarCollapsed;
+          setSidebarCollapsed(nextCollapsed);
+          setSidebarMenuTarget(null);
+          setSidebarMenuPosition(null);
+          setConfirmingSidebarGroupDeletion(null);
+          clearSelectedAccountDrag();
+          clearGroupDrag();
+          sidebarResizeStartRef.current = null;
+          setResizingSidebar(false);
+          try {
+            window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(nextCollapsed));
+          } catch {
+            // Toggling still works when browser storage is unavailable.
+          }
+        }}
+        aria-controls="primary-sidebar"
+        aria-expanded={!sidebarCollapsed}
+        aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+      >
+        <svg className="sidebar-toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+          <path d="m14 6-6 6 6 6" />
+        </svg>
+      </button>
       <aside
         ref={mobileSidebarRef}
         className="sidebar"

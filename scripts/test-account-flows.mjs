@@ -100,6 +100,8 @@ const editorBundle = await build({
       import BulkLogoPicker from './app/BulkLogoPicker';
       export { validateBulkCustomLogoCapacity, accountIconDataUrlBytes, retainedAccountIconBytes } from './app/BulkLogoPicker';
       import SettingsCenter from './app/SettingsCenter';
+      import GroupIcon from './app/GroupIcon';
+      export { GROUP_ICON_OPTIONS } from './app/GroupCustomizationDialog';
       import { I18nProvider } from './app/I18nProvider';
       import { createElement } from 'react';
       import { renderToStaticMarkup } from 'react-dom/server';
@@ -111,6 +113,9 @@ const editorBundle = await build({
       }
       export function renderSettings(props) {
         return renderToStaticMarkup(createElement(I18nProvider, null, createElement(SettingsCenter, props)));
+      }
+      export function renderGroupIcon(icon) {
+        return renderToStaticMarkup(createElement(GroupIcon, { icon, color: 'rose', className: 'group-symbol' }));
       }
     `,
     resolveDir: process.cwd(),
@@ -126,6 +131,17 @@ const editorModule = { exports: {} };
 new Function("require", "module", "exports", editorBundle.outputFiles[0].text)(
   createRequire(import.meta.url), editorModule, editorModule.exports,
 );
+const groupIcons = editorModule.exports.GROUP_ICON_OPTIONS;
+assert.equal(groupIcons.length, 40);
+assert.equal(new Set(groupIcons.map((option) => option.value)).size, groupIcons.length);
+for (const option of groupIcons) {
+  assert.match(editorModule.exports.renderGroupIcon(option.value), /<(?:path|rect|circle|ellipse)\b/u);
+  const iconVault = withVaultUpdate(createEmptyVault({ name: "Icons", email: "icons@example.com" }), {
+    groupCustomizations: [{ name: "Custom group", icon: option.value, color: "rose" }],
+  });
+  assert.equal(parsePersistedVault(JSON.parse(JSON.stringify(iconVault))).groupCustomizations[0].icon, option.value);
+}
+console.log("PASS: all 40 group icons render and persist in the encrypted vault model");
 const markup = editorModule.exports.renderEditor({
   account: {
     id: "test-card", service: "Test", identity: "test@example.com", urls: ["https://example.com"],
