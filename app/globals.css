@@ -1273,6 +1273,7 @@ h1 { margin: 0; font-size: clamp(34px, 4vw, 53px); line-height: .98; letter-spac
 .theme-light .add-button-icon-mark { stroke: #fffaf7; }
 .theme-light .service-meta h2 { color: #545a50; }
 .theme-light .account-card:not(.is-locked) .code-value { color: #42473e; text-shadow: none; }
+.theme-light .account-card:not(.is-locked) .expiring-code .code-value { color: var(--expiry-code); text-shadow: 0 0 14px var(--expiry-glow); }
 .theme-light .add-card { border-color: rgba(202,115,115,.25); background: var(--surface); }
 .theme-light .add-card:is(:hover, :focus-visible) { border-color: var(--theme-accent); background: var(--accent-soft); }
 .theme-light .add-card strong { color: #545a50; }
@@ -1293,6 +1294,7 @@ h1 { margin: 0; font-size: clamp(34px, 4vw, 53px); line-height: .98; letter-spac
 }
 .theme-light .favorite.selected { color: var(--theme-accent); }
 .theme-light .countdown { background: conic-gradient(var(--theme-accent) var(--progress), #ecece5 0); }
+.theme-light .countdown.urgent { background: conic-gradient(var(--expiry-code) var(--progress), #ecece5 0); }
 
 .theme-light .vault-status { border-color: rgba(202,115,115,.42); background: var(--accent-soft); }
 .theme-light .vault-status-icon { background: var(--theme-accent); }
