@@ -1,6 +1,7 @@
 import type { CofferAccount, CofferTotpAlgorithm } from "./backup";
 import type { ImportBatch, ImportItem } from "./importers";
 import { createOtpAuthUri, parseBase32Secret, parseOtpAuthUri, validateOtpSettings, type OtpType, type OtpDigits } from "./totp";
+import { isUngroupedAccountGroup } from "./vault-model";
 
 export const TWOFAS_SCHEMA_VERSION = 4 as const;
 export const TWOFAS_BACKUP_KDF_ITERATIONS = 10_000 as const;
@@ -466,7 +467,9 @@ function makeGroups(accounts: readonly CofferAccount[], updatedAt: number): {
 } {
   const ids = new Map<string, string>();
   for (const account of accounts) {
-    if (!ids.has(account.group)) ids.set(account.group, randomUuid());
+    if (!isUngroupedAccountGroup(account.group) && !ids.has(account.group)) {
+      ids.set(account.group, randomUuid());
+    }
   }
   const groups = [...ids.entries()].map(([name, id]) => ({ id, name, isExpanded: true, updatedAt }));
   return { groups, ids };

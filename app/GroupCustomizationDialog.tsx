@@ -395,8 +395,8 @@ function GroupCustomizationDialogContent({
           {onDelete && (
             <p className={`group-customization-delete-note ${confirmingDelete ? "confirming" : ""}`}>
               {confirmingDelete
-                ? "Delete this group? Its accounts will be moved to Archive. This cannot be undone."
-                : "Delete this group and move its accounts to Archive."}
+                ? "Delete this group? Active accounts will stay in All Cards and archived accounts will stay in Archive. This cannot be undone."
+                : "Delete this group and remove the group from its accounts."}
             </p>
           )}
 

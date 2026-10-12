@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useState, type FormEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { isUngroupedAccountGroup, UNGROUPED_ACCOUNT_GROUP } from "../lib/vault-model";
 
 export type BulkGroupActionsProps = {
   active: boolean;
@@ -63,7 +64,7 @@ function uniqueGroupNames(groups: readonly string[]) {
   for (const rawName of groups) {
     const name = normalizeGroupName(rawName);
     const key = name.toLocaleLowerCase("en");
-    if (name && !names.has(key)) names.set(key, name);
+    if (name && !isUngroupedAccountGroup(name) && !names.has(key)) names.set(key, name);
   }
 
   return [...names.values()];
@@ -220,7 +221,7 @@ export default function BulkGroupActions({
             <strong>{selectedCount} selected</strong>
             <span>{visibleCount} visible</span>
           </div>
-          {showGroupDragHint && selectedCount > 0 && <span className="bulk-drag-hint">Hold outside the code row and drag a selected card to Favorites, Archive, or a sidebar group.</span>}
+          {showGroupDragHint && selectedCount > 0 && <span className="bulk-drag-hint">Hold outside the code row and drag a selected card to All Cards, Favorites, Archive, or a sidebar group.</span>}
         </div>
 
         <div className="bulk-action-buttons">
@@ -318,21 +319,20 @@ export default function BulkGroupActions({
         <div className="bulk-move-panel" id={panelId}>
           <div className="bulk-move-heading">
             <strong>Move selected accounts</strong>
-            <span>Choose an existing group or create one now.</span>
+            <span>Choose All Cards to remove the group, select another group, or create one now.</span>
           </div>
 
           <form className="bulk-existing-group" onSubmit={submitExistingGroup}>
-            <label htmlFor={`${panelId}-existing`}>Existing group</label>
+            <label htmlFor={`${panelId}-existing`}>Destination</label>
             <div>
               <select
                 id={`${panelId}-existing`}
                 value={existingGroup}
                 onChange={(event) => setExistingGroup(event.target.value)}
-                disabled={disabled || existingGroups.length === 0}
+                disabled={disabled}
               >
-                <option value="">
-                  {existingGroups.length === 0 ? "No groups yet" : "Choose a group"}
-                </option>
+                <option value="">Choose a destination</option>
+                <option value={UNGROUPED_ACCOUNT_GROUP}>All Cards (no group)</option>
                 {existingGroups.map((name) => (
                   <option value={name} key={name} data-i18n-ignore>{name}</option>
                 ))}

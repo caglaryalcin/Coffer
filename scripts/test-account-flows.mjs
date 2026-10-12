@@ -11,7 +11,10 @@ const result = await build({
       export { createOtpAuthUri, parseOtpAuthUri } from './lib/totp';
       export { savedCustomLogos, withSelectedAccountLogo } from './lib/custom-logos';
       export { accountCreationDestination } from './lib/account-navigation';
-      export { createEmptyVault, parsePersistedVault, withVaultUpdate } from './lib/vault-model';
+      export { createEmptyVault, parsePersistedVault, UNGROUPED_ACCOUNT_GROUP, withVaultUpdate } from './lib/vault-model';
+      export { removeGroupBranchFromAccounts } from './lib/account-groups';
+      export { orderedVisibleGroupNames } from './lib/group-order';
+      export { compareVaultConflictVersions } from './lib/vault-conflict';
     `,
     resolveDir: process.cwd(),
   },
@@ -22,7 +25,8 @@ const result = await build({
 });
 const {
   createAccountQr, createOtpAuthUri, parseOtpAuthUri, savedCustomLogos, withSelectedAccountLogo,
-  accountCreationDestination, createEmptyVault, parsePersistedVault, withVaultUpdate,
+  accountCreationDestination, createEmptyVault, parsePersistedVault, withVaultUpdate, compareVaultConflictVersions,
+  UNGROUPED_ACCOUNT_GROUP, removeGroupBranchFromAccounts, orderedVisibleGroupNames,
 } = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString("base64")}`);
 
 for (const group of ["Personal", "Work / AI", "All"]) {
@@ -31,6 +35,22 @@ for (const group of ["Personal", "Work / AI", "All"]) {
 assert.deepEqual(accountCreationDestination("favorites", "Personal"), { view: "favorites", group: "All" });
 assert.deepEqual(accountCreationDestination("archive", "Personal"), { view: "all", group: "All" });
 console.log("PASS: account creation preserves the origin group and Favorites behavior");
+
+const groupedAccounts = [
+  { id: "active-root", group: "Work", archived: false },
+  { id: "active-child", group: "Work / AI", archived: false },
+  { id: "archived-child", group: "Work / Legacy", archived: true },
+  { id: "other", group: "Personal", archived: false },
+];
+const accountsAfterGroupDeletion = removeGroupBranchFromAccounts(groupedAccounts, "Work");
+assert.deepEqual(accountsAfterGroupDeletion.map(({ id, group, archived }) => ({ id, group, archived })), [
+  { id: "active-root", group: UNGROUPED_ACCOUNT_GROUP, archived: false },
+  { id: "active-child", group: UNGROUPED_ACCOUNT_GROUP, archived: false },
+  { id: "archived-child", group: UNGROUPED_ACCOUNT_GROUP, archived: true },
+  { id: "other", group: "Personal", archived: false },
+]);
+assert.deepEqual(orderedVisibleGroupNames(accountsAfterGroupDeletion, [{ name: "All" }], ["All", "Work", "Work / AI", "Personal"]), ["Personal"]);
+console.log("PASS: deleting a group removes active and archived memberships without archiving accounts or recreating All Cards as a group");
 
 const logos = savedCustomLogos([
   { service: "Active", iconDataUrl: "logo-a", archived: false },
@@ -53,6 +73,45 @@ assert.deepEqual(withVaultUpdate(restored, { accounts: [] }).settings.mainScreen
 assert.deepEqual(empty.settings.mainScreen, { kind: "all" });
 assert.throws(() => parsePersistedVault({ ...favorites, settings: { ...favorites.settings, mainScreen: { kind: "favorites", group: "Invalid" } } }));
 console.log("PASS: Favorites default survives saving, reopening, and an empty vault");
+
+const conflictAccount = {
+  id: "shared", service: "Shared", identity: "user@example.com", urls: ["https://example.com"],
+  secret: "JBSWY3DPEHPK3PXP", group: "Work", color: "ink", letter: "S", favorite: true,
+  lastUsed: 10, algorithm: "SHA-1", digits: 6, otpType: "totp", counter: 0, period: 30,
+  archived: false, iconBrand: null, iconDataUrl: null,
+};
+const browserConflictVault = withVaultUpdate(createEmptyVault({ name: "Browser User", email: "user@example.com" }, new Date("2026-01-01T00:00:00.000Z")), {
+  accounts: [
+    conflictAccount,
+    { ...conflictAccount, id: "shared-order", service: "Order", secret: "MFRGGZDFMZTWQ2LK" },
+    { ...conflictAccount, id: "browser-only", service: "Browser only", secret: "ONSWG4TFOQXG433U" },
+  ],
+  groupCustomizations: [{ name: "Work", icon: "briefcase", color: "blue" }],
+  groupOrder: ["Work"],
+}, new Date("2026-01-02T03:04:05.000Z"));
+const serverConflictVault = withVaultUpdate(createEmptyVault({ name: "Server User", email: "user@example.com" }, new Date("2026-01-01T00:00:00.000Z")), {
+  accounts: [
+    { ...conflictAccount, id: "shared-order", service: "Order", secret: "MFRGGZDFMZTWQ2LK" },
+    { ...conflictAccount, secret: "KRSXG5DSNFXGOIDB", group: "Personal", favorite: false, digits: 8 },
+    { ...conflictAccount, id: "server-only", service: "Server only", secret: "IFBEGRCFIZDUQSKK" },
+  ],
+  settings: { ...browserConflictVault.settings, theme: "light" },
+  groupCustomizations: [{ name: "Personal", icon: "person", color: "rose" }],
+  groupOrder: ["Personal"],
+}, new Date("2026-01-03T04:05:06.000Z"));
+const conflictDifference = compareVaultConflictVersions(browserConflictVault, serverConflictVault);
+assert.deepEqual(conflictDifference.browserOnlyAccounts.map((account) => account.label), ["Browser only · user@example.com"]);
+assert.deepEqual(conflictDifference.serverOnlyAccounts.map((account) => account.label), ["Server only · user@example.com"]);
+assert.deepEqual(conflictDifference.changedAccounts[0].changes.map((change) => change.field), ["secret key", "group", "favorite status", "code settings"]);
+assert.deepEqual(conflictDifference.changedAccounts[0].changes[0], { field: "secret key", browserValue: "Hidden", serverValue: "Hidden" });
+assert.deepEqual(conflictDifference.changedAccounts[0].changes[1], { field: "group", browserValue: "Work", serverValue: "Personal" });
+assert.deepEqual(conflictDifference.profileChanges.map((change) => change.field), ["name"]);
+assert.deepEqual(conflictDifference.settingsChanges.map((change) => change.field), ["theme"]);
+assert.deepEqual(conflictDifference.groupChanges.map((change) => change.field), ["group names, icons, or colors", "group order"]);
+assert.equal(conflictDifference.accountOrderChanged, true);
+assert.equal(conflictDifference.hasContentDifferences, true);
+assert.doesNotMatch(JSON.stringify(conflictDifference), /JBSWY3DPEHPK3PXP|KRSXG5DSNFXGOIDB|ONSWG4TFOQXG433U|IFBEGRCFIZDUQSKK/u);
+console.log("PASS: vault conflicts summarize both copies without exposing secret values");
 
 function decodeQr(qr) {
   const scale = 6;
@@ -101,6 +160,7 @@ const editorBundle = await build({
       export { validateBulkCustomLogoCapacity, accountIconDataUrlBytes, retainedAccountIconBytes } from './app/BulkLogoPicker';
       import SettingsCenter from './app/SettingsCenter';
       import GroupIcon from './app/GroupIcon';
+      import VaultConflictPanel from './app/VaultConflictPanel';
       export { GROUP_ICON_OPTIONS } from './app/GroupCustomizationDialog';
       import { I18nProvider } from './app/I18nProvider';
       import { createElement } from 'react';
@@ -116,6 +176,9 @@ const editorBundle = await build({
       }
       export function renderGroupIcon(icon) {
         return renderToStaticMarkup(createElement(GroupIcon, { icon, color: 'rose', className: 'group-symbol' }));
+      }
+      export function renderVaultConflictPanel(props) {
+        return renderToStaticMarkup(createElement(VaultConflictPanel, props));
       }
     `,
     resolveDir: process.cwd(),
@@ -160,6 +223,15 @@ assert.match(markup, /Live codes for Test/u);
 assert.match(markup, /Website URLs/u);
 assert.doesNotMatch(markup, /Account import QR code/u);
 console.log("PASS: Account Details renders separate framed sections with all fields and keeps QR hidden initially");
+const conflictMarkup = editorModule.exports.renderVaultConflictPanel({
+  browserVault: browserConflictVault, serverVault: serverConflictVault, saveError: null, busy: false,
+  onOpenBackup: () => {}, onUseServer: () => {}, onKeepBrowser: () => {},
+});
+for (const text of ["Review differences", "Browser copy", "Server copy", "Only in this browser", "Only on the server", "Different in both copies", "Secret key", "Browser", "Server", "Work", "Personal", "Hidden"]) {
+  assert.match(conflictMarkup, new RegExp(text, "u"));
+}
+assert.doesNotMatch(conflictMarkup, /JBSWY3DPEHPK3PXP|KRSXG5DSNFXGOIDB|ONSWG4TFOQXG433U|IFBEGRCFIZDUQSKK/u);
+console.log("PASS: vault conflict UI renders an actionable comparison without secret material");
 const hotpMarkup = editorModule.exports.renderEditor({
   account: {
     id: "hotp-card", service: "Counter", identity: "hotp@example.com", urls: [],

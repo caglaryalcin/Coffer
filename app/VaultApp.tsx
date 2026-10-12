@@ -7,6 +7,7 @@ import AccountEditor, { type AccountEditorCodePreview, type AccountIconOption } 
 import AccountUrlFields from "./AccountUrlFields";
 import SavedLogoPicker from "./SavedLogoPicker";
 import { savedCustomLogos, withSelectedAccountLogo } from "../lib/custom-logos";
+import { accountGroupIsInBranch, removeGroupBranchFromAccounts } from "../lib/account-groups";
 import { accountCreationDestination } from "../lib/account-navigation";
 import BulkGroupActions, { AccountSelectionIndicator, ArchiveBulkActions, mouseIsOutsideAccountCodeRow, normalizeGroupName } from "./BulkGroupActions";
 import BulkLogoPicker, { retainedAccountIconBytes, type BulkAccountLogoPatch } from "./BulkLogoPicker";
@@ -23,10 +24,11 @@ import SettingsCenter, { type UserProfile, type UserProfilePatch } from "./Setti
 import SignInScreen from "./SignInScreen";
 import ThemeToggle from "./ThemeToggle";
 import TransferCenter, { type ImportDecision } from "./TransferCenter";
+import VaultConflictPanel from "./VaultConflictPanel";
 import { formatCode, generateAccountCode, generateTotpTestPreview, isTotpExpiring, isValidBase32, normalizeSecret, parseOtpAuthUri, totpWindow, type OtpType, type TotpAlgorithm, type TotpTestPreview } from "../lib/totp";
 import { changeVaultPassword, claimLegacyVault, deleteVaultAccount, getOidcState, getVaultBootstrap, identifyVault, loginVault, logoutOidc, logoutVault, saveVault, setupVault, updateInstanceSettings, VAULT_API_TIMEOUT_MS, VaultApiError, type OidcClientState, type VaultInstanceSettings } from "../lib/vault-api";
 import { createAuthProof, createEncryptedVault, DEFAULT_VAULT_RESUME_AGE_MS, decryptVaultPayload, encryptVaultPayload, REMEMBERED_VAULT_RESUME_AGE_MS, rotateVaultPassword, unlockVaultHeader, VaultCryptoError, type EncryptedVaultHeader, type VaultPayloadCipher, type VaultRuntime } from "../lib/vault-crypto";
-import { createEmptyVault, MAX_ACCOUNT_URLS, MAX_GROUP_CUSTOMIZATIONS, parseAccountUrls, parsePersistedVault, withVaultUpdate, type PersistedVault, type VaultAccount, type VaultGroupColor, type VaultGroupCustomization, type VaultGroupIcon, type VaultMainScreen, type VaultTheme } from "../lib/vault-model";
+import { createEmptyVault, isUngroupedAccountGroup, MAX_ACCOUNT_URLS, MAX_GROUP_CUSTOMIZATIONS, parseAccountUrls, parsePersistedVault, UNGROUPED_ACCOUNT_GROUP, withVaultUpdate, type PersistedVault, type VaultAccount, type VaultGroupColor, type VaultGroupCustomization, type VaultGroupIcon, type VaultMainScreen, type VaultTheme } from "../lib/vault-model";
 import { classifyVaultOutbox, clearVaultOutbox, createVaultOutboxRecord, readVaultOutbox, writeVaultOutbox, type VaultOutboxRecord } from "../lib/vault-outbox";
 import { clearVaultResumeSession, readRememberedVaultResumeHint, readVaultResumeSession, saveVaultResumeSession, touchVaultResumeSession, type VaultResumePersistence } from "../lib/vault-resume";
 import { remainingAutoLockMs } from "../lib/auto-lock";
@@ -499,9 +501,7 @@ function groupDepth(value: string) {
 }
 
 function groupIsInBranch(candidate: string, branchRoot: string) {
-  const candidateKey = groupKey(candidate);
-  const rootKey = groupKey(branchRoot);
-  return candidateKey === rootKey || candidateKey.startsWith(`${rootKey}${GROUP_PATH_SEPARATOR}`);
+  return accountGroupIsInBranch(candidate, branchRoot);
 }
 
 function renameGroupBranchName(candidate: string, previousRoot: string, nextRoot: string) {
@@ -669,7 +669,7 @@ export default function VaultApp() {
   const [draggingSelectedAccounts, setDraggingSelectedAccounts] = useState(false);
   const [draggedAccountIds, setDraggedAccountIds] = useState<Set<string>>(() => new Set());
   const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
-  const [dragOverPrimaryTarget, setDragOverPrimaryTarget] = useState<"favorites" | "archive" | null>(null);
+  const [dragOverPrimaryTarget, setDragOverPrimaryTarget] = useState<"all" | "favorites" | "archive" | null>(null);
   const [accountDropTarget, setAccountDropTarget] = useState<AccountDropTarget | null>(null);
   const [draggingGroup, setDraggingGroup] = useState<string | null>(null);
   const [groupDropTarget, setGroupDropTarget] = useState<GroupDropTarget | null>(null);
@@ -3623,16 +3623,12 @@ export default function VaultApp() {
     const focusGroupName = deletedIndex >= 0
       ? groups[deletedIndex + 1] ?? groups[deletedIndex - 1] ?? null
       : null;
-    const archivedCount = vaultRef.current?.accounts.filter((account) => (
+    const movedToAllCardsCount = vaultRef.current?.accounts.filter((account) => (
       groupIsInBranch(account.group, deletedName) && !account.archived
     )).length ?? 0;
 
     const saved = commitVault((current) => withVaultUpdate(current, {
-      accounts: current.accounts.map((account) => (
-        groupIsInBranch(account.group, deletedName) && !account.archived
-          ? { ...account, archived: true }
-          : account
-      )),
+      accounts: removeGroupBranchFromAccounts(current.accounts, deletedName),
       settings: {
         ...current.settings,
         mainScreen: current.settings.mainScreen.kind === "group" &&
@@ -3661,8 +3657,8 @@ export default function VaultApp() {
       (nextGroup ?? document.querySelector<HTMLButtonElement>(".primary-nav-main"))
         ?.focus({ preventScroll: true });
     });
-    setToast(archivedCount > 0
-      ? `${deletedName} group deleted. ${archivedCount} ${archivedCount === 1 ? "account" : "accounts"} moved to Archive.`
+    setToast(movedToAllCardsCount > 0
+      ? `${deletedName} group deleted. ${movedToAllCardsCount} ${movedToAllCardsCount === 1 ? "account" : "accounts"} moved to All Cards.`
       : `${deletedName} group deleted.`);
     return true;
   };
@@ -3705,11 +3701,14 @@ export default function VaultApp() {
 
     const normalized = normalizeGroupName(requestedGroup);
     const normalizedKey = groupKey(normalized);
-    if (!normalized || normalized.length > 48 || normalizedKey === "all") {
+    const movingToAllCards = !createGroup && isUngroupedAccountGroup(normalized);
+    if (!normalized || normalized.length > 48 || (createGroup && isUngroupedAccountGroup(normalized))) {
       setToast("Use a group name between 1 and 48 characters. “All” is reserved.");
       return false;
     }
-    const existing = groups.find((name) => groupKey(name) === normalizedKey);
+    const existing = movingToAllCards
+      ? UNGROUPED_ACCOUNT_GROUP
+      : groups.find((name) => groupKey(name) === normalizedKey);
     if (createGroup && existing) {
       setToast("That group already exists. Choose it from the existing groups list.");
       return false;
@@ -3719,7 +3718,8 @@ export default function VaultApp() {
       return false;
     }
 
-    const targetGroup = existing ?? normalized;
+    const targetGroup = movingToAllCards ? UNGROUPED_ACCOUNT_GROUP : existing ?? normalized;
+    const targetLabel = movingToAllCards ? "All Cards" : targetGroup;
     const targetGroupKey = groupKey(targetGroup);
     const currentVault = vaultRef.current;
     if (!currentVault) return false;
@@ -3743,7 +3743,9 @@ export default function VaultApp() {
       .map((account) => account.id));
     const movedCount = changed.size;
     if (movedCount === 0) {
-      setToast(`Selected accounts are already in ${targetGroup}.`);
+      setToast(movingToAllCards
+        ? "Selected accounts are already outside a group."
+        : `Selected accounts are already in ${targetGroup}.`);
       return false;
     }
     const saved = createGroup
@@ -3767,10 +3769,10 @@ export default function VaultApp() {
     if (!saved) return false;
     if (openTargetGroup) {
       setView("all");
-      setGroup(targetGroup);
+      setGroup(movingToAllCards ? "All" : targetGroup);
     }
     exitSelectionMode();
-    setToast(`${movedCount} ${movedCount === 1 ? "account" : "accounts"} moved to ${targetGroup}.`);
+    setToast(`${movedCount} ${movedCount === 1 ? "account" : "accounts"} moved to ${targetLabel}.`);
     return true;
   };
 
@@ -3951,14 +3953,16 @@ export default function VaultApp() {
 
   const canDropAccountIdsOnPrimaryTarget = (
     accountIds: ReadonlySet<string>,
-    target: "favorites" | "archive",
-  ) => target === "favorites"
-    ? canAddAccountIdsToFavorites(accountIds)
-    : canArchiveAccountIds(accountIds);
+    target: "all" | "favorites" | "archive",
+  ) => target === "all"
+    ? canMoveAccountIdsToGroup(accountIds, UNGROUPED_ACCOUNT_GROUP)
+    : target === "favorites"
+      ? canAddAccountIdsToFavorites(accountIds)
+      : canArchiveAccountIds(accountIds);
 
   const dragSelectedAccountsOverPrimaryTarget = (
     event: ReactDragEvent<HTMLButtonElement>,
-    target: "favorites" | "archive",
+    target: "all" | "favorites" | "archive",
   ) => {
     if (!acceptsSelectedAccountDrag()) return;
     setAccountDropTarget(null);
@@ -3974,7 +3978,7 @@ export default function VaultApp() {
 
   const leaveSelectedAccountPrimaryTarget = (
     event: ReactDragEvent<HTMLButtonElement>,
-    target: "favorites" | "archive",
+    target: "all" | "favorites" | "archive",
   ) => {
     if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
     if (dragOverPrimaryTarget === target) setDragOverPrimaryTarget(null);
@@ -4217,14 +4221,15 @@ export default function VaultApp() {
 
   const dropSelectedAccountsOnPrimaryTarget = (
     event: ReactDragEvent<HTMLButtonElement>,
-    target: "favorites" | "archive",
+    target: "all" | "favorites" | "archive",
   ) => {
     if (!acceptsSelectedAccountDrag() || !canDropAccountIdsOnPrimaryTarget(draggedAccountIdsRef.current, target)) return;
     event.preventDefault();
     event.stopPropagation();
     const accountIds = new Set(draggedAccountIdsRef.current);
     clearSelectedAccountDrag();
-    if (target === "favorites") addAccountIdsToFavorites(accountIds);
+    if (target === "all") moveSelectedAccounts(UNGROUPED_ACCOUNT_GROUP, false, accountIds);
+    else if (target === "favorites") addAccountIdsToFavorites(accountIds);
     else archiveAccountIds(accountIds);
   };
 
@@ -4396,6 +4401,11 @@ export default function VaultApp() {
       return;
     }
     setAccounts((current) => current.map((account) => account.id === id ? { ...account, favorite: !account.favorite } : account));
+  };
+
+  const removeAccountFromGroup = (id: string) => {
+    setAccountMenuId(null);
+    return moveSelectedAccounts(UNGROUPED_ACCOUNT_GROUP, false, new Set([id]), false);
   };
 
   const toggleArchive = (id: string) => {
@@ -4857,12 +4867,16 @@ export default function VaultApp() {
   const archiveMenuOpen = sidebarMenuIsOpen(archiveTarget);
   const archivedAccountCount = accounts.filter((account) => account.archived).length;
   const primarySelectionActive = selectionMode && view === "all" && selectedVisibleAccountIds.size > 0;
+  const allCardsSelectionReady = primarySelectionActive && canMoveSelectedAccountsToGroup(UNGROUPED_ACCOUNT_GROUP);
   const favoriteSelectionReady = primarySelectionActive && canAddAccountIdsToFavorites(selectedVisibleAccountIds);
   const archiveSelectionReady = primarySelectionActive && canArchiveAccountIds(selectedVisibleAccountIds);
+  const allCardsDragReady = draggingSelectedAccounts && canMoveAccountIdsToGroup(draggedAccountIds, UNGROUPED_ACCOUNT_GROUP);
   const favoriteDragReady = draggingSelectedAccounts && canAddAccountIdsToFavorites(draggedAccountIds);
   const archiveDragReady = draggingSelectedAccounts && canArchiveAccountIds(draggedAccountIds);
+  const allCardsDropReady = allCardsSelectionReady || allCardsDragReady;
   const favoriteDropReady = favoriteSelectionReady || favoriteDragReady;
   const archiveDropReady = archiveSelectionReady || archiveDragReady;
+  const allCardsDropTarget = allCardsDragReady && dragOverPrimaryTarget === "all";
   const favoriteDropTarget = favoriteDragReady && dragOverPrimaryTarget === "favorites";
   const archiveDropTarget = archiveDragReady && dragOverPrimaryTarget === "archive";
   const sidebarMenuStyle = sidebarMenuPosition
@@ -4959,7 +4973,7 @@ export default function VaultApp() {
 
         <nav className="primary-nav" aria-label="Primary navigation">
           <div
-            className={`primary-nav-row ${allCodesActive ? "active" : ""} ${allCodesDefault ? "main-screen-default" : ""} ${allCodesMenuOpen ? "menu-open" : ""}`}
+            className={`primary-nav-row ${allCodesActive ? "active" : ""} ${allCodesDefault ? "main-screen-default" : ""} ${allCodesMenuOpen ? "menu-open" : ""} ${allCardsDropReady ? "drop-ready" : ""} ${allCardsDropTarget ? "drop-target" : ""}`}
             onBlur={(event) => {
               if (!event.currentTarget.contains(event.relatedTarget)) {
                 setSidebarMenuTarget(null);
@@ -4967,7 +4981,23 @@ export default function VaultApp() {
               }
             }}
           >
-            <button title="All Cards" className="primary-nav-main sidebar-all-cards-button" onClick={() => { showAllAccounts(); closeMobileSidebar(); }}><CardsIcon className="nav-icon cards-icon" />All Cards<span className="nav-count">{accounts.filter((account) => !account.archived).length}</span></button>
+            <button
+              title={primarySelectionActive ? "Move selected accounts to All Cards and remove their group" : "All Cards"}
+              aria-label={primarySelectionActive ? "Move selected accounts to All Cards and remove their group" : "All Cards"}
+              className="primary-nav-main sidebar-all-cards-button"
+              onDragEnter={(event) => dragSelectedAccountsOverPrimaryTarget(event, "all")}
+              onDragOver={(event) => dragSelectedAccountsOverPrimaryTarget(event, "all")}
+              onDragLeave={(event) => leaveSelectedAccountPrimaryTarget(event, "all")}
+              onDrop={(event) => dropSelectedAccountsOnPrimaryTarget(event, "all")}
+              onClick={() => {
+                if (primarySelectionActive) {
+                  if (moveSelectedAccounts(UNGROUPED_ACCOUNT_GROUP, false)) closeMobileSidebar();
+                  return;
+                }
+                showAllAccounts();
+                closeMobileSidebar();
+              }}
+            ><CardsIcon className="nav-icon cards-icon" />All Cards<span className="nav-count">{accounts.filter((account) => !account.archived).length}</span></button>
             <button
               type="button"
               className="primary-options-button more-button"
@@ -5316,25 +5346,15 @@ export default function VaultApp() {
           </div>
         </header>
 
-        {saveConflict && (
-          <section className="vault-conflict-panel transfer-error" role="alert" aria-live="assertive">
-            <span aria-hidden="true">!</span>
-            <div>
-              <strong>Choose which encrypted vault version to keep</strong>
-              <p>
-                {saveConflict.localVault
-                  ? "This browser has pending changes, while the server has a newer version. Nothing will be overwritten until you choose. Export a backup first if you want to preserve a portable copy."
-                  : "The browser recovery record cannot be opened with this vault. Keep the server version to discard only that unreadable local record."}
-              </p>
-              {saveError && <small>{saveError}</small>}
-            </div>
-            <div className="vault-conflict-actions">
-              <button className="modal-secondary" type="button" onClick={() => setView("transfer")} disabled={conflictBusy}>Open data &amp; backup</button>
-              <button className="modal-secondary" type="button" onClick={() => void chooseServerConflictVersion()} disabled={conflictBusy}>Use server version</button>
-              <button className="modal-primary" type="button" onClick={() => void keepBrowserConflictVersion()} disabled={conflictBusy || !saveConflict.localVault}>{conflictBusy ? "Resolving…" : "Keep this browser's changes"}</button>
-            </div>
-          </section>
-        )}
+        {saveConflict && <VaultConflictPanel
+          browserVault={saveConflict.localVault}
+          serverVault={saveConflict.serverVault}
+          saveError={saveError}
+          busy={conflictBusy}
+          onOpenBackup={() => setView("transfer")}
+          onUseServer={() => void chooseServerConflictVersion()}
+          onKeepBrowser={() => void keepBrowserConflictVersion()}
+        />}
 
         {view === "transfer" ? (
           <TransferCenter
@@ -5430,11 +5450,11 @@ export default function VaultApp() {
                   title: draggableAccount
                     ? account.archived
                       ? selectionMode && selected
-                        ? "Hold and drag outside the code area to restore selected accounts to a sidebar group"
-                        : "Hold and drag outside the code area to restore this account to a sidebar group"
+                        ? "Hold and drag outside the code area to restore selected accounts to All Cards or a sidebar group"
+                        : "Hold and drag outside the code area to restore this account to All Cards or a sidebar group"
                       : selectionMode && selected
-                      ? "Hold and drag outside the code area to reorder or move selected accounts to Favorites, Archive, or a group"
-                      : "Hold and drag outside the code area to reorder this account or move it to Favorites, Archive, or a group"
+                      ? "Hold and drag outside the code area to reorder or move selected accounts to All Cards, Favorites, Archive, or a group"
+                      : "Hold and drag outside the code area to reorder this account or move it to All Cards, Favorites, Archive, or a group"
                     : undefined,
                   onMouseDown: (event) => prepareSelectedAccountDrag(event, account.id, draggableAccount),
                   onMouseEnter: (event) => updateSelectedAccountDragZone(event, draggableAccount),
@@ -5492,6 +5512,7 @@ export default function VaultApp() {
                           <div className="account-menu" role="menu">
                             <button role="menuitem" onClick={(event) => openAccountEditor(account.id, event.currentTarget)}>Edit account</button>
                             {!account.archived && <button role="menuitem" onClick={() => toggleFavorite(account.id)}>{account.favorite ? "Remove from Favorites" : "Add to Favorites"}</button>}
+                            {!account.archived && !isUngroupedAccountGroup(account.group) && <button role="menuitem" onClick={() => removeAccountFromGroup(account.id)}>Remove from group</button>}
                             {!account.archived && <button role="menuitem" onClick={() => toggleArchive(account.id)}>Move to Archive</button>}
                             {account.archived && <button role="menuitem" onClick={() => toggleArchive(account.id)}>Restore</button>}
                             {account.archived && <button className="danger" role="menuitem" onClick={() => deleteArchivedAccount(account.id)}>Delete permanently</button>}
@@ -5587,7 +5608,7 @@ export default function VaultApp() {
                       <input ref={manualServiceInputRef} className="service-entry-input" value={service} onChange={(event) => setService(event.target.value)} placeholder="e.g. GitHub" />
                     </div>
                   </label>
-                  <label><span>Group</span><select value={newGroup} onChange={(event) => setNewGroup(event.target.value as Group)}>{entryGroups.map((name) => <option key={name} data-i18n-ignore>{name}</option>)}</select></label>
+                  <label><span>Group</span><select value={newGroup} onChange={(event) => setNewGroup(event.target.value as Group)}><option value={UNGROUPED_ACCOUNT_GROUP}>All Cards (no group)</option>{entryGroups.map((name) => <option key={name} data-i18n-ignore>{name}</option>)}</select></label>
                 </div>
                 <label><span>Account name</span><input value={identity} onChange={(event) => setIdentity(event.target.value)} placeholder="name@example.com" /></label>
                 {customLogos.length > 0 && (

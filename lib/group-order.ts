@@ -1,4 +1,4 @@
-import type { VaultAccount, VaultGroupCustomization } from "./vault-model";
+import { isUngroupedAccountGroup, type VaultAccount, type VaultGroupCustomization } from "./vault-model";
 
 export type GroupDropEdge = "before" | "after";
 
@@ -18,12 +18,14 @@ export function orderedVisibleGroupNames(
   const availableNames = new Map<string, string>();
 
   for (const account of accounts) {
-    if (!account.archived) {
+    if (!account.archived && !isUngroupedAccountGroup(account.group)) {
       availableNames.set(normalizedGroupKey(account.group), account.group);
     }
   }
   for (const customization of customizations) {
-    availableNames.set(normalizedGroupKey(customization.name), customization.name);
+    if (!isUngroupedAccountGroup(customization.name)) {
+      availableNames.set(normalizedGroupKey(customization.name), customization.name);
+    }
   }
 
   const names: string[] = [];
@@ -38,9 +40,11 @@ export function orderedVisibleGroupNames(
 
   for (const name of groupOrder) addIfVisible(name);
   for (const account of accounts) {
-    if (!account.archived) addIfVisible(account.group);
+    if (!account.archived && !isUngroupedAccountGroup(account.group)) addIfVisible(account.group);
   }
-  for (const customization of customizations) addIfVisible(customization.name);
+  for (const customization of customizations) {
+    if (!isUngroupedAccountGroup(customization.name)) addIfVisible(customization.name);
+  }
 
   return names;
 }

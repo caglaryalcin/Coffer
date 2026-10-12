@@ -18,9 +18,14 @@ export const MAX_PROFILE_AVATAR_BYTES = 512 * 1024;
 export const ACCOUNT_ICON_SIZE = 128;
 export const MAX_ACCOUNT_ICON_BYTES = 96 * 1024;
 export const MAX_VAULT_ACCOUNT_ICON_BYTES = 2 * 1024 * 1024;
+export const UNGROUPED_ACCOUNT_GROUP = "All" as const;
 
 export type VaultColor = "ink" | "orange" | "blue" | "violet" | "green";
 export type VaultTheme = "dark" | "light";
+
+export function isUngroupedAccountGroup(value: string) {
+  return value.trim().replace(/\s+/gu, " ").normalize("NFKC").toLocaleLowerCase("en") === "all";
+}
 export type VaultGroupIcon =
   | "dot"
   | "folder"
@@ -635,14 +640,18 @@ function availableGroupNames(
 ): string[] {
   const names = new Map<string, string>();
   for (const account of accounts) {
-    if (!account.archived) names.set(orderedGroupKey(account.group), account.group);
+    if (!account.archived && !isUngroupedAccountGroup(account.group)) {
+      names.set(orderedGroupKey(account.group), account.group);
+    }
   }
   for (const customization of groupCustomizations) {
-    names.set(orderedGroupKey(customization.name), customization.name);
+    if (!isUngroupedAccountGroup(customization.name)) {
+      names.set(orderedGroupKey(customization.name), customization.name);
+    }
   }
   for (const account of accounts) {
     const key = orderedGroupKey(account.group);
-    if (!names.has(key)) names.set(key, account.group);
+    if (!isUngroupedAccountGroup(account.group) && !names.has(key)) names.set(key, account.group);
   }
   return [...names.values()];
 }
@@ -653,10 +662,14 @@ function visibleMainScreenGroupNames(
 ): string[] {
   const names = new Map<string, string>();
   for (const account of accounts) {
-    if (!account.archived) names.set(orderedGroupKey(account.group), account.group);
+    if (!account.archived && !isUngroupedAccountGroup(account.group)) {
+      names.set(orderedGroupKey(account.group), account.group);
+    }
   }
   for (const customization of groupCustomizations) {
-    names.set(orderedGroupKey(customization.name), customization.name);
+    if (!isUngroupedAccountGroup(customization.name)) {
+      names.set(orderedGroupKey(customization.name), customization.name);
+    }
   }
   return [...names.values()];
 }
