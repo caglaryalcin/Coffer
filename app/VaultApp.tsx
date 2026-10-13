@@ -26,8 +26,8 @@ import ThemeToggle from "./ThemeToggle";
 import TransferCenter, { type ImportDecision } from "./TransferCenter";
 import VaultConflictPanel from "./VaultConflictPanel";
 import { formatCode, generateAccountCode, generateTotpTestPreview, isTotpExpiring, isValidBase32, normalizeSecret, parseOtpAuthUri, totpWindow, type OtpType, type TotpAlgorithm, type TotpTestPreview } from "../lib/totp";
-import { changeVaultPassword, claimLegacyVault, deleteVaultAccount, getOidcState, getVaultBootstrap, identifyVault, loginVault, logoutOidc, logoutVault, saveVault, setupVault, updateInstanceSettings, VAULT_API_TIMEOUT_MS, VaultApiError, type OidcClientState, type VaultInstanceSettings } from "../lib/vault-api";
-import { createAuthProof, createEncryptedVault, DEFAULT_VAULT_RESUME_AGE_MS, decryptVaultPayload, encryptVaultPayload, REMEMBERED_VAULT_RESUME_AGE_MS, rotateVaultPassword, unlockVaultHeader, VaultCryptoError, type EncryptedVaultHeader, type VaultPayloadCipher, type VaultRuntime } from "../lib/vault-crypto";
+import { beginPasswordRecovery, changeVaultPassword, claimLegacyVault, completePasswordRecovery, configureVaultRecovery, deleteVaultAccount, getOidcState, getVaultBootstrap, identifyVault, loginVault, logoutOidc, logoutVault, requestPasswordRecovery, saveVault, setupVault, updateInstanceSettings, VAULT_API_TIMEOUT_MS, VaultApiError, type OidcClientState, type VaultInstanceSettings } from "../lib/vault-api";
+import { createAuthProof, createEncryptedVault, createVaultRecovery, DEFAULT_VAULT_RESUME_AGE_MS, decryptVaultPayload, encryptVaultPayload, recoverVaultPassword, REMEMBERED_VAULT_RESUME_AGE_MS, rotateVaultPassword, unlockVaultHeader, VaultCryptoError, type EncryptedVaultHeader, type VaultPayloadCipher, type VaultRuntime } from "../lib/vault-crypto";
 import { createEmptyVault, isUngroupedAccountGroup, MAX_ACCOUNT_URLS, MAX_GROUP_CUSTOMIZATIONS, parseAccountUrls, parsePersistedVault, UNGROUPED_ACCOUNT_GROUP, withVaultUpdate, type PersistedVault, type VaultAccount, type VaultGroupColor, type VaultGroupCustomization, type VaultGroupIcon, type VaultMainScreen, type VaultTheme } from "../lib/vault-model";
 import { classifyVaultOutbox, clearVaultOutbox, createVaultOutboxRecord, readVaultOutbox, writeVaultOutbox, type VaultOutboxRecord } from "../lib/vault-outbox";
 import { clearVaultResumeSession, readRememberedVaultResumeHint, readVaultResumeSession, saveVaultResumeSession, touchVaultResumeSession, type VaultResumePersistence } from "../lib/vault-resume";
@@ -444,6 +444,7 @@ async function settleWithin<T>(
 const EMPTY_GROUP_CUSTOMIZATIONS: VaultGroupCustomization[] = [];
 const SIDEBAR_WIDTH_STORAGE_KEY = "coffer:sidebar-width:v1";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "coffer:sidebar-collapsed:v1";
+const CURRENT_VIEW_SESSION_STORAGE_KEY = "coffer:current-view:v1";
 const DEFAULT_SIDEBAR_WIDTH = 248;
 const MIN_SIDEBAR_WIDTH = 210;
 const MAX_SIDEBAR_WIDTH = 420;
@@ -468,6 +469,46 @@ function readSidebarCollapsed() {
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
   } catch {
     return false;
+  }
+}
+
+function isView(value: unknown): value is View {
+  return value === "all" || value === "favorites" || value === "archive" || value === "transfer" || value === "settings";
+}
+
+function readCurrentSessionView(vaultId: string): View | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const stored = JSON.parse(window.sessionStorage.getItem(CURRENT_VIEW_SESSION_STORAGE_KEY) ?? "null") as unknown;
+    if (!stored || typeof stored !== "object") return null;
+    const candidate = stored as { vaultId?: unknown; view?: unknown };
+    return candidate.vaultId === vaultId && isView(candidate.view) ? candidate.view : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCurrentSessionView(vaultId: string, view: View): void {
+  try {
+    window.sessionStorage.setItem(CURRENT_VIEW_SESSION_STORAGE_KEY, JSON.stringify({ vaultId, view }));
+  } catch {
+    // Navigation restoration is best-effort when browser storage is unavailable.
+  }
+}
+
+function clearCurrentSessionView(vaultId?: string): void {
+  try {
+    if (vaultId) {
+      const stored = JSON.parse(window.sessionStorage.getItem(CURRENT_VIEW_SESSION_STORAGE_KEY) ?? "null") as unknown;
+      if (
+        stored &&
+        typeof stored === "object" &&
+        (stored as { vaultId?: unknown }).vaultId !== vaultId
+      ) return;
+    }
+    window.sessionStorage.removeItem(CURRENT_VIEW_SESSION_STORAGE_KEY);
+  } catch {
+    // A locked vault does not depend on navigation cleanup succeeding.
   }
 }
 const NEW_GROUP_CUSTOMIZATION: VaultGroupCustomization = { name: "", icon: "folder", color: "rose" };
@@ -633,6 +674,10 @@ export default function VaultApp() {
     allowAccountCreation: true,
   });
   const [accountCreationEnabled, setAccountCreationEnabled] = useState(true);
+  const [passwordRecoveryEnabled, setPasswordRecoveryEnabled] = useState(false);
+  const [recoveryConfigured, setRecoveryConfigured] = useState(false);
+  const [passwordRecoveryToken, setPasswordRecoveryToken] = useState<string | null>(null);
+  const [recoverySetupRequestId, setRecoverySetupRequestId] = useState(0);
   const [oidc, setOidc] = useState<OidcClientState>({
     enabled: false,
     providerName: null,
@@ -1070,8 +1115,9 @@ export default function VaultApp() {
     setRuntime(publication.runtime);
     setVault(publication.vault);
     setAdvancingHotpId(null);
-    setView(publication.vault.settings.mainScreen.kind === "favorites" ? "favorites" : "all");
-    setGroup(defaultMainScreenGroup(publication.vault));
+    const restoredView = readCurrentSessionView(publication.header.vaultId);
+    setView(restoredView ?? (publication.vault.settings.mainScreen.kind === "favorites" ? "favorites" : "all"));
+    setGroup(restoredView ? "All" : defaultMainScreenGroup(publication.vault));
     setSidebarMenuTarget(null);
     setSaveConflict(publication.conflict);
     setConflictBusy(false);
@@ -1487,6 +1533,7 @@ export default function VaultApp() {
   }, [commitVault]);
 
   const handleCreateAccount = useCallback(async (details: VaultCreateAccountDetails) => {
+    clearCurrentSessionView();
     let transitionEpoch: number | null = null;
     setAuthBusy(true);
     setAuthError(null);
@@ -1544,6 +1591,7 @@ export default function VaultApp() {
         saveStatus: "saved",
         saveError: null,
       });
+      setRecoveryConfigured(false);
     } catch (error) {
       const closedTransition = transitionEpoch === null
         ? null
@@ -1609,6 +1657,8 @@ export default function VaultApp() {
       ensureTransitionActive();
       setInstanceSettings(result.instanceSettings);
       setAccountCreationEnabled(result.accountCreationEnabled);
+      setPasswordRecoveryEnabled(result.passwordRecoveryEnabled);
+      setRecoveryConfigured(result.recoveryConfigured);
       let serverVault = parsePersistedVault(
         await decryptVaultPayload<unknown>(result.payload, nextRuntime.vaultKey),
       );
@@ -1812,6 +1862,7 @@ export default function VaultApp() {
   }, [prepareOpeningSession, publishReadySession, saveResumeSession]);
 
   const handleSignIn = useCallback(async (details: VaultAccessDetails) => {
+    clearCurrentSessionView();
     setAuthBusy(true);
     setAuthError(null);
     let transitionEpoch: number | null = null;
@@ -1910,6 +1961,7 @@ export default function VaultApp() {
     lastResumeTouchAtRef.current = 0;
     lastActivityAtRef.current = null;
     hiddenLockArmedRef.current = false;
+    clearCurrentSessionView(vaultId);
 
     const firstResumeCleanup = clearVaultResumeSession().then(
       () => true,
@@ -2527,6 +2579,83 @@ export default function VaultApp() {
     }
   }, [lockVault, saveResumeSession, stagePendingVaults]);
 
+  const createOwnRecoveryKey = useCallback(async (currentPassword: string): Promise<string> => {
+    const header = bootstrapHeaderRef.current;
+    if (!header || !runtimeRef.current || sessionTransitionRef.current.phase !== "ready") {
+      throw new Error("Unlock the vault before configuring account recovery.");
+    }
+    let created: Awaited<ReturnType<typeof createVaultRecovery>>;
+    try {
+      created = await createVaultRecovery(currentPassword, header);
+    } catch (error) {
+      if (error instanceof VaultCryptoError && error.code === "AUTHENTICATION_FAILED") {
+        throw new Error("The current password is incorrect.");
+      }
+      throw new Error(error instanceof Error ? error.message : "The recovery key could not be created.");
+    }
+    try {
+      await configureVaultRecovery({
+        vaultId: header.vaultId,
+        currentAuthProof: created.currentAuthProof,
+        recoveryProof: created.recoveryProof,
+        envelope: created.envelope,
+      });
+      setRecoveryConfigured(true);
+      return created.recoveryKey;
+    } catch (error) {
+      if (error instanceof VaultApiError && error.code === "invalid_credentials") {
+        throw new Error("The current password is incorrect.");
+      }
+      throw new Error(error instanceof Error ? error.message : "The recovery key could not be saved.");
+    }
+  }, []);
+
+  const sendPasswordRecoveryEmail = useCallback(async (email: string) => {
+    return requestPasswordRecovery(email);
+  }, []);
+
+  const resetForgottenPassword = useCallback(async (
+    token: string,
+    recoveryKey: string,
+    nextPassword: string,
+  ): Promise<void> => {
+    try {
+      const challenge = await beginPasswordRecovery(token);
+      const recovered = await recoverVaultPassword(
+        recoveryKey,
+        nextPassword,
+        challenge.header,
+        challenge.envelope,
+      );
+      await completePasswordRecovery({
+        token,
+        expectedRevision: challenge.revision,
+        recoveryProof: recovered.recoveryProof,
+        nextAuthProof: recovered.nextAuthProof,
+        header: recovered.header,
+      });
+      await clearVaultResumeSession().catch(() => undefined);
+      const cleanUrl = new URL(window.location.href);
+      cleanUrl.searchParams.delete("recovery");
+      window.history.replaceState(null, "", `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+      setPasswordRecoveryToken(null);
+      setRecoveryConfigured(false);
+      setAuthError(null);
+      setAuthStatus("access");
+    } catch (error) {
+      if (error instanceof VaultCryptoError && error.code === "AUTHENTICATION_FAILED") {
+        throw new Error("The recovery key is incorrect.");
+      }
+      if (error instanceof VaultApiError && error.code === "invalid_token") {
+        throw new Error("This recovery link is invalid or has expired.");
+      }
+      if (error instanceof VaultApiError && error.code === "revision_conflict") {
+        throw new Error("The vault changed after this link was opened. Request a new recovery email.");
+      }
+      throw new Error(error instanceof Error ? error.message : "The password could not be reset.");
+    }
+  }, []);
+
   const chooseServerConflictVersion = useCallback(async () => {
     const conflict = conflictRef.current;
     const transitionEpoch = sessionTransitionRef.current.epoch;
@@ -2685,6 +2814,17 @@ export default function VaultApp() {
         setOidc(oidcState);
         setInstanceSettings(bootstrap.instanceSettings);
         setAccountCreationEnabled(bootstrap.accountCreationEnabled);
+        setPasswordRecoveryEnabled(bootstrap.passwordRecoveryEnabled);
+        setRecoveryConfigured(bootstrap.authenticated ? bootstrap.recoveryConfigured : false);
+        const recoveryToken = new URLSearchParams(window.location.search).get("recovery");
+        setPasswordRecoveryToken(recoveryToken);
+        if (recoveryToken) {
+          bootstrapHeaderRef.current = null;
+          revisionRef.current = 0;
+          setAuthError(null);
+          setAuthStatus("access");
+          return;
+        }
         if (!bootstrap.authenticated) {
           const rememberedHint = readRememberedVaultResumeHint();
           if (rememberedHint) {
@@ -2851,6 +2991,7 @@ export default function VaultApp() {
     const result = await updateInstanceSettings({ allowAccountCreation });
     setInstanceSettings(result.instanceSettings);
     setAccountCreationEnabled(result.accountCreationEnabled);
+    setPasswordRecoveryEnabled(result.passwordRecoveryEnabled);
   }, []);
 
   useEffect(() => {
@@ -3187,6 +3328,12 @@ export default function VaultApp() {
       window.removeEventListener("storage", syncPreference);
     };
   }, []);
+
+  useEffect(() => {
+    if (authStatus !== "ready") return;
+    const vaultId = bootstrapHeaderRef.current?.vaultId;
+    if (vaultId) writeCurrentSessionView(vaultId, view);
+  }, [authStatus, view]);
 
   useEffect(() => {
     if (!toast) return;
@@ -4786,10 +4933,14 @@ export default function VaultApp() {
         busy={authBusy}
         error={authError}
         accountCreationEnabled={accountCreationEnabled}
+        passwordRecoveryEnabled={passwordRecoveryEnabled}
+        recoveryToken={passwordRecoveryToken}
         oidc={oidc}
         onCreateAccount={handleCreateAccount}
         onOidcSignOut={handleOidcSignOut}
         onSignIn={handleSignIn}
+        onRequestPasswordRecovery={sendPasswordRecoveryEmail}
+        onResetPassword={resetForgottenPassword}
       />
     );
   }
@@ -4855,6 +5006,14 @@ export default function VaultApp() {
     setSidebarMenuTarget(null);
     setView(mainScreen.kind === "favorites" ? "favorites" : "all");
     setGroup(vault ? defaultMainScreenGroup(vault) : "All");
+  };
+  const openRecoverySettings = () => {
+    exitSelectionMode();
+    setAccountMenuId(null);
+    setSidebarMenuTarget(null);
+    setRecoverySetupRequestId((current) => current + 1);
+    setView("settings");
+    closeMobileSidebar();
   };
   const allCodesTarget: SidebarMenuTarget = { kind: "all" };
   const allCodesActive = view === "all" && group === "All";
@@ -5346,6 +5505,18 @@ export default function VaultApp() {
           </div>
         </header>
 
+        {!recoveryConfigured && (
+          <aside className="recovery-setup-banner" role="status" aria-labelledby="recovery-setup-title">
+            <span className="recovery-setup-icon" aria-hidden="true">!</span>
+            <div>
+              <strong id="recovery-setup-title">Account recovery is not set up</strong>
+              <p>Create and save a recovery key now. Without it, a forgotten password cannot be reset.</p>
+              {!passwordRecoveryEnabled && <small>Recovery emails also require SMTP configuration.</small>}
+            </div>
+            <button type="button" onClick={openRecoverySettings}>Create recovery key</button>
+          </aside>
+        )}
+
         {saveConflict && <VaultConflictPanel
           browserVault={saveConflict.localVault}
           serverVault={saveConflict.serverVault}
@@ -5366,11 +5537,16 @@ export default function VaultApp() {
           />
         ) : view === "settings" ? (
           <SettingsCenter
+            key={`settings-${recoverySetupRequestId}`}
             profile={profile}
             autoLockMinutes={autoLockMinutes}
             lockWhenHidden={lockWhenHidden}
             clearClipboard={clearClipboard}
             allowAccountCreation={instanceSettings.allowAccountCreation}
+            passwordRecoveryEnabled={passwordRecoveryEnabled}
+            recoveryConfigured={recoveryConfigured}
+            openRecoveryOnMount={recoverySetupRequestId > 0}
+            onPasswordRecoveryAvailabilityChange={setPasswordRecoveryEnabled}
             onProfileChange={setProfile}
             onAutoLockMinutesChange={(minutes) => updateSettings({ autoLockMinutes: minutes })}
             onLockWhenHiddenChange={(enabled) => updateSettings({ lockWhenHidden: enabled })}
@@ -5379,6 +5555,7 @@ export default function VaultApp() {
             onNotice={setToast}
             onSignOut={() => void lockVault()}
             onChangePassword={changeOwnPassword}
+            onCreateRecoveryKey={createOwnRecoveryKey}
             onDeleteAccount={deleteOwnAccount}
           />
         ) : (

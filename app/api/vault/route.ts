@@ -2,11 +2,18 @@ import {
   decodeFixedAuthProof,
   isEncryptedVaultPayload,
   isVaultCryptoHeader,
+  isVaultRecoveryEnvelope,
   MAX_SESSION_TTL_MS,
   normalizeVaultIdentifier,
   VaultStore,
   VaultStoreError,
 } from "@/lib/server/vault-store";
+import {
+  PasswordRecoveryError,
+  PasswordRecoveryService,
+  passwordRecoveryEnabled,
+  sendSmtpTestEmail,
+} from "@/lib/server/password-recovery";
 import { extensionCorsHeaders, isExtensionRequest } from "@/lib/server/extension-origin";
 import {
   getOidcIdentity,
@@ -22,6 +29,12 @@ import {
   writeOidcSettings,
   type OidcClientAuthMethod,
 } from "@/lib/server/oidc-settings-store";
+import {
+  prepareSmtpSettingsUpdate,
+  publicSmtpSettings,
+  SmtpSettingsStoreError,
+  writeSmtpSettings,
+} from "@/lib/server/smtp-settings-store";
 import { isIP } from "node:net";
 
 export const runtime = "nodejs";
@@ -32,6 +45,7 @@ const SESSION_COOKIE = "coffer_session";
 const SESSION_MAX_AGE_SECONDS = 12 * 60 * 60;
 const REMEMBERED_SESSION_MAX_AGE_SECONDS = MAX_SESSION_TTL_MS / 1_000;
 const store = new VaultStore();
+const passwordRecovery = new PasswordRecoveryService();
 
 type JsonObject = Record<string, unknown>;
 
@@ -48,7 +62,10 @@ class RequestError extends Error {
 
 export async function GET(request: Request): Promise<Response> {
   try {
-    return json(await store.getAuthenticatedBootstrap(sessionToken(request)));
+    return json({
+      ...await store.getAuthenticatedBootstrap(sessionToken(request)),
+      passwordRecoveryEnabled: passwordRecoveryEnabled(),
+    });
   } catch (error) {
     return errorResponse(error);
   }
@@ -94,6 +111,18 @@ export async function POST(request: Request): Promise<Response> {
       case "change_password":
         response = await changePassword(request, body);
         break;
+      case "configure_recovery":
+        response = await configureRecovery(request, body);
+        break;
+      case "request_password_recovery":
+        response = await requestPasswordRecovery(request, body);
+        break;
+      case "begin_password_recovery":
+        response = await beginPasswordRecovery(request, body);
+        break;
+      case "complete_password_recovery":
+        response = await completePasswordRecovery(request, body);
+        break;
       case "update_instance_settings":
         response = await updateInstanceSettings(request, body);
         break;
@@ -102,6 +131,15 @@ export async function POST(request: Request): Promise<Response> {
         break;
       case "update_oidc_settings":
         response = await updateOidcSettings(request, body);
+        break;
+      case "get_smtp_settings":
+        response = getSmtpSettings(request, body);
+        break;
+      case "update_smtp_settings":
+        response = await updateSmtpSettings(request, body);
+        break;
+      case "test_smtp_settings":
+        response = await testSmtpSettings(request, body);
         break;
       case "delete_account":
         response = await deleteAccount(request, body);
@@ -212,6 +250,8 @@ async function login(request: Request, body: JsonObject): Promise<Response> {
       revision: result.revision,
       payload: result.payload,
       legacy: result.legacy,
+      recoveryConfigured: result.recoveryConfigured,
+      passwordRecoveryEnabled: passwordRecoveryEnabled(),
       ...await store.getAccountCreationState(),
     },
     {
@@ -238,10 +278,13 @@ async function updateInstanceSettings(request: Request, body: JsonObject): Promi
     throw invalidSchema();
   }
 
-  return json(await store.updateInstanceSettings({
-    sessionToken: sessionToken(request),
-    allowAccountCreation: body.allowAccountCreation,
-  }));
+  return json({
+    ...await store.updateInstanceSettings({
+      sessionToken: sessionToken(request),
+      allowAccountCreation: body.allowAccountCreation,
+    }),
+    passwordRecoveryEnabled: passwordRecoveryEnabled(),
+  });
 }
 
 function getOidcSettings(request: Request, body: JsonObject): Response {
@@ -309,6 +352,98 @@ async function updateOidcSettings(request: Request, body: JsonObject): Promise<R
 
 function isOidcClientAuthMethod(value: unknown): value is OidcClientAuthMethod {
   return value === "client_secret_basic" || value === "client_secret_post" || value === "none";
+}
+
+function getSmtpSettings(request: Request, body: JsonObject): Response {
+  requireSameOrigin(request);
+  if (!hasExactKeys(body, ["action"]) || body.action !== "get_smtp_settings") {
+    throw invalidSchema();
+  }
+  store.authorizeInstanceAdministration(sessionToken(request));
+  return json({ ...publicSmtpSettings(), passwordRecoveryEnabled: passwordRecoveryEnabled() });
+}
+
+async function updateSmtpSettings(request: Request, body: JsonObject): Promise<Response> {
+  requireSameOrigin(request);
+  if (!hasExactKeys(body, [
+    "action",
+    "enabled",
+    "host",
+    "port",
+    "secure",
+    "user",
+    "password",
+    "from",
+  ])) {
+    throw invalidSchema();
+  }
+  if (
+    body.action !== "update_smtp_settings" ||
+    typeof body.enabled !== "boolean" ||
+    typeof body.host !== "string" ||
+    typeof body.port !== "number" ||
+    !Number.isSafeInteger(body.port) ||
+    typeof body.secure !== "boolean" ||
+    typeof body.user !== "string" ||
+    (body.password !== null && typeof body.password !== "string") ||
+    typeof body.from !== "string"
+  ) {
+    throw invalidSchema();
+  }
+  store.authorizeInstanceAdministration(sessionToken(request));
+  const settings = prepareSmtpSettingsUpdate({
+    enabled: body.enabled,
+    host: body.host,
+    port: body.port,
+    secure: body.secure,
+    user: body.user,
+    password: body.password,
+    from: body.from,
+  });
+  await writeSmtpSettings(settings);
+  return json({ ...publicSmtpSettings(), passwordRecoveryEnabled: passwordRecoveryEnabled() });
+}
+
+async function testSmtpSettings(request: Request, body: JsonObject): Promise<Response> {
+  requireSameOrigin(request);
+  if (!hasExactKeys(body, [
+    "action",
+    "host",
+    "port",
+    "secure",
+    "user",
+    "password",
+    "from",
+    "recipient",
+  ])) {
+    throw invalidSchema();
+  }
+  if (
+    body.action !== "test_smtp_settings" ||
+    typeof body.host !== "string" ||
+    typeof body.port !== "number" ||
+    !Number.isSafeInteger(body.port) ||
+    typeof body.secure !== "boolean" ||
+    typeof body.user !== "string" ||
+    (body.password !== null && typeof body.password !== "string") ||
+    typeof body.from !== "string" ||
+    typeof body.recipient !== "string"
+  ) {
+    throw invalidSchema();
+  }
+  store.authorizeInstanceAdministration(sessionToken(request));
+  const recipient = normalizeVaultIdentifier(body.recipient);
+  const settings = prepareSmtpSettingsUpdate({
+    enabled: true,
+    host: body.host,
+    port: body.port,
+    secure: body.secure,
+    user: body.user,
+    password: body.password,
+    from: body.from,
+  });
+  await sendSmtpTestEmail(settings, recipient);
+  return json({ sent: true });
 }
 
 async function claimLegacy(request: Request, body: JsonObject): Promise<Response> {
@@ -422,6 +557,120 @@ async function changePassword(request: Request, body: JsonObject): Promise<Respo
     { revision: result.revision, updatedAt: result.updatedAt },
     { headers: { "Set-Cookie": sessionCookie(request, result.sessionToken) } },
   );
+}
+
+async function configureRecovery(request: Request, body: JsonObject): Promise<Response> {
+  requireSameOrigin(request);
+  if (!hasExactKeys(body, [
+    "action",
+    "vaultId",
+    "currentAuthProof",
+    "recoveryProof",
+    "envelope",
+  ])) {
+    throw invalidSchema();
+  }
+  const currentAuthProof = decodeFixedAuthProof(body.currentAuthProof);
+  const recoveryProof = decodeFixedAuthProof(body.recoveryProof);
+  if (
+    body.action !== "configure_recovery" ||
+    typeof body.vaultId !== "string" ||
+    !currentAuthProof ||
+    !recoveryProof ||
+    !isVaultRecoveryEnvelope(body.envelope)
+  ) {
+    throw invalidSchema();
+  }
+  return json(await store.configureRecovery({
+    sessionToken: sessionToken(request),
+    vaultId: body.vaultId,
+    currentAuthProof,
+    recoveryProof,
+    envelope: body.envelope,
+    rateKey: clientRateKey(request),
+  }));
+}
+
+async function requestPasswordRecovery(request: Request, body: JsonObject): Promise<Response> {
+  requireSameOrigin(request);
+  if (!hasExactKeys(body, ["action", "identifier"]) ||
+      body.action !== "request_password_recovery" ||
+      typeof body.identifier !== "string") {
+    throw invalidSchema();
+  }
+  if (!passwordRecoveryEnabled()) {
+    throw new PasswordRecoveryError("not_configured", "Password recovery email is not configured.");
+  }
+  let identifier: string;
+  try {
+    identifier = normalizeVaultIdentifier(body.identifier);
+  } catch {
+    return json({ accepted: true });
+  }
+  try {
+    await store.getRecoveryChallenge(identifier);
+  } catch (error) {
+    if (error instanceof VaultStoreError && error.code === "recovery_unavailable") {
+      return json({ accepted: true });
+    }
+    throw error;
+  }
+  const delivery = await passwordRecovery.deliver(
+    identifier,
+    recoveryPublicBaseUrl(request),
+    clientRateKey(request),
+  );
+  return json({ accepted: true, ...delivery });
+}
+
+async function beginPasswordRecovery(request: Request, body: JsonObject): Promise<Response> {
+  requireSameOrigin(request);
+  if (!hasExactKeys(body, ["action", "token"]) ||
+      body.action !== "begin_password_recovery" ||
+      typeof body.token !== "string") {
+    throw invalidSchema();
+  }
+  const record = passwordRecovery.resolve(body.token);
+  return json(await store.getRecoveryChallenge(record.identifier));
+}
+
+async function completePasswordRecovery(request: Request, body: JsonObject): Promise<Response> {
+  requireSameOrigin(request);
+  if (!hasExactKeys(body, [
+    "action",
+    "token",
+    "expectedRevision",
+    "recoveryProof",
+    "nextAuthProof",
+    "header",
+  ])) {
+    throw invalidSchema();
+  }
+  const recoveryProof = decodeFixedAuthProof(body.recoveryProof);
+  const nextAuthProof = decodeFixedAuthProof(body.nextAuthProof);
+  if (
+    body.action !== "complete_password_recovery" ||
+    typeof body.token !== "string" ||
+    !isRevision(body.expectedRevision) ||
+    !recoveryProof ||
+    !nextAuthProof ||
+    !isVaultCryptoHeader(body.header)
+  ) {
+    throw invalidSchema();
+  }
+  const record = passwordRecovery.resolve(body.token);
+  const result = await store.completeRecovery({
+    identifier: record.identifier,
+    expectedRevision: body.expectedRevision,
+    recoveryProof,
+    nextAuthProof,
+    header: body.header,
+    rateKey: clientRateKey(request),
+  });
+  passwordRecovery.consume(body.token);
+  return json(result, {
+    headers: { "Set-Cookie": clearSessionCookie(request) },
+  });
 }
 
 async function deleteAccount(request: Request, body: JsonObject): Promise<Response> {
@@ -638,6 +887,25 @@ function trustedForwardedOrigin(request: Request): string | null {
   }
 }
 
+function recoveryPublicBaseUrl(request: Request): string {
+  const configured = process.env.COFFER_PUBLIC_URL?.trim();
+  if (configured) {
+    try {
+      const parsed = new URL(configured);
+      if (
+        (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+        !parsed.username &&
+        !parsed.password
+      ) {
+        return parsed.origin;
+      }
+    } catch {
+      // Fall back to the validated request origin below.
+    }
+  }
+  return trustedForwardedOrigin(request) ?? new URL(request.url).origin;
+}
+
 function clientRateKey(request: Request): string {
   if (!trustProxyHeaders()) return "local";
   return (
@@ -697,6 +965,8 @@ function errorResponse(error: unknown): Response {
       legacy_unavailable: 409,
       revision_conflict: 409,
       invalid_input: 400,
+      recovery_unavailable: 409,
+      invalid_recovery: 401,
       corrupt_store: 500,
     };
     const publicMessage =
@@ -720,6 +990,24 @@ function errorResponse(error: unknown): Response {
     return json(
       { error: { code: "invalid_oidc_settings", message: error.message } },
       { status: 400 },
+    );
+  }
+  if (error instanceof SmtpSettingsStoreError) {
+    return json(
+      { error: { code: "invalid_smtp_settings", message: error.message } },
+      { status: 400 },
+    );
+  }
+  if (error instanceof PasswordRecoveryError) {
+    const statusByCode: Record<typeof error.code, number> = {
+      not_configured: 503,
+      invalid_token: 401,
+      rate_limited: 429,
+      delivery_failed: 502,
+    };
+    return json(
+      { error: { code: error.code, message: error.message } },
+      { status: statusByCode[error.code] },
     );
   }
 

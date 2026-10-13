@@ -15,12 +15,18 @@ const RESUME_WRAPPING_KEY_BYTES = 32;
 const RESUME_TAB_TOKEN_BYTES = 32;
 const RESUME_KEY_BUNDLE_BYTES = AES_KEY_BYTES + AUTH_KEY_BYTES;
 const RESUME_CIPHERTEXT_BYTES = RESUME_KEY_BUNDLE_BYTES + GCM_TAG_BYTES;
+const RECOVERY_KEY_BYTES = 20;
+const RECOVERY_KEY_CHARACTERS = 32;
+const RECOVERY_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 const WRAP_AAD_CONTEXT = "coffer:vault-key-wrap:v1";
 const PAYLOAD_AAD_CONTEXT = "coffer:vault-payload:v1";
 const PASSWORD_VERIFIER_CONTEXT = "coffer:password-verifier:v1";
 const API_AUTH_PROOF_CONTEXT = "coffer:api-auth-proof:v1";
 const RESUME_ENVELOPE_AAD_CONTEXT = "coffer:vault-resume-key-envelope:v1";
+const RECOVERY_WRAP_AAD_CONTEXT = "coffer:vault-recovery-wrap:v1";
+const RECOVERY_DERIVE_CONTEXT = "coffer:vault-recovery-derive:v1";
+const RECOVERY_PROOF_CONTEXT = "coffer:vault-recovery-proof:v1";
 
 const MAX_PASSWORD_BYTES = 1_024;
 const MIN_PASSWORD_CHARACTERS = 12;
@@ -100,6 +106,28 @@ export interface VaultPayloadCipher {
   iv: string;
   ciphertext: string;
   tagLength: 128;
+}
+
+export interface VaultRecoveryEnvelope {
+  readonly format: "coffer-vault-recovery";
+  readonly version: 1;
+  readonly vaultId: string;
+  readonly createdAt: string;
+  readonly salt: string;
+  readonly wrappedKey: WrappedVaultKey;
+}
+
+export interface CreatedVaultRecovery {
+  readonly envelope: VaultRecoveryEnvelope;
+  readonly recoveryKey: string;
+  readonly currentAuthProof: string;
+  readonly recoveryProof: string;
+}
+
+export interface RecoveredVaultPassword {
+  readonly header: EncryptedVaultHeader;
+  readonly nextAuthProof: string;
+  readonly recoveryProof: string;
 }
 
 /**
@@ -199,6 +227,57 @@ function bytesToBase64Url(bytes: Uint8Array): string {
     .replaceAll("+", "-")
     .replaceAll("/", "_")
     .replace(/=+$/u, "");
+}
+
+function recoveryKeyToString(bytes: Uint8Array): string {
+  if (bytes.byteLength !== RECOVERY_KEY_BYTES) {
+    throw new VaultCryptoError("INVALID_INPUT", "Recovery key material has an invalid length.");
+  }
+  let bits = 0;
+  let value = 0;
+  let encoded = "";
+  for (const byte of bytes) {
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      encoded += RECOVERY_ALPHABET[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  return encoded.match(/.{1,4}/gu)?.join("-") ?? encoded;
+}
+
+function recoveryKeyFromString(input: unknown): Uint8Array {
+  if (typeof input !== "string") {
+    throw new VaultCryptoError("INVALID_INPUT", "Recovery key must be a string.");
+  }
+  const normalized = input.toUpperCase().replace(/[\s-]+/gu, "");
+  if (normalized.length !== RECOVERY_KEY_CHARACTERS) {
+    throw new VaultCryptoError("INVALID_INPUT", "Enter the complete recovery key.");
+  }
+  const bytes = new Uint8Array(RECOVERY_KEY_BYTES);
+  let bits = 0;
+  let value = 0;
+  let offset = 0;
+  for (const character of normalized) {
+    const index = RECOVERY_ALPHABET.indexOf(character);
+    if (index < 0) {
+      bytes.fill(0);
+      throw new VaultCryptoError("INVALID_INPUT", "The recovery key contains invalid characters.");
+    }
+    value = (value << 5) | index;
+    bits += 5;
+    if (bits >= 8) {
+      bytes[offset] = (value >>> (bits - 8)) & 0xff;
+      offset += 1;
+      bits -= 8;
+    }
+  }
+  if (offset !== RECOVERY_KEY_BYTES || bits !== 0) {
+    bytes.fill(0);
+    throw new VaultCryptoError("INVALID_INPUT", "The recovery key has an invalid length.");
+  }
+  return bytes;
 }
 
 const CANONICAL_BASE64 =
@@ -488,6 +567,90 @@ async function importAuthKey(bytes: Uint8Array): Promise<CryptoKey> {
     false,
     ["sign"],
   );
+}
+
+async function deriveRecoveryMaterial(
+  recoveryKey: string,
+  salt: Uint8Array,
+  vaultId: string,
+): Promise<{ encryptionKey: CryptoKey; authKey: CryptoKey; rawAuthKey: Uint8Array }> {
+  const secret = recoveryKeyFromString(recoveryKey);
+  let derived: Uint8Array | undefined;
+  try {
+    const baseKey = await cryptoApi().subtle.importKey(
+      "raw",
+      webCryptoBytes(secret),
+      "HKDF",
+      false,
+      ["deriveBits"],
+    );
+    derived = new Uint8Array(await cryptoApi().subtle.deriveBits(
+      {
+        name: "HKDF",
+        hash: "SHA-256",
+        salt: webCryptoBytes(salt),
+        info: webCryptoBytes(UTF8.encode(`${RECOVERY_DERIVE_CONTEXT}:${vaultId}`)),
+      },
+      baseKey,
+      DERIVED_KEY_BYTES * 8,
+    ));
+    const encryptionBytes = derived.slice(0, AES_KEY_BYTES);
+    const rawAuthKey = derived.slice(AES_KEY_BYTES);
+    try {
+      const [encryptionKey, authKey] = await Promise.all([
+        importAesKey(encryptionBytes, ["encrypt", "decrypt"]),
+        importAuthKey(rawAuthKey),
+      ]);
+      return { encryptionKey, authKey, rawAuthKey };
+    } finally {
+      encryptionBytes.fill(0);
+    }
+  } finally {
+    secret.fill(0);
+    derived?.fill(0);
+  }
+}
+
+async function createRecoveryProof(authKey: CryptoKey): Promise<string> {
+  const signature = await hmacContext(authKey, RECOVERY_PROOF_CONTEXT);
+  try {
+    return bytesToBase64Url(signature);
+  } finally {
+    signature.fill(0);
+  }
+}
+
+function recoveryAdditionalData(envelope: VaultRecoveryEnvelope): Uint8Array {
+  return UTF8.encode(JSON.stringify({
+    context: RECOVERY_WRAP_AAD_CONTEXT,
+    format: envelope.format,
+    version: envelope.version,
+    vaultId: envelope.vaultId,
+    createdAt: envelope.createdAt,
+    salt: envelope.salt,
+  }));
+}
+
+function validateRecoveryEnvelope(envelope: VaultRecoveryEnvelope): void {
+  if (
+    !envelope ||
+    envelope.format !== "coffer-vault-recovery" ||
+    envelope.version !== 1 ||
+    typeof envelope.vaultId !== "string" ||
+    typeof envelope.createdAt !== "string" ||
+    envelope.wrappedKey?.algorithm !== "AES-256-GCM" ||
+    envelope.wrappedKey.tagLength !== 128
+  ) {
+    throw new VaultCryptoError("INVALID_INPUT", "The recovery record is invalid.");
+  }
+  decodeExactBase64(envelope.vaultId, "recovery.vaultId", VAULT_ID_BYTES).fill(0);
+  decodeExactBase64(envelope.salt, "recovery.salt", SALT_BYTES).fill(0);
+  decodeExactBase64(envelope.wrappedKey.iv, "recovery.wrappedKey.iv", GCM_IV_BYTES).fill(0);
+  decodeExactBase64(
+    envelope.wrappedKey.ciphertext,
+    "recovery.wrappedKey.ciphertext",
+    AES_KEY_BYTES + GCM_TAG_BYTES,
+  ).fill(0);
 }
 
 function assertAesVaultKey(key: CryptoKey): void {
@@ -1267,6 +1430,203 @@ export async function rotateVaultPassword(
     kekBytes?.fill(0);
     nextAuthKeyBytes?.fill(0);
     wrappedKey?.fill(0);
+  }
+}
+
+/**
+ * Creates a printable, high-entropy recovery key and a server-storable envelope
+ * that wraps the existing vault key. The recovery key itself never leaves the
+ * browser; the server receives only a proof and encrypted key material.
+ */
+export async function createVaultRecovery(
+  currentPassword: string,
+  header: EncryptedVaultHeader,
+): Promise<CreatedVaultRecovery> {
+  const current = await unwrapVaultKeyMaterial(currentPassword, header);
+  const recoverySecret = randomBytes(RECOVERY_KEY_BYTES);
+  const salt = randomBytes(SALT_BYTES);
+  const iv = randomBytes(GCM_IV_BYTES);
+  let wrappedKey: Uint8Array | undefined;
+  let recoveryMaterial: Awaited<ReturnType<typeof deriveRecoveryMaterial>> | undefined;
+  try {
+    const recoveryKey = recoveryKeyToString(recoverySecret);
+    recoveryMaterial = await deriveRecoveryMaterial(recoveryKey, salt, header.vaultId);
+    const envelopeBase: VaultRecoveryEnvelope = {
+      format: "coffer-vault-recovery",
+      version: 1,
+      vaultId: header.vaultId,
+      createdAt: new Date().toISOString(),
+      salt: bytesToBase64(salt),
+      wrappedKey: {
+        algorithm: "AES-256-GCM",
+        iv: bytesToBase64(iv),
+        ciphertext: "",
+        tagLength: 128,
+      },
+    };
+    wrappedKey = new Uint8Array(await cryptoApi().subtle.encrypt(
+      {
+        name: "AES-GCM",
+        iv: webCryptoBytes(iv),
+        additionalData: webCryptoBytes(recoveryAdditionalData(envelopeBase)),
+        tagLength: 128,
+      },
+      recoveryMaterial.encryptionKey,
+      webCryptoBytes(current.rawVaultKey),
+    ));
+    const envelope: VaultRecoveryEnvelope = {
+      ...envelopeBase,
+      wrappedKey: { ...envelopeBase.wrappedKey, ciphertext: bytesToBase64(wrappedKey) },
+    };
+    validateRecoveryEnvelope(envelope);
+    const [currentAuthProof, recoveryProof] = await Promise.all([
+      createAuthProof(current.authKey),
+      createRecoveryProof(recoveryMaterial.authKey),
+    ]);
+    return { envelope, recoveryKey, currentAuthProof, recoveryProof };
+  } finally {
+    current.rawVaultKey.fill(0);
+    current.rawAuthKey.fill(0);
+    recoverySecret.fill(0);
+    salt.fill(0);
+    iv.fill(0);
+    wrappedKey?.fill(0);
+    recoveryMaterial?.rawAuthKey.fill(0);
+  }
+}
+
+async function wrapRecoveredVaultKey(
+  rawVaultKey: Uint8Array,
+  nextPassword: string,
+  header: EncryptedVaultHeader,
+): Promise<{ header: EncryptedVaultHeader; nextAuthProof: string }> {
+  validatePassword(nextPassword);
+  const kdfOptions = resolveKdfOptions({
+    memoryKiB: header.kdf.memoryKiB,
+    iterations: header.kdf.iterations,
+    parallelism: header.kdf.parallelism,
+  });
+  const salt = randomBytes(SALT_BYTES);
+  const wrapIv = randomBytes(GCM_IV_BYTES);
+  let derived: Uint8Array | undefined;
+  let kekBytes: Uint8Array | undefined;
+  let nextAuthKeyBytes: Uint8Array | undefined;
+  let wrappedKey: Uint8Array | undefined;
+  try {
+    derived = await deriveKeyMaterial(nextPassword, salt, kdfOptions);
+    kekBytes = derived.slice(0, AES_KEY_BYTES);
+    nextAuthKeyBytes = derived.slice(AES_KEY_BYTES);
+    const [kek, nextAuthKey] = await Promise.all([
+      importAesKey(kekBytes, ["encrypt"]),
+      importAuthKey(nextAuthKeyBytes),
+    ]);
+    const nextHeader: EncryptedVaultHeader = {
+      format: header.format,
+      version: header.version,
+      vaultId: header.vaultId,
+      createdAt: header.createdAt,
+      kdf: {
+        algorithm: "argon2id",
+        salt: bytesToBase64(salt),
+        memoryKiB: kdfOptions.memoryKiB,
+        iterations: kdfOptions.iterations,
+        parallelism: kdfOptions.parallelism,
+        hashLength: 64,
+      },
+      passwordVerifier: {
+        algorithm: "HMAC-SHA-256",
+        value: await passwordVerifier(nextAuthKey),
+      },
+      wrappedKey: {
+        algorithm: "AES-256-GCM",
+        iv: "",
+        ciphertext: "",
+        tagLength: 128,
+      },
+    };
+    wrappedKey = new Uint8Array(await cryptoApi().subtle.encrypt(
+      {
+        name: "AES-GCM",
+        iv: webCryptoBytes(wrapIv),
+        additionalData: webCryptoBytes(wrapAdditionalData(nextHeader)),
+        tagLength: 128,
+      },
+      kek,
+      webCryptoBytes(rawVaultKey),
+    ));
+    nextHeader.wrappedKey = {
+      algorithm: "AES-256-GCM",
+      iv: bytesToBase64(wrapIv),
+      ciphertext: bytesToBase64(wrappedKey),
+      tagLength: 128,
+    };
+    validateHeader(nextHeader);
+    return { header: nextHeader, nextAuthProof: await createAuthProof(nextAuthKey) };
+  } finally {
+    salt.fill(0);
+    wrapIv.fill(0);
+    derived?.fill(0);
+    kekBytes?.fill(0);
+    nextAuthKeyBytes?.fill(0);
+    wrappedKey?.fill(0);
+  }
+}
+
+/** Uses a recovery key to re-wrap the unchanged vault key with a new password. */
+export async function recoverVaultPassword(
+  recoveryKey: string,
+  nextPassword: string,
+  header: EncryptedVaultHeader,
+  envelope: VaultRecoveryEnvelope,
+): Promise<RecoveredVaultPassword> {
+  validateHeader(header);
+  validateRecoveryEnvelope(envelope);
+  if (envelope.vaultId !== header.vaultId) {
+    throw new VaultCryptoError("INVALID_INPUT", "The recovery key does not belong to this vault.");
+  }
+  const salt = decodeExactBase64(envelope.salt, "recovery.salt", SALT_BYTES);
+  const iv = decodeExactBase64(envelope.wrappedKey.iv, "recovery.wrappedKey.iv", GCM_IV_BYTES);
+  const encrypted = decodeExactBase64(
+    envelope.wrappedKey.ciphertext,
+    "recovery.wrappedKey.ciphertext",
+    AES_KEY_BYTES + GCM_TAG_BYTES,
+  );
+  let rawVaultKey: Uint8Array | undefined;
+  let recoveryMaterial: Awaited<ReturnType<typeof deriveRecoveryMaterial>> | undefined;
+  try {
+    recoveryMaterial = await deriveRecoveryMaterial(recoveryKey, salt, envelope.vaultId);
+    try {
+      rawVaultKey = new Uint8Array(await cryptoApi().subtle.decrypt(
+        {
+          name: "AES-GCM",
+          iv: webCryptoBytes(iv),
+          additionalData: webCryptoBytes(recoveryAdditionalData(envelope)),
+          tagLength: 128,
+        },
+        recoveryMaterial.encryptionKey,
+        webCryptoBytes(encrypted),
+      ));
+    } catch (error) {
+      throw new VaultCryptoError(
+        "AUTHENTICATION_FAILED",
+        "The recovery key is incorrect or the recovery record was modified.",
+        { cause: error },
+      );
+    }
+    if (rawVaultKey.byteLength !== AES_KEY_BYTES) {
+      throw new VaultCryptoError("CORRUPT_VAULT", "The recovered vault key has an invalid length.");
+    }
+    const [rotated, recoveryProof] = await Promise.all([
+      wrapRecoveredVaultKey(rawVaultKey, nextPassword, header),
+      createRecoveryProof(recoveryMaterial.authKey),
+    ]);
+    return { ...rotated, recoveryProof };
+  } finally {
+    salt.fill(0);
+    iv.fill(0);
+    encrypted.fill(0);
+    rawVaultKey?.fill(0);
+    recoveryMaterial?.rawAuthKey.fill(0);
   }
 }
 

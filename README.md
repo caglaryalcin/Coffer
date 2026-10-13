@@ -17,6 +17,7 @@ server. It also supports QR imports, groups, backups, and 2FAS transfers.
 ## Features
 
 - Multi-user, browser-encrypted vaults
+- Optional password recovery using a user-held recovery key plus a 15-minute email link; the server never receives the recovery key or decrypted vault data
 - TOTP and HOTP generation with QR and manual account setup
 - HOTP counters advance explicitly with Next code and are saved in the encrypted vault before copying; copying alone does not advance them
 - HOTP import/export through Coffer backups, 2FAS, 2FAuth imports, and OTPAuth links (counter range: 0–9,007,199,254,740,991)
@@ -66,6 +67,14 @@ keeps encrypted vault data across container restarts and replacements.
 | `COFFER_OIDC_PROVIDER_NAME` | `OpenID Connect` | Provider name shown on the sign-in button. |
 | `COFFER_OIDC_SCOPES` | `openid email profile` | Space-separated OIDC scopes. `openid` and `email` are always requested. |
 | `COFFER_OIDC_REDIRECT_URI` | Derived from request | Explicit callback URL, for example `https://coffer.example.com/api/auth/oidc/callback`. |
+| `COFFER_PUBLIC_URL` | Derived from request | Public Coffer origin used in password recovery emails, for example `https://coffer.example.com`. Set this explicitly in production. |
+| `COFFER_SMTP_HOST` | Empty | SMTP server hostname. Password recovery is enabled when this and `COFFER_SMTP_FROM` are valid. |
+| `COFFER_SMTP_PORT` | `587` | SMTP server port. |
+| `COFFER_SMTP_SECURE` | `0` | Set to `1` for implicit TLS, usually on port 465. Port 587 uses STARTTLS. |
+| `COFFER_SMTP_USER` | Empty | Optional SMTP username. Must be paired with `COFFER_SMTP_PASSWORD`. |
+| `COFFER_SMTP_PASSWORD` | Empty | Optional SMTP password. Must be paired with `COFFER_SMTP_USER`. |
+| `COFFER_SMTP_FROM` | Empty | Sender address used for recovery emails, for example `Coffer <no-reply@example.com>`. |
+| `COFFER_RECOVERY_DEV_MODE` | `0` | Development only. Set to `1` outside production to show the recovery link in the UI without SMTP. Never use in production. |
 | `HOST` | `0.0.0.0` in Docker | Address the application server listens on. |
 | `PORT` | `3000` | Application server port inside the container. |
 | `NODE_ENV` | `production` in Docker | Node.js runtime mode. |
@@ -117,6 +126,30 @@ OIDC authorization flows and sessions currently live in process memory. Run one
 replica, or configure load-balancer affinity; pod restarts require users to sign
 in to the identity provider again.
 
+### Password recovery
+
+Configure SMTP with the `COFFER_SMTP_*` environment variables or from
+**Settings → Email delivery**, then each existing or new user can opt in from
+**Settings → Security → Account recovery**. Settings saved in the interface are
+stored in `COFFER_DATA_DIR/smtp-settings.json` and take priority over every SMTP
+environment variable. The SMTP password is never returned by the settings API
+or rendered back into the browser. Coffer asks for the current vault password and
+creates a printable recovery key in the browser. The server stores only an
+encrypted envelope and a verifier; it cannot reconstruct the recovery key or
+decrypt the vault.
+
+A forgotten-password reset requires both the emailed link and the saved recovery
+key. Recovery links expire after 15 minutes, are rate-limited, and are kept only
+in the running server process. Run one replica or use load-balancer affinity;
+restarting the process invalidates outstanding links. A successful reset revokes
+existing sessions and invalidates the recovery key, so the user must create a new
+one after signing in.
+
+Recovery is optional and backward compatible. Existing accounts keep working
+without migration, but an account that did not create a recovery key before the
+password was lost cannot be recovered retroactively. Vault backups remain the
+last-resort recovery path.
+
 For HTTPS behind a reverse proxy, set both `COFFER_TRUST_PROXY=1` and
 `VINEXT_TRUSTED_HOSTS` to the public hostname. The proxy must overwrite and
 forward `X-Forwarded-Proto` and `X-Forwarded-Host`; the application backend
@@ -124,4 +157,6 @@ should not be exposed directly when proxy trust is enabled. Production browser
 access requires HTTPS because vault encryption uses Web Crypto; `localhost` is
 the development exception.
 
-> Passwords cannot be recovered. Keep a backup of your encrypted vault data.
+> Passwords can be reset only when account recovery was enabled in advance and
+> the user still has both the recovery key and access to the account email. Keep
+> a protected backup of encrypted vault data as well.

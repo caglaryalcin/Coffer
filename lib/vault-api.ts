@@ -1,4 +1,4 @@
-import type { EncryptedVaultHeader, VaultPayloadCipher } from "./vault-crypto";
+import type { EncryptedVaultHeader, VaultPayloadCipher, VaultRecoveryEnvelope } from "./vault-crypto";
 
 export const VAULT_API_TIMEOUT_MS = 10_000;
 
@@ -9,6 +9,7 @@ export type VaultInstanceSettings = {
 export type VaultAccountCreationState = {
   instanceSettings: VaultInstanceSettings;
   accountCreationEnabled: boolean;
+  passwordRecoveryEnabled: boolean;
 };
 
 export type OidcClientState = {
@@ -39,6 +40,25 @@ export type OidcSettingsUpdate = Omit<
   clientSecret: string | null;
 };
 
+export type SmtpAdminSettings = {
+  enabled: boolean;
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  from: string;
+  source: "environment" | "volume" | "none";
+  passwordConfigured: boolean;
+  passwordRecoveryEnabled: boolean;
+};
+
+export type SmtpSettingsUpdate = Omit<
+  SmtpAdminSettings,
+  "source" | "passwordConfigured" | "passwordRecoveryEnabled"
+> & {
+  password: string | null;
+};
+
 export type VaultBootstrap =
   | ({ authenticated: false } & VaultAccountCreationState)
   | {
@@ -46,6 +66,7 @@ export type VaultBootstrap =
       revision: number;
       header: EncryptedVaultHeader;
       legacy: boolean;
+      recoveryConfigured: boolean;
     } & VaultAccountCreationState;
 
 export type VaultIdentity =
@@ -61,6 +82,7 @@ export type VaultLoginResult = {
   revision: number;
   payload: VaultPayloadCipher;
   legacy: boolean;
+  recoveryConfigured: boolean;
 } & VaultAccountCreationState;
 
 export type VaultSaveResult = { revision: number; updatedAt: string };
@@ -118,9 +140,10 @@ async function parseResponse(response: Response): Promise<unknown> {
 async function requestVault(
   input: RequestInfo | URL,
   init: RequestInit,
+  timeoutMilliseconds = VAULT_API_TIMEOUT_MS,
 ): Promise<{ body: unknown; status: number }> {
   const controller = new AbortController();
-  const timeout = globalThis.setTimeout(() => controller.abort(), VAULT_API_TIMEOUT_MS);
+  const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMilliseconds);
   try {
     const response = await fetch(input, { ...init, signal: controller.signal });
     const body = await parseResponse(response);
@@ -146,6 +169,7 @@ async function requestVault(
 
 async function postVault(
   body: Record<string, unknown>,
+  timeoutMilliseconds = VAULT_API_TIMEOUT_MS,
 ): Promise<{ body: unknown; status: number }> {
   return requestVault("/api/vault", {
     method: "POST",
@@ -153,7 +177,7 @@ async function postVault(
     cache: "no-store",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  });
+  }, timeoutMilliseconds);
 }
 
 function invalidResponse(message: string, status: number): never {
@@ -174,7 +198,10 @@ function parseAccountCreationState(
   const accountCreationEnabled = typeof body.accountCreationEnabled === "boolean"
     ? body.accountCreationEnabled
     : true;
-  return { instanceSettings, accountCreationEnabled };
+  const passwordRecoveryEnabled = typeof body.passwordRecoveryEnabled === "boolean"
+    ? body.passwordRecoveryEnabled
+    : false;
+  return { instanceSettings, accountCreationEnabled, passwordRecoveryEnabled };
 }
 
 export async function getVaultBootstrap(): Promise<VaultBootstrap> {
@@ -189,7 +216,7 @@ export async function getVaultBootstrap(): Promise<VaultBootstrap> {
   if (!body.authenticated) return { authenticated: false, ...accountCreationState };
 
   const header = parseHeader(body.header);
-  if (!isRevision(body.revision) || !header) {
+  if (!isRevision(body.revision) || !header || typeof body.recoveryConfigured !== "boolean") {
     invalidResponse("The vault server returned invalid session data.", status);
   }
   if (body.legacy !== undefined && body.legacy !== true) {
@@ -200,6 +227,7 @@ export async function getVaultBootstrap(): Promise<VaultBootstrap> {
     revision: body.revision,
     header,
     legacy: body.legacy === true,
+    recoveryConfigured: body.recoveryConfigured,
     ...accountCreationState,
   };
 }
@@ -270,6 +298,50 @@ function isOidcClientAuthMethod(value: unknown): value is OidcClientAuthMethod {
   return value === "client_secret_basic" || value === "client_secret_post" || value === "none";
 }
 
+export async function getSmtpAdminSettings(): Promise<SmtpAdminSettings> {
+  const { body, status } = await postVault({ action: "get_smtp_settings" });
+  return parseSmtpAdminSettings(body, status);
+}
+
+export async function updateSmtpAdminSettings(
+  input: SmtpSettingsUpdate,
+): Promise<SmtpAdminSettings> {
+  const { body, status } = await postVault({ action: "update_smtp_settings", ...input });
+  return parseSmtpAdminSettings(body, status);
+}
+
+export async function testSmtpAdminSettings(
+  input: Omit<SmtpSettingsUpdate, "enabled">,
+  recipient: string,
+): Promise<void> {
+  const { body, status } = await postVault(
+    { action: "test_smtp_settings", ...input, recipient },
+    20_000,
+  );
+  if (!isRecord(body) || body.sent !== true) {
+    invalidResponse("The SMTP server returned an invalid test result.", status);
+  }
+}
+
+function parseSmtpAdminSettings(body: unknown, status: number): SmtpAdminSettings {
+  if (
+    !isRecord(body) ||
+    typeof body.enabled !== "boolean" ||
+    typeof body.host !== "string" ||
+    typeof body.port !== "number" ||
+    !Number.isSafeInteger(body.port) ||
+    typeof body.secure !== "boolean" ||
+    typeof body.user !== "string" ||
+    typeof body.from !== "string" ||
+    (body.source !== "environment" && body.source !== "volume" && body.source !== "none") ||
+    typeof body.passwordConfigured !== "boolean" ||
+    typeof body.passwordRecoveryEnabled !== "boolean"
+  ) {
+    invalidResponse("The SMTP server returned invalid settings.", status);
+  }
+  return body as SmtpAdminSettings;
+}
+
 export async function identifyVault(identifier: string): Promise<VaultIdentity> {
   const { body, status } = await postVault({ action: "identify", identifier });
   if (!isRecord(body) || typeof body.configured !== "boolean") {
@@ -321,6 +393,7 @@ export async function loginVault(
     !isRevision(body.revision) ||
     !isRecord(body.payload) ||
     typeof body.legacy !== "boolean"
+    || typeof body.recoveryConfigured !== "boolean"
   ) {
     invalidResponse("The vault server returned an invalid sign-in result.", status);
   }
@@ -328,6 +401,7 @@ export async function loginVault(
     revision: body.revision,
     payload: body.payload as unknown as VaultPayloadCipher,
     legacy: body.legacy,
+    recoveryConfigured: body.recoveryConfigured,
     ...parseAccountCreationState(body),
   };
 }
@@ -340,7 +414,8 @@ export async function updateInstanceSettings(input: {
     !isRecord(body) ||
     !isRecord(body.instanceSettings) ||
     typeof body.instanceSettings.allowAccountCreation !== "boolean" ||
-    typeof body.accountCreationEnabled !== "boolean"
+    typeof body.accountCreationEnabled !== "boolean" ||
+    typeof body.passwordRecoveryEnabled !== "boolean"
   ) {
     invalidResponse("The vault server returned invalid instance settings.", status);
   }
@@ -349,6 +424,7 @@ export async function updateInstanceSettings(input: {
       allowAccountCreation: body.instanceSettings.allowAccountCreation,
     },
     accountCreationEnabled: body.accountCreationEnabled,
+    passwordRecoveryEnabled: body.passwordRecoveryEnabled,
   };
 }
 
@@ -390,6 +466,67 @@ export async function changeVaultPassword(input: {
     typeof body.updatedAt !== "string"
   ) {
     invalidResponse("The vault server returned an invalid password change result.", status);
+  }
+  return { revision: body.revision, updatedAt: body.updatedAt };
+}
+
+export async function configureVaultRecovery(input: {
+  vaultId: string;
+  currentAuthProof: string;
+  recoveryProof: string;
+  envelope: VaultRecoveryEnvelope;
+}): Promise<{ configuredAt: string }> {
+  const { body, status } = await postVault({ action: "configure_recovery", ...input });
+  if (!isRecord(body) || typeof body.configuredAt !== "string") {
+    invalidResponse("The vault server returned an invalid recovery result.", status);
+  }
+  return { configuredAt: body.configuredAt };
+}
+
+export async function requestPasswordRecovery(
+  identifier: string,
+): Promise<{ accepted: true; previewUrl?: string }> {
+  const { body, status } = await postVault({ action: "request_password_recovery", identifier });
+  if (
+    !isRecord(body) ||
+    body.accepted !== true ||
+    (body.previewUrl !== undefined && typeof body.previewUrl !== "string")
+  ) {
+    invalidResponse("The vault server returned an invalid recovery request result.", status);
+  }
+  return {
+    accepted: true,
+    ...(typeof body.previewUrl === "string" ? { previewUrl: body.previewUrl } : {}),
+  };
+}
+
+export async function beginPasswordRecovery(token: string): Promise<{
+  revision: number;
+  header: EncryptedVaultHeader;
+  envelope: VaultRecoveryEnvelope;
+}> {
+  const { body, status } = await postVault({ action: "begin_password_recovery", token });
+  const header = isRecord(body) ? parseHeader(body.header) : null;
+  if (!isRecord(body) || !isRevision(body.revision) || !header || !isRecord(body.envelope)) {
+    invalidResponse("The vault server returned an invalid recovery challenge.", status);
+  }
+  return {
+    revision: body.revision,
+    header,
+    envelope: body.envelope as unknown as VaultRecoveryEnvelope,
+  };
+}
+
+export async function completePasswordRecovery(input: {
+  token: string;
+  expectedRevision: number;
+  recoveryProof: string;
+  nextAuthProof: string;
+  header: EncryptedVaultHeader;
+}): Promise<VaultChangePasswordResult> {
+  const { body, status } = await postVault({ action: "complete_password_recovery", ...input });
+  if (!isRecord(body) || !isRevision(body.revision) || typeof body.updatedAt !== "string") {
+    invalidResponse("The vault server returned an invalid recovery completion result.", status);
   }
   return { revision: body.revision, updatedAt: body.updatedAt };
 }

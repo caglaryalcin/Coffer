@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { build } from "esbuild";
 import jsQR from "jsqr";
 
@@ -15,6 +18,9 @@ const result = await build({
       export { removeGroupBranchFromAccounts } from './lib/account-groups';
       export { orderedVisibleGroupNames } from './lib/group-order';
       export { compareVaultConflictVersions } from './lib/vault-conflict';
+      export { createAuthProof, createEncryptedVault, createVaultRecovery, recoverVaultPassword, unlockEncryptedVault } from './lib/vault-crypto';
+      export { VaultStore } from './lib/server/vault-store';
+      export { prepareSmtpSettingsUpdate, publicSmtpSettings, readSmtpSettings, writeSmtpSettings } from './lib/server/smtp-settings-store';
     `,
     resolveDir: process.cwd(),
   },
@@ -27,7 +33,129 @@ const {
   createAccountQr, createOtpAuthUri, parseOtpAuthUri, savedCustomLogos, withSelectedAccountLogo,
   accountCreationDestination, createEmptyVault, parsePersistedVault, withVaultUpdate, compareVaultConflictVersions,
   UNGROUPED_ACCOUNT_GROUP, removeGroupBranchFromAccounts, orderedVisibleGroupNames,
+  createEncryptedVault, createVaultRecovery, recoverVaultPassword, unlockEncryptedVault,
+  createAuthProof, VaultStore,
+  prepareSmtpSettingsUpdate, publicSmtpSettings, readSmtpSettings, writeSmtpSettings,
 } = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString("base64")}`);
+
+const recoveryPassword = "correct horse battery staple";
+const replacementPassword = "new correct horse battery staple";
+const recoveryPayload = { account: "encrypted", secret: "never-server-readable" };
+const encryptedForRecovery = await createEncryptedVault(recoveryPassword, recoveryPayload, {
+  kdf: { memoryKiB: 19_456, iterations: 2, parallelism: 1 },
+});
+const recoverySetup = await createVaultRecovery(recoveryPassword, encryptedForRecovery.header);
+assert.match(recoverySetup.recoveryKey, /^(?:[0-9A-HJKMNP-TV-Z]{4}-){7}[0-9A-HJKMNP-TV-Z]{4}$/u);
+const recoveredPassword = await recoverVaultPassword(
+  recoverySetup.recoveryKey,
+  replacementPassword,
+  encryptedForRecovery.header,
+  recoverySetup.envelope,
+);
+const recoveredVault = await unlockEncryptedVault(
+  replacementPassword,
+  recoveredPassword.header,
+  encryptedForRecovery.payloadCipher,
+);
+assert.deepEqual(recoveredVault.payload, recoveryPayload);
+await assert.rejects(
+  recoverVaultPassword(
+    recoverySetup.recoveryKey.replace(/^./u, recoverySetup.recoveryKey.startsWith("0") ? "1" : "0"),
+    replacementPassword,
+    encryptedForRecovery.header,
+    recoverySetup.envelope,
+  ),
+  /recovery key is incorrect/iu,
+);
+console.log("PASS: recovery keys preserve existing encrypted vault data while rotating a forgotten password");
+
+const recoveryStoreDirectory = await mkdtemp(join(tmpdir(), "coffer-recovery-test-"));
+try {
+  const store = new VaultStore({ dataDir: recoveryStoreDirectory });
+  const initialAuthProof = await createAuthProof(encryptedForRecovery.runtime.authKey);
+  const setupResult = await store.setup({
+    identifier: "recovery@example.com",
+    header: encryptedForRecovery.header,
+    payload: encryptedForRecovery.payloadCipher,
+    authProof: new Uint8Array(Buffer.from(initialAuthProof, "base64url")),
+  });
+  await store.configureRecovery({
+    sessionToken: setupResult.sessionToken,
+    vaultId: encryptedForRecovery.header.vaultId,
+    currentAuthProof: new Uint8Array(Buffer.from(recoverySetup.currentAuthProof, "base64url")),
+    recoveryProof: new Uint8Array(Buffer.from(recoverySetup.recoveryProof, "base64url")),
+    envelope: recoverySetup.envelope,
+    rateKey: "test",
+  });
+  const challenge = await store.getRecoveryChallenge("recovery@example.com");
+  assert.equal(challenge.revision, 1);
+  const completed = await store.completeRecovery({
+    identifier: "recovery@example.com",
+    expectedRevision: challenge.revision,
+    recoveryProof: new Uint8Array(Buffer.from(recoveredPassword.recoveryProof, "base64url")),
+    nextAuthProof: new Uint8Array(Buffer.from(recoveredPassword.nextAuthProof, "base64url")),
+    header: recoveredPassword.header,
+    rateKey: "test",
+  });
+  assert.equal(completed.revision, 2);
+  await assert.rejects(store.getRecoveryChallenge("recovery@example.com"), /not configured|unavailable/iu);
+  const loginAfterRecovery = await store.login(
+    "recovery@example.com",
+    new Uint8Array(Buffer.from(recoveredPassword.nextAuthProof, "base64url")),
+    "test",
+  );
+  assert.equal(loginAfterRecovery.recoveryConfigured, false);
+  const openedAfterRecovery = await unlockEncryptedVault(
+    replacementPassword,
+    recoveredPassword.header,
+    loginAfterRecovery.payload,
+  );
+  assert.deepEqual(openedAfterRecovery.payload, recoveryPayload);
+} finally {
+  await rm(recoveryStoreDirectory, { recursive: true, force: true });
+}
+console.log("PASS: existing server vaults can opt into recovery and recovery keys are one-time after reset");
+
+const smtpStoreDirectory = await mkdtemp(join(tmpdir(), "coffer-smtp-test-"));
+const smtpEnvironmentKeys = [
+  "COFFER_DATA_DIR", "COFFER_SMTP_HOST", "COFFER_SMTP_PORT", "COFFER_SMTP_SECURE",
+  "COFFER_SMTP_USER", "COFFER_SMTP_PASSWORD", "COFFER_SMTP_FROM",
+];
+const previousSmtpEnvironment = new Map(smtpEnvironmentKeys.map((key) => [key, process.env[key]]));
+try {
+  process.env.COFFER_DATA_DIR = smtpStoreDirectory;
+  process.env.COFFER_SMTP_HOST = "smtp.env.example";
+  process.env.COFFER_SMTP_PORT = "587";
+  process.env.COFFER_SMTP_SECURE = "0";
+  process.env.COFFER_SMTP_USER = "env-user";
+  process.env.COFFER_SMTP_PASSWORD = "env-password";
+  process.env.COFFER_SMTP_FROM = "Coffer ENV <env@example.com>";
+  const environmentSmtp = readSmtpSettings();
+  assert.equal(environmentSmtp.source, "environment");
+  assert.equal(environmentSmtp.host, "smtp.env.example");
+  const interfaceSmtp = prepareSmtpSettingsUpdate({
+    enabled: true,
+    host: "smtp.ui.example",
+    port: 465,
+    secure: true,
+    user: "ui-user",
+    password: "ui-password",
+    from: "Coffer UI <ui@example.com>",
+  });
+  await writeSmtpSettings(interfaceSmtp);
+  assert.equal(readSmtpSettings().source, "volume");
+  assert.equal(readSmtpSettings().host, "smtp.ui.example");
+  const publicSmtp = publicSmtpSettings();
+  assert.equal(publicSmtp.passwordConfigured, true);
+  assert.equal("password" in publicSmtp, false);
+  console.log("PASS: interface SMTP settings override environment settings without exposing the password");
+} finally {
+  for (const [key, value] of previousSmtpEnvironment) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  await rm(smtpStoreDirectory, { recursive: true, force: true });
+}
 
 for (const group of ["Personal", "Work / AI", "All"]) {
   assert.deepEqual(accountCreationDestination("all", group), { view: "all", group });
@@ -252,19 +380,29 @@ assert.doesNotMatch(hotpMarkup, /value="steam"/u);
 const settingsMarkup = editorModule.exports.renderSettings({
   profile: { name: "Test", email: "test@example.com", avatarDataUrl: null },
   autoLockMinutes: 5, lockWhenHidden: false, clearClipboard: true, allowAccountCreation: true,
+  passwordRecoveryEnabled: true, recoveryConfigured: false, openRecoveryOnMount: true,
+  onPasswordRecoveryAvailabilityChange: () => {},
   onProfileChange: () => {}, onAutoLockMinutesChange: () => {}, onLockWhenHiddenChange: () => {},
   onClearClipboardChange: () => {}, onAllowAccountCreationChange: () => {}, onNotice: () => {},
-  onSignOut: () => {}, onChangePassword: async () => {}, onDeleteAccount: async () => {},
+  onSignOut: () => {}, onChangePassword: async () => {}, onCreateRecoveryKey: async () => "test-key",
+  onDeleteAccount: async () => {},
 });
 assert.deepEqual([...settingsMarkup.matchAll(/<h2[^>]*>(.*?)<\/h2>/gu)].map((match) => match[1]), [
-  "Profile", "Language", "OpenID Connect", "Security", "About", "Vault session", "Delete account",
+  "Profile", "Language", "OpenID Connect", "Email delivery", "Security", "About", "Vault session", "Delete account",
 ]);
-for (const id of ["profile-settings", "language-settings", "oidc-settings", "security-settings", "about-settings", "session-settings", "delete-account-settings"]) {
+for (const id of ["profile-settings", "language-settings", "oidc-settings", "smtp-settings", "security-settings", "about-settings", "session-settings", "delete-account-settings"]) {
   assert.ok(settingsMarkup.includes(`id="${id}"`), `Settings navigation anchor ${id} must remain available`);
 }
 for (const label of ["Save profile", "Language", "Enable OIDC sign-in", "Automatic lock delay", "Lock and sign out", "Delete this account"]) {
   assert.ok(settingsMarkup.includes(label), `Existing settings control ${label} must remain available`);
 }
+assert.match(settingsMarkup, /Account recovery/u);
+assert.match(settingsMarkup, /Create key/u);
+assert.match(settingsMarkup, /Confirm your current password\. A new recovery key will be shown once\./u);
+assert.match(settingsMarkup, /Loading SMTP settings/u);
+assert.match(settingsMarkup, /Send test email/u);
+assert.match(settingsMarkup, /Test recipient/u);
+assert.match(settingsMarkup, /settings-section-nav/u);
 assert.doesNotMatch(settingsMarkup, /<form[^>]*id="account-delete-confirmation"/u);
 assert.match(settingsMarkup, /Loading OIDC settings/u);
 assert.doesNotMatch(settingsMarkup, /<legend/u);

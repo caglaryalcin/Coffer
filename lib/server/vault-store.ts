@@ -14,6 +14,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import type {
   EncryptedVaultHeader,
+  VaultRecoveryEnvelope,
   VaultKdfParams,
   VaultPayloadCipher,
   WrappedVaultKey,
@@ -24,6 +25,7 @@ export type {
   VaultKdfParams,
   VaultPayloadCipher,
   WrappedVaultKey,
+  VaultRecoveryEnvelope,
 } from "../vault-crypto";
 
 export const VAULT_FILE_FORMAT = "coffer-server-vault" as const;
@@ -59,6 +61,10 @@ type StoredVaultFile = {
   authVerifier: { algorithm: "SHA-256"; value: string };
   header: VaultCryptoHeader;
   payload: EncryptedVaultPayload;
+  recovery?: {
+    envelope: VaultRecoveryEnvelope;
+    proofVerifier: { algorithm: "SHA-256"; value: string };
+  };
 };
 
 type LegacyClaimMarker = {
@@ -139,6 +145,22 @@ export type ChangePasswordInput = {
   header: VaultCryptoHeader;
   rateKey: string;
 };
+export type ConfigureRecoveryInput = {
+  sessionToken: string;
+  vaultId: string;
+  currentAuthProof: Uint8Array;
+  recoveryProof: Uint8Array;
+  envelope: VaultRecoveryEnvelope;
+  rateKey: string;
+};
+export type CompleteRecoveryInput = {
+  identifier: string;
+  expectedRevision: number;
+  recoveryProof: Uint8Array;
+  nextAuthProof: Uint8Array;
+  header: VaultCryptoHeader;
+  rateKey: string;
+};
 export type UpdateInstanceSettingsInput = {
   sessionToken: string;
   allowAccountCreation: boolean;
@@ -160,6 +182,7 @@ export type AuthenticatedVaultBootstrap =
       revision: number;
       header: VaultCryptoHeader;
       legacy?: true;
+      recoveryConfigured: boolean;
     } & AccountCreationState;
 
 export type LoginResult = {
@@ -168,6 +191,7 @@ export type LoginResult = {
   legacy: boolean;
   sessionToken: string;
   sessionExpiresAt: string;
+  recoveryConfigured: boolean;
 };
 export type SetupResult = {
   revision: number;
@@ -181,6 +205,11 @@ export type ChangePasswordResult = {
   sessionToken: string;
   sessionExpiresAt: string;
 };
+export type RecoveryChallenge = {
+  revision: number;
+  header: VaultCryptoHeader;
+  envelope: VaultRecoveryEnvelope;
+};
 export type ClaimLegacyResult = { claimed: true; revision: number };
 export type VaultStoreErrorCode =
   | "already_configured"
@@ -193,6 +222,8 @@ export type VaultStoreErrorCode =
   | "legacy_unavailable"
   | "revision_conflict"
   | "invalid_input"
+  | "recovery_unavailable"
+  | "invalid_recovery"
   | "corrupt_store";
 
 export class VaultStoreError extends Error {
@@ -286,6 +317,7 @@ export class VaultStore {
       authenticated: true,
       revision: stored.revision,
       header: structuredClone(stored.header),
+      recoveryConfigured: Boolean(stored.recovery),
       ...(session.principal.kind === "legacy" ? { legacy: true as const } : {}),
       ...accountCreationState,
     };
@@ -389,6 +421,7 @@ export class VaultStore {
         revision: stored.revision,
         payload: structuredClone(stored.payload),
         legacy: principal.kind === "legacy",
+        recoveryConfigured: Boolean(stored.recovery),
         ...session,
       };
     });
@@ -445,6 +478,7 @@ export class VaultStore {
         revision: stored.revision,
         payload: structuredClone(stored.payload),
         legacy: false,
+        recoveryConfigured: Boolean(stored.recovery),
         ...session,
       };
     });
@@ -739,6 +773,140 @@ export class VaultStore {
       });
       this.clearFailedLoginsForAccount(accountKey);
       return { revision: next.revision, updatedAt, ...session };
+    });
+  }
+
+  async configureRecovery(input: ConfigureRecoveryInput): Promise<{ configuredAt: string }> {
+    if (
+      input.currentAuthProof.byteLength !== 32 ||
+      input.recoveryProof.byteLength !== 32 ||
+      !isCanonicalEncodedBytes(input.vaultId, 16) ||
+      !isVaultRecoveryEnvelope(input.envelope) ||
+      input.envelope.vaultId !== input.vaultId
+    ) {
+      throw new VaultStoreError("invalid_input", "The recovery data is invalid.");
+    }
+    this.requireUserSession(input.sessionToken);
+    return this.withMutationLock(async () => {
+      const activeSession = this.requireUserSession(input.sessionToken);
+      if (activeSession.principal.kind !== "user") {
+        throw new VaultStoreError(
+          "legacy_claim_required",
+          "Claim the legacy vault before configuring recovery.",
+        );
+      }
+      const { accountKey } = activeSession.principal;
+      const path = this.userVaultPath(accountKey);
+      const stored = await this.readStoredVault(path);
+      if (
+        !stored ||
+        stored.header.vaultId !== activeSession.principal.vaultId ||
+        stored.header.vaultId !== input.vaultId
+      ) {
+        throw new VaultStoreError("unauthorized", "The recovery request does not match this vault.");
+      }
+      const failureKey = `recovery-configure:${input.rateKey.slice(0, 256)}:${accountKey}`;
+      this.assertLoginAllowed(failureKey);
+      if (!proofMatches(stored, input.currentAuthProof)) {
+        const failure = this.recordFailedLogin(failureKey);
+        if (failure.blockedUntil > this.now()) {
+          throw this.rateLimitError(failure.blockedUntil, this.now());
+        }
+        throw new VaultStoreError("invalid_credentials", "The current password is incorrect.");
+      }
+      const configuredAt = new Date(this.now()).toISOString();
+      await this.atomicWriteJson(path, {
+        ...stored,
+        recovery: {
+          envelope: structuredClone(input.envelope),
+          proofVerifier: { algorithm: "SHA-256", value: hashProof(input.recoveryProof) },
+        },
+      } satisfies StoredVaultFile);
+      this.failedLogins.delete(failureKey);
+      return { configuredAt };
+    });
+  }
+
+  async getRecoveryChallenge(identifier: string): Promise<RecoveryChallenge> {
+    const accountKey = accountKeyForIdentifier(identifier);
+    const stored = await this.readStoredVault(this.userVaultPath(accountKey));
+    if (!stored?.recovery) {
+      throw new VaultStoreError(
+        "recovery_unavailable",
+        "Password recovery is not configured for this account.",
+      );
+    }
+    return {
+      revision: stored.revision,
+      header: structuredClone(stored.header),
+      envelope: structuredClone(stored.recovery.envelope),
+    };
+  }
+
+  async completeRecovery(input: CompleteRecoveryInput): Promise<{ revision: number; updatedAt: string }> {
+    if (
+      input.recoveryProof.byteLength !== 32 ||
+      input.nextAuthProof.byteLength !== 32 ||
+      !Number.isSafeInteger(input.expectedRevision) ||
+      input.expectedRevision < 1 ||
+      input.expectedRevision >= Number.MAX_SAFE_INTEGER ||
+      !isVaultCryptoHeader(input.header)
+    ) {
+      throw new VaultStoreError("invalid_input", "The password recovery data is invalid.");
+    }
+    const accountKey = accountKeyForIdentifier(input.identifier);
+    return this.withMutationLock(async () => {
+      const path = this.userVaultPath(accountKey);
+      const stored = await this.readStoredVault(path);
+      if (!stored?.recovery) {
+        throw new VaultStoreError("recovery_unavailable", "Password recovery is unavailable.");
+      }
+      if (stored.revision !== input.expectedRevision) {
+        throw new VaultStoreError(
+          "revision_conflict",
+          "The vault changed after the recovery link was opened.",
+          { currentRevision: stored.revision },
+        );
+      }
+      if (
+        input.header.vaultId !== stored.header.vaultId ||
+        input.header.createdAt !== stored.header.createdAt
+      ) {
+        throw new VaultStoreError("invalid_input", "The recovered vault header does not match this vault.");
+      }
+      const failureKey = `recovery-complete:${input.rateKey.slice(0, 256)}:${accountKey}`;
+      this.assertLoginAllowed(failureKey);
+      if (!proofHashMatches(stored.recovery.proofVerifier.value, input.recoveryProof)) {
+        const failure = this.recordFailedLogin(failureKey);
+        if (failure.blockedUntil > this.now()) {
+          throw this.rateLimitError(failure.blockedUntil, this.now());
+        }
+        throw new VaultStoreError("invalid_recovery", "The recovery key is incorrect.");
+      }
+      if (
+        proofMatches(stored, input.nextAuthProof) ||
+        input.header.kdf.salt === stored.header.kdf.salt ||
+        input.header.passwordVerifier.value === stored.header.passwordVerifier.value ||
+        input.header.wrappedKey.iv === stored.header.wrappedKey.iv
+      ) {
+        throw new VaultStoreError(
+          "invalid_input",
+          "The replacement vault credentials must use fresh key material.",
+        );
+      }
+      const updatedAt = new Date(this.now()).toISOString();
+      const next: StoredVaultFile = {
+        ...stored,
+        revision: stored.revision + 1,
+        updatedAt,
+        authVerifier: { algorithm: "SHA-256", value: hashProof(input.nextAuthProof) },
+        header: structuredClone(input.header),
+      };
+      delete next.recovery;
+      await this.atomicWriteJson(path, next);
+      this.revokeAccountSessions(accountKey);
+      this.clearFailedLoginsForAccount(accountKey);
+      return { revision: next.revision, updatedAt };
     });
   }
 
@@ -1315,8 +1483,12 @@ function publicIdentifyResult(
 }
 
 function proofMatches(stored: StoredVaultFile, authProof: Uint8Array): boolean {
-  const candidate = Buffer.from(hashProof(authProof), "base64url");
-  const expected = Buffer.from(stored.authVerifier.value, "base64url");
+  return proofHashMatches(stored.authVerifier.value, authProof);
+}
+
+function proofHashMatches(expectedHash: string, proof: Uint8Array): boolean {
+  const candidate = Buffer.from(hashProof(proof), "base64url");
+  const expected = Buffer.from(expectedHash, "base64url");
   return candidate.byteLength === expected.byteLength && timingSafeEqual(candidate, expected);
 }
 
@@ -1370,7 +1542,7 @@ function hashSessionToken(sessionToken: string): string {
 }
 
 function isStoredVaultFile(value: unknown): value is StoredVaultFile {
-  if (!isExactObject(value, [
+  const requiredKeys = [
     "format",
     "version",
     "revision",
@@ -1379,7 +1551,10 @@ function isStoredVaultFile(value: unknown): value is StoredVaultFile {
     "authVerifier",
     "header",
     "payload",
-  ])) return false;
+  ];
+  if (!isExactObject(value, requiredKeys) && !isExactObject(value, [...requiredKeys, "recovery"])) {
+    return false;
+  }
   return (
     value.format === VAULT_FILE_FORMAT &&
     value.version === VAULT_FILE_VERSION &&
@@ -1388,8 +1563,15 @@ function isStoredVaultFile(value: unknown): value is StoredVaultFile {
     isIsoTimestamp(value.updatedAt) &&
     isSha256Verifier(value.authVerifier) &&
     isVaultCryptoHeader(value.header) &&
-    isEncryptedVaultPayload(value.payload)
+    isEncryptedVaultPayload(value.payload) &&
+    (value.recovery === undefined || isStoredRecovery(value.recovery))
   );
+}
+
+function isStoredRecovery(value: unknown): value is NonNullable<StoredVaultFile["recovery"]> {
+  return isExactObject(value, ["envelope", "proofVerifier"]) &&
+    isVaultRecoveryEnvelope(value.envelope) &&
+    isSha256Verifier(value.proofVerifier);
 }
 
 function isLegacyClaimMarker(value: unknown): value is LegacyClaimMarker {
@@ -1446,6 +1628,25 @@ export function isVaultCryptoHeader(value: unknown): value is VaultCryptoHeader 
     isIsoTimestamp(value.createdAt) &&
     isArgon2idHeader(value.kdf) &&
     isPasswordVerifier(value.passwordVerifier) &&
+    isAesGcmCipher(value.wrappedKey, 48, 48)
+  );
+}
+
+export function isVaultRecoveryEnvelope(value: unknown): value is VaultRecoveryEnvelope {
+  if (!isExactObject(value, [
+    "format",
+    "version",
+    "vaultId",
+    "createdAt",
+    "salt",
+    "wrappedKey",
+  ])) return false;
+  return (
+    value.format === "coffer-vault-recovery" &&
+    value.version === 1 &&
+    isCanonicalEncodedBytes(value.vaultId, 16) &&
+    isIsoTimestamp(value.createdAt) &&
+    isCanonicalEncodedBytes(value.salt, 16) &&
     isAesGcmCipher(value.wrappedKey, 48, 48)
   );
 }

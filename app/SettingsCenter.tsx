@@ -1,12 +1,16 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from "react";
 import type { VaultProfile } from "../lib/vault-model";
 import {
   getOidcAdminSettings,
+  getSmtpAdminSettings,
+  testSmtpAdminSettings,
   updateOidcAdminSettings,
+  updateSmtpAdminSettings,
   type OidcAdminSettings,
   type OidcClientAuthMethod,
+  type SmtpAdminSettings,
 } from "../lib/vault-api";
 import { languages, useI18n, type CofferLanguage } from "./I18nProvider";
 import { PROFILE_IMAGE_ACCEPT, prepareProfileImage } from "./profile-image";
@@ -46,6 +50,10 @@ export type SettingsCenterProps = {
   lockWhenHidden: boolean;
   clearClipboard: boolean;
   allowAccountCreation: boolean;
+  passwordRecoveryEnabled: boolean;
+  recoveryConfigured: boolean;
+  openRecoveryOnMount?: boolean;
+  onPasswordRecoveryAvailabilityChange: (enabled: boolean) => void;
   onProfileChange: (
     patch: UserProfilePatch,
   ) => ProfileMutationResult | Promise<ProfileMutationResult>;
@@ -56,6 +64,7 @@ export type SettingsCenterProps = {
   onNotice: (message: string) => void;
   onSignOut: () => void;
   onChangePassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  onCreateRecoveryKey: (currentPassword: string) => Promise<string>;
   onDeleteAccount: (password: string) => Promise<void>;
 };
 
@@ -64,7 +73,7 @@ type PasswordErrorField = "current" | "new" | "confirmation" | "form" | null;
 const MIN_PASSWORD_CHARACTERS = 12;
 const MAX_PASSWORD_CHARACTERS = 256;
 
-type SettingsGlyphKind = "profile" | "language" | "oidc" | "security" | "about" | "session" | "delete";
+type SettingsGlyphKind = "profile" | "language" | "oidc" | "email" | "security" | "about" | "session" | "delete";
 
 type OidcSettingsDraft = Pick<
   OidcAdminSettings,
@@ -77,6 +86,11 @@ type OidcSettingsDraft = Pick<
   | "redirectUri"
 >;
 
+type SmtpSettingsDraft = Pick<
+  SmtpAdminSettings,
+  "enabled" | "host" | "port" | "secure" | "user" | "from"
+>;
+
 const emptyOidcDraft: OidcSettingsDraft = {
   enabled: false,
   issuerUrl: "",
@@ -87,6 +101,27 @@ const emptyOidcDraft: OidcSettingsDraft = {
   redirectUri: "",
 };
 
+const emptySmtpDraft: SmtpSettingsDraft = {
+  enabled: false,
+  host: "",
+  port: 587,
+  secure: false,
+  user: "",
+  from: "",
+};
+
+const settingsNavigation = [
+  { id: "profile-settings", label: "Profile" },
+  { id: "language-settings", label: "Language" },
+  { id: "oidc-settings", label: "OpenID Connect" },
+  { id: "smtp-settings", label: "Email delivery" },
+  { id: "security-settings", label: "Security" },
+  { id: "about-settings", label: "About" },
+  { id: "session-settings", label: "Vault session" },
+  { id: "delete-account-settings", label: "Delete account" },
+] as const;
+type SettingsSectionId = (typeof settingsNavigation)[number]["id"];
+
 function oidcDraftFromSettings(settings: OidcAdminSettings): OidcSettingsDraft {
   return {
     enabled: settings.enabled,
@@ -96,6 +131,17 @@ function oidcDraftFromSettings(settings: OidcAdminSettings): OidcSettingsDraft {
     providerName: settings.providerName,
     scopes: settings.scopes,
     redirectUri: settings.redirectUri,
+  };
+}
+
+function smtpDraftFromSettings(settings: SmtpAdminSettings): SmtpSettingsDraft {
+  return {
+    enabled: settings.enabled,
+    host: settings.host,
+    port: settings.port,
+    secure: settings.secure,
+    user: settings.user,
+    from: settings.from,
   };
 }
 
@@ -136,6 +182,12 @@ function SettingsGlyph({ kind }: { kind: SettingsGlyphKind }) {
             <circle cx="8" cy="12" r="3.25" />
             <path d="M11.25 12H21M17.5 12v3M14.5 12v2" />
             <path d="M4.75 12H3" />
+          </>
+        )}
+        {kind === "email" && (
+          <>
+            <rect x="3" y="5" width="18" height="14" rx="2.5" />
+            <path d="m4 7 8 6 8-6" />
           </>
         )}
         {kind === "about" && (
@@ -212,6 +264,10 @@ export default function SettingsCenter({
   lockWhenHidden,
   clearClipboard,
   allowAccountCreation,
+  passwordRecoveryEnabled,
+  recoveryConfigured,
+  openRecoveryOnMount = false,
+  onPasswordRecoveryAvailabilityChange,
   onProfileChange,
   onAutoLockMinutesChange,
   onLockWhenHiddenChange,
@@ -220,6 +276,7 @@ export default function SettingsCenter({
   onNotice,
   onSignOut,
   onChangePassword,
+  onCreateRecoveryKey,
   onDeleteAccount,
 }: SettingsCenterProps) {
   const { language, setLanguage } = useI18n();
@@ -236,6 +293,11 @@ export default function SettingsCenter({
   const [passwordBusy, setPasswordBusy] = useState(false);
   const [passwordError, setPasswordError] = useState("");
   const [passwordErrorField, setPasswordErrorField] = useState<PasswordErrorField>(null);
+  const [recoveryExpanded, setRecoveryExpanded] = useState(openRecoveryOnMount);
+  const [recoveryPassword, setRecoveryPassword] = useState("");
+  const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryError, setRecoveryError] = useState("");
   const [instanceSettingsBusy, setInstanceSettingsBusy] = useState(false);
   const [instanceSettingsError, setInstanceSettingsError] = useState("");
   const [oidcSettings, setOidcSettings] = useState<OidcAdminSettings | null>(null);
@@ -244,6 +306,14 @@ export default function SettingsCenter({
   const [oidcClearClientSecret, setOidcClearClientSecret] = useState(false);
   const [oidcBusy, setOidcBusy] = useState(true);
   const [oidcError, setOidcError] = useState("");
+  const [smtpSettings, setSmtpSettings] = useState<SmtpAdminSettings | null>(null);
+  const [smtpDraft, setSmtpDraft] = useState<SmtpSettingsDraft>(emptySmtpDraft);
+  const [smtpPassword, setSmtpPassword] = useState("");
+  const [smtpBusy, setSmtpBusy] = useState(true);
+  const [smtpTesting, setSmtpTesting] = useState(false);
+  const [smtpTestRecipient, setSmtpTestRecipient] = useState(profile.email);
+  const [smtpError, setSmtpError] = useState("");
+  const [activeSettingsSection, setActiveSettingsSection] = useState<SettingsSectionId>(settingsNavigation[0].id);
   const [deleteExpanded, setDeleteExpanded] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
@@ -255,9 +325,12 @@ export default function SettingsCenter({
   const passwordConfirmationRef = useRef<HTMLInputElement>(null);
   const passwordToggleRef = useRef<HTMLButtonElement>(null);
   const restorePasswordToggleFocusRef = useRef(false);
+  const recoveryPasswordRef = useRef<HTMLInputElement>(null);
   const deletePasswordRef = useRef<HTMLInputElement>(null);
   const deleteToggleRef = useRef<HTMLButtonElement>(null);
   const restoreDeleteToggleFocusRef = useRef(false);
+  const settingsNavigationLockRef = useRef<SettingsSectionId | null>(null);
+  const settingsNavigationTimerRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
 
   useEffect(() => {
     if (passwordExpanded) {
@@ -282,6 +355,12 @@ export default function SettingsCenter({
   }, [deleteExpanded]);
 
   useEffect(() => {
+    if (!recoveryExpanded || recoveryKey) return;
+    document.getElementById("security-settings")?.scrollIntoView({ block: "start" });
+    recoveryPasswordRef.current?.focus();
+  }, [recoveryExpanded, recoveryKey]);
+
+  useEffect(() => {
     let active = true;
     void getOidcAdminSettings()
       .then((settings) => {
@@ -301,6 +380,90 @@ export default function SettingsCenter({
     return () => {
       active = false;
     };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void getSmtpAdminSettings()
+      .then((settings) => {
+        if (!active) return;
+        setSmtpSettings(settings);
+        setSmtpDraft(smtpDraftFromSettings(settings));
+        onPasswordRecoveryAvailabilityChange(settings.passwordRecoveryEnabled);
+      })
+      .catch((caught) => {
+        if (!active) return;
+        setSmtpError(caught instanceof Error
+          ? caught.message
+          : "Coffer could not load the SMTP settings.");
+      })
+      .finally(() => {
+        if (active) setSmtpBusy(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [onPasswordRecoveryAvailabilityChange]);
+
+  useEffect(() => {
+    const sections = settingsNavigation
+      .map(({ id }) => document.getElementById(id))
+      .filter((section): section is HTMLElement => section !== null);
+    let animationFrame = 0;
+    const updateActiveSection = () => {
+      animationFrame = 0;
+      if (settingsNavigationLockRef.current) {
+        setActiveSettingsSection(settingsNavigationLockRef.current);
+        return;
+      }
+      const atPageEnd = globalThis.scrollY + globalThis.innerHeight
+        >= document.documentElement.scrollHeight - 8;
+      let activeSection = atPageEnd ? sections.at(-1) : sections[0];
+      if (!atPageEnd) {
+        const activationLine = Math.min(180, globalThis.innerHeight * 0.25);
+        for (const section of sections) {
+          if (section.getBoundingClientRect().top > activationLine) break;
+          activeSection = section;
+        }
+      }
+      if (activeSection) setActiveSettingsSection(activeSection.id as SettingsSectionId);
+    };
+    const scheduleUpdate = () => {
+      if (animationFrame) return;
+      animationFrame = globalThis.requestAnimationFrame(updateActiveSection);
+    };
+    const releaseNavigationLock = () => {
+      settingsNavigationLockRef.current = null;
+      if (settingsNavigationTimerRef.current !== null) {
+        globalThis.clearTimeout(settingsNavigationTimerRef.current);
+        settingsNavigationTimerRef.current = null;
+      }
+    };
+    updateActiveSection();
+    globalThis.addEventListener("scroll", scheduleUpdate, { passive: true });
+    globalThis.addEventListener("resize", scheduleUpdate);
+    globalThis.addEventListener("wheel", releaseNavigationLock, { passive: true });
+    globalThis.addEventListener("touchstart", releaseNavigationLock, { passive: true });
+    return () => {
+      globalThis.removeEventListener("scroll", scheduleUpdate);
+      globalThis.removeEventListener("resize", scheduleUpdate);
+      globalThis.removeEventListener("wheel", releaseNavigationLock);
+      globalThis.removeEventListener("touchstart", releaseNavigationLock);
+      if (animationFrame) globalThis.cancelAnimationFrame(animationFrame);
+      releaseNavigationLock();
+    };
+  }, []);
+
+  useEffect(() => {
+    const sectionId = globalThis.location.hash.slice(1);
+    if (!settingsNavigation.some(({ id }) => id === sectionId)) return;
+    const animationFrame = globalThis.requestAnimationFrame(() => {
+      const section = document.getElementById(sectionId);
+      if (!section) return;
+      setActiveSettingsSection(sectionId as SettingsSectionId);
+      section.scrollIntoView({ block: "start" });
+    });
+    return () => globalThis.cancelAnimationFrame(animationFrame);
   }, []);
 
   if (profile.name !== profileNameSource) {
@@ -467,6 +630,51 @@ export default function SettingsCenter({
     }
   };
 
+  const createRecoveryKey = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (recoveryBusy || passwordBusy || deleteBusy) return;
+    setRecoveryError("");
+    if (!recoveryPassword) {
+      setRecoveryError("Enter your current password.");
+      return;
+    }
+    setRecoveryBusy(true);
+    try {
+      const key = await onCreateRecoveryKey(recoveryPassword);
+      setRecoveryPassword("");
+      setRecoveryKey(key);
+      onNotice(recoveryConfigured ? "Recovery key replaced." : "Account recovery enabled.");
+    } catch (caught) {
+      setRecoveryPassword("");
+      setRecoveryError(caught instanceof Error ? caught.message : "The recovery key could not be created.");
+    } finally {
+      setRecoveryBusy(false);
+    }
+  };
+
+  const copyRecoveryKey = async () => {
+    if (!recoveryKey) return;
+    try {
+      await navigator.clipboard.writeText(recoveryKey);
+      onNotice("Recovery key copied.");
+    } catch {
+      setRecoveryError("The recovery key could not be copied. Select and copy it manually.");
+    }
+  };
+
+  const downloadRecoveryKey = () => {
+    if (!recoveryKey) return;
+    const blob = new Blob([
+      `Coffer account recovery key\n\n${recoveryKey}\n\nAccount: ${profile.email}\n\nKeep this file private. You need both this key and access to your email to reset the vault password.\n`,
+    ], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "coffer-recovery-key.txt";
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
   const cancelAccountDeletion = () => {
     if (deleteBusy) return;
     restoreDeleteToggleFocusRef.current = true;
@@ -540,6 +748,80 @@ export default function SettingsCenter({
     } finally {
       setOidcBusy(false);
     }
+  };
+
+  const saveSmtpSettings = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (smtpBusy) return;
+    setSmtpError("");
+    setSmtpBusy(true);
+    try {
+      const password = smtpPassword || !smtpDraft.user.trim() ? smtpPassword : null;
+      const settings = await updateSmtpAdminSettings({ ...smtpDraft, password });
+      setSmtpSettings(settings);
+      setSmtpDraft(smtpDraftFromSettings(settings));
+      setSmtpPassword("");
+      onPasswordRecoveryAvailabilityChange(settings.passwordRecoveryEnabled);
+      onNotice(settings.enabled ? "SMTP settings saved and enabled." : "SMTP settings saved and disabled.");
+    } catch (caught) {
+      setSmtpError(caught instanceof Error
+        ? caught.message
+        : "Coffer could not save the SMTP settings.");
+    } finally {
+      setSmtpBusy(false);
+    }
+  };
+
+  const testSmtpSettings = async () => {
+    if (smtpBusy || smtpTesting) return;
+    setSmtpError("");
+    const recipient = smtpTestRecipient.trim();
+    if (!recipient) {
+      setSmtpError("Enter the email address that should receive the test message.");
+      return;
+    }
+    setSmtpTesting(true);
+    try {
+      const password = smtpPassword || !smtpDraft.user.trim() ? smtpPassword : null;
+      await testSmtpAdminSettings({
+        host: smtpDraft.host,
+        port: smtpDraft.port,
+        secure: smtpDraft.secure,
+        user: smtpDraft.user,
+        from: smtpDraft.from,
+        password,
+      }, recipient);
+      onNotice(`Test email sent to ${recipient}.`);
+    } catch (caught) {
+      setSmtpError(caught instanceof Error
+        ? caught.message
+        : "Coffer could not send the SMTP test email.");
+    } finally {
+      setSmtpTesting(false);
+    }
+  };
+
+  const jumpToSettingsSection = (
+    event: ReactMouseEvent<HTMLAnchorElement>,
+    sectionId: SettingsSectionId,
+  ) => {
+    event.preventDefault();
+    const section = document.getElementById(sectionId);
+    if (!section) return;
+    settingsNavigationLockRef.current = sectionId;
+    if (settingsNavigationTimerRef.current !== null) {
+      globalThis.clearTimeout(settingsNavigationTimerRef.current);
+    }
+    settingsNavigationTimerRef.current = globalThis.setTimeout(() => {
+      settingsNavigationLockRef.current = null;
+      settingsNavigationTimerRef.current = null;
+    }, 1_000);
+    setActiveSettingsSection(sectionId);
+    globalThis.history.replaceState(null, "", `#${sectionId}`);
+    section.scrollIntoView({
+      behavior: globalThis.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      block: "start",
+    });
   };
 
   return (
@@ -753,6 +1035,139 @@ export default function SettingsCenter({
             </form>
           </section>
 
+          <section className="settings-card" id="smtp-settings" aria-labelledby="smtp-settings-title" tabIndex={-1}>
+            <div className="settings-card-copy">
+              <SettingsGlyph kind="email" />
+              <div>
+                <h2 id="smtp-settings-title">Email delivery</h2>
+                <p>Configure SMTP for password recovery emails. Settings saved here take priority over Docker environment variables.</p>
+              </div>
+            </div>
+            <form className="settings-form smtp-settings-form" onSubmit={(event) => void saveSmtpSettings(event)} aria-busy={smtpBusy}>
+              <div className="settings-toggle-row smtp-enabled-row">
+                <span><label htmlFor="smtp-enabled">Enable recovery emails</label><small>Users still need to create and safely store their own recovery key.</small></span>
+                <input
+                  id="smtp-enabled"
+                  type="checkbox"
+                  checked={smtpDraft.enabled}
+                  onChange={(event) => setSmtpDraft((current) => ({ ...current, enabled: event.target.checked }))}
+                  disabled={smtpBusy}
+                />
+              </div>
+
+              <div className="smtp-settings-meta" role="status">
+                {smtpBusy && !smtpSettings
+                  ? "Loading SMTP settings…"
+                  : smtpSettings?.source === "volume"
+                    ? "Configuration source: Coffer interface (overrides environment variables)"
+                    : smtpSettings?.source === "environment"
+                      ? "Configuration source: Docker environment variables"
+                      : "SMTP is not configured yet."}
+              </div>
+
+              <div className="smtp-connection-grid">
+                <label>
+                  <span>SMTP host</span>
+                  <input
+                    value={smtpDraft.host}
+                    placeholder="smtp.example.com"
+                    required={smtpDraft.enabled}
+                    onChange={(event) => setSmtpDraft((current) => ({ ...current, host: event.target.value }))}
+                    disabled={smtpBusy}
+                    autoComplete="off"
+                  />
+                  <small>Enter a hostname without <code>smtp://</code> or a port.</small>
+                </label>
+                <label>
+                  <span>Port</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="65535"
+                    value={smtpDraft.port}
+                    required={smtpDraft.enabled}
+                    onChange={(event) => setSmtpDraft((current) => ({ ...current, port: Number(event.target.value) }))}
+                    disabled={smtpBusy}
+                    inputMode="numeric"
+                  />
+                </label>
+                <label>
+                  <span>Connection security</span>
+                  <select
+                    value={smtpDraft.secure ? "tls" : "starttls"}
+                    onChange={(event) => setSmtpDraft((current) => {
+                      const secure = event.target.value === "tls";
+                      const port = current.port === 465 || current.port === 587
+                        ? secure ? 465 : 587
+                        : current.port;
+                      return { ...current, secure, port };
+                    })}
+                    disabled={smtpBusy}
+                  >
+                    <option value="starttls">STARTTLS (usually port 587)</option>
+                    <option value="tls">Implicit TLS (usually port 465)</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="smtp-field-grid">
+                <label>
+                  <span>Username</span>
+                  <input
+                    value={smtpDraft.user}
+                    onChange={(event) => setSmtpDraft((current) => ({ ...current, user: event.target.value }))}
+                    disabled={smtpBusy}
+                    autoComplete="username"
+                  />
+                  <small>Leave username and password blank if the SMTP server does not require authentication.</small>
+                </label>
+                <label>
+                  <span>SMTP password</span>
+                  <input
+                    type="password"
+                    value={smtpPassword}
+                    placeholder={smtpSettings?.passwordConfigured ? "Stored password — leave blank to keep" : "Enter SMTP password"}
+                    onChange={(event) => setSmtpPassword(event.target.value)}
+                    disabled={smtpBusy}
+                    autoComplete="new-password"
+                  />
+                  <small>The stored SMTP password is never returned to the browser.</small>
+                </label>
+                <label className="smtp-from-field">
+                  <span>Sender address</span>
+                  <input
+                    value={smtpDraft.from}
+                    placeholder="Coffer &lt;no-reply@example.com&gt;"
+                    required={smtpDraft.enabled}
+                    onChange={(event) => setSmtpDraft((current) => ({ ...current, from: event.target.value }))}
+                    disabled={smtpBusy}
+                    autoComplete="off"
+                  />
+                  <small>The From value shown in password recovery emails.</small>
+                </label>
+                <label className="smtp-test-recipient-field">
+                  <span>Test recipient</span>
+                  <input
+                    type="email"
+                    value={smtpTestRecipient}
+                    placeholder="you@example.com"
+                    onChange={(event) => setSmtpTestRecipient(event.target.value)}
+                    disabled={smtpBusy || smtpTesting}
+                    autoComplete="email"
+                  />
+                  <small>The address that will receive the SMTP test message.</small>
+                </label>
+              </div>
+
+              <p className="smtp-storage-note">Interface settings are written atomically to <code>COFFER_DATA_DIR/smtp-settings.json</code> with owner-only file permissions. When this file exists, it takes priority over all <code>COFFER_SMTP_*</code> environment variables.</p>
+              {smtpError && <p className="settings-error" role="alert">{smtpError}</p>}
+              <div className="settings-actions">
+                <button className="smtp-test-button" type="button" disabled={smtpBusy || smtpTesting} onClick={() => void testSmtpSettings()}>{smtpTesting ? "Sending test…" : "Send test email"}</button>
+                <button type="submit" disabled={smtpBusy || smtpTesting}>{smtpBusy ? "Saving…" : "Save SMTP settings"}</button>
+              </div>
+            </form>
+          </section>
+
           <section className="settings-card" id="security-settings" aria-labelledby="security-settings-title" tabIndex={-1}>
             <div className="settings-card-copy"><SettingsGlyph kind="security" /><div><h2 id="security-settings-title">Security</h2><p>Change your vault password and control when the vault locks and how the clipboard behaves.</p></div></div>
             <div className="password-change-row">
@@ -858,6 +1273,58 @@ export default function SettingsCenter({
                 </div>
               </form>
             )}
+            <div className="settings-control-row recovery-settings-row">
+              <div>
+                <strong>Account recovery</strong>
+                <span>{recoveryConfigured ? "A recovery key is configured for this vault." : "Create a recovery key before you need it."}</span>
+                {!passwordRecoveryEnabled && <small>Configure SMTP to enable recovery emails.</small>}
+              </div>
+              {!recoveryExpanded && (
+                <button
+                  className="password-change-toggle"
+                  type="button"
+                  disabled={passwordBusy || recoveryBusy || deleteBusy}
+                  onClick={() => {
+                    setRecoveryExpanded(true);
+                    setRecoveryKey(null);
+                    setRecoveryPassword("");
+                    setRecoveryError("");
+                  }}
+                >{recoveryConfigured ? "Replace recovery key" : "Create recovery key"}</button>
+              )}
+            </div>
+            {recoveryExpanded && (
+              <div className="recovery-settings-form" aria-live="polite">
+                {recoveryKey ? (
+                  <div className="recovery-key-result">
+                    <div className="backup-passphrase-important" role="note">
+                      <span className="backup-passphrase-important-title"><span className="backup-passphrase-important-icon" aria-hidden="true">!</span>Save this key now</span>
+                      <small>Coffer does not store this key and cannot show it again. Replacing it invalidates the previous key.</small>
+                    </div>
+                    <output className="recovery-key-value" aria-label="Recovery key">{recoveryKey}</output>
+                    {recoveryError && <p className="settings-error" role="alert">{recoveryError}</p>}
+                    <div className="password-change-actions">
+                      <button type="button" onClick={() => void copyRecoveryKey()}>Copy</button>
+                      <button type="button" onClick={downloadRecoveryKey}>Download</button>
+                      <button className="transfer-primary" type="button" onClick={() => { setRecoveryKey(null); setRecoveryExpanded(false); }}>I saved it</button>
+                    </div>
+                  </div>
+                ) : (
+                  <form onSubmit={(event) => void createRecoveryKey(event)}>
+                    <p>Confirm your current password. A new recovery key will be shown once.</p>
+                    <label>
+                      <span>Current password</span>
+                      <input ref={recoveryPasswordRef} type="password" value={recoveryPassword} autoComplete="current-password" disabled={recoveryBusy} onChange={(event) => { setRecoveryPassword(event.target.value); setRecoveryError(""); }} />
+                    </label>
+                    {recoveryError && <p className="settings-error" role="alert">{recoveryError}</p>}
+                    <div className="password-change-actions">
+                      <button type="button" disabled={recoveryBusy} onClick={() => { setRecoveryExpanded(false); setRecoveryPassword(""); setRecoveryError(""); }}>Cancel</button>
+                      <button type="submit" disabled={recoveryBusy}>{recoveryBusy ? "Creating…" : recoveryConfigured ? "Replace key" : "Create key"}</button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            )}
             <div className="settings-control-row">
               <div><strong>Automatic lock</strong><span>Lock after continuous keyboard, pointer, or touch inactivity.</span></div>
               <select aria-label="Automatic lock delay" value={autoLockMinutes} onChange={(event) => onAutoLockMinutesChange(Number(event.target.value))} disabled={passwordBusy}>
@@ -936,6 +1403,25 @@ export default function SettingsCenter({
             )}
           </section>
         </div>
+        <aside className="settings-section-nav" aria-label="Settings sections">
+          <div className="settings-section-nav-heading">
+            <strong>Settings</strong>
+            <span>On this page</span>
+          </div>
+          <nav className="settings-section-nav-list">
+            {settingsNavigation.map((item) => (
+              <a
+                key={item.id}
+                href={`#${item.id}`}
+                aria-current={activeSettingsSection === item.id ? "location" : undefined}
+                onClick={(event) => jumpToSettingsSection(event, item.id)}
+              >
+                <span aria-hidden="true" />
+                {item.label}
+              </a>
+            ))}
+          </nav>
+        </aside>
       </div>
     </section>
   );

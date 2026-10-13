@@ -10,6 +10,8 @@ export type SignInScreenProps = {
   busy: boolean;
   error: string | null;
   accountCreationEnabled: boolean;
+  passwordRecoveryEnabled: boolean;
+  recoveryToken: string | null;
   oidc: OidcClientState;
   onSignIn: (details: {
     email: string;
@@ -23,6 +25,8 @@ export type SignInScreenProps = {
     rememberLogin: boolean;
   }) => Promise<void> | void;
   onOidcSignOut: () => Promise<void> | void;
+  onRequestPasswordRecovery: (email: string) => Promise<{ accepted: true; previewUrl?: string }>;
+  onResetPassword: (token: string, recoveryKey: string, newPassword: string) => Promise<void>;
 };
 
 export type AccessField = "name" | "email" | "password" | "confirmation";
@@ -104,10 +108,14 @@ export default function SignInScreen({
   busy,
   error,
   accountCreationEnabled,
+  passwordRecoveryEnabled,
+  recoveryToken,
   oidc,
   onSignIn,
   onCreateAccount,
   onOidcSignOut,
+  onRequestPasswordRecovery,
+  onResetPassword,
 }: SignInScreenProps) {
   const id = useId();
   const [mode, setMode] = useState<AccessMode>("sign-in");
@@ -119,6 +127,13 @@ export default function SignInScreen({
   const [fieldErrors, setFieldErrors] = useState<AccessFieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [forgotPassword, setForgotPassword] = useState(false);
+  const [recoverySent, setRecoverySent] = useState(false);
+  const [recoveryPreviewUrl, setRecoveryPreviewUrl] = useState<string | null>(null);
+  const [recoveryKey, setRecoveryKey] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newPasswordConfirmation, setNewPasswordConfirmation] = useState("");
+  const [recoveryComplete, setRecoveryComplete] = useState(false);
 
   const isLocking = status === "locking";
   const isCreateAccount = accountCreationEnabled && mode === "create-account";
@@ -211,6 +226,58 @@ export default function SignInScreen({
     }
   };
 
+  const requestRecovery = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (isBusy) return;
+    const normalizedEmail = effectiveEmail.trim();
+    if (!normalizedEmail || normalizedEmail.length > 254 || !EMAIL_PATTERN.test(normalizedEmail)) {
+      setSubmissionError("Enter a valid email address.");
+      return;
+    }
+    setSubmitting(true);
+    setSubmissionError(null);
+    try {
+      const result = await onRequestPasswordRecovery(normalizedEmail);
+      setRecoveryPreviewUrl(result.previewUrl ?? null);
+      setRecoverySent(true);
+    } catch (caught) {
+      setSubmissionError(caught instanceof Error ? caught.message : "Coffer could not send the recovery email.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const resetPassword = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (isBusy || !recoveryToken) return;
+    const passwordLength = Array.from(newPassword).length;
+    if (!recoveryKey.trim()) {
+      setSubmissionError("Enter your recovery key.");
+      return;
+    }
+    if (passwordLength < MINIMUM_PASSWORD_LENGTH || passwordLength > MAXIMUM_PASSWORD_LENGTH) {
+      setSubmissionError(`Use ${MINIMUM_PASSWORD_LENGTH} to ${MAXIMUM_PASSWORD_LENGTH} characters for the new password.`);
+      return;
+    }
+    if (newPassword !== newPasswordConfirmation) {
+      setSubmissionError("The new passwords do not match.");
+      return;
+    }
+    setSubmitting(true);
+    setSubmissionError(null);
+    try {
+      await onResetPassword(recoveryToken, recoveryKey.trim(), newPassword);
+      setRecoveryKey("");
+      setNewPassword("");
+      setNewPasswordConfirmation("");
+      setRecoveryComplete(true);
+    } catch (caught) {
+      setSubmissionError(caught instanceof Error ? caught.message : "The password could not be reset.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   if (status === "loading" || isLocking) {
     return (
       <main className="transfer-center auth-screen auth-loading-screen theme-dark" aria-labelledby={ids.title}>
@@ -229,6 +296,99 @@ export default function SignInScreen({
                 : "Checking your encrypted vault session…"}
           </p>
           {error && <div className="transfer-error" role="alert"><span aria-hidden="true">!</span>{error}</div>}
+        </section>
+      </main>
+    );
+  }
+
+  if (recoveryToken) {
+    return (
+      <main className="transfer-center auth-screen theme-dark" aria-label="Reset Coffer password">
+        <header className="transfer-heading auth-intro">
+          <div className="auth-intro-copy">
+            <div className="auth-brand"><span className="brand-mark" aria-hidden="true">C</span><span>Coffer</span></div>
+            <p className="auth-tagline">Your codes. Yours alone.</p>
+          </div>
+        </header>
+        <section className="transfer-panel auth-access-panel recovery-access-panel" aria-labelledby={ids.formTitle} aria-busy={isBusy}>
+          <div className="review-head auth-form-heading">
+            <div>
+              <h2 id={ids.formTitle}>Reset vault password</h2>
+              <p>Use the recovery key you saved when account recovery was enabled.</p>
+            </div>
+          </div>
+          {visibleError && <div className="transfer-error" role="alert"><span aria-hidden="true">!</span>{visibleError}</div>}
+          <form className="transfer-form" onSubmit={(event) => void resetPassword(event)} noValidate>
+            <label>
+              <span>Recovery key</span>
+              <input
+                type="text"
+                value={recoveryKey}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
+                disabled={isBusy}
+                onChange={(event) => { setRecoveryKey(event.target.value); setSubmissionError(null); }}
+              />
+            </label>
+            <label>
+              <span>New password</span>
+              <input type="password" value={newPassword} autoComplete="new-password" disabled={isBusy} onChange={(event) => { setNewPassword(event.target.value); setSubmissionError(null); }} />
+              <small>Use {MINIMUM_PASSWORD_LENGTH} to {MAXIMUM_PASSWORD_LENGTH} characters.</small>
+            </label>
+            <label>
+              <span>Confirm new password</span>
+              <input type="password" value={newPasswordConfirmation} autoComplete="new-password" disabled={isBusy} onChange={(event) => { setNewPasswordConfirmation(event.target.value); setSubmissionError(null); }} />
+            </label>
+            <div className="auth-recovery-warning" role="note">
+              <span className="mini-lock" aria-hidden="true" />
+              <div><strong>Your vault data stays encrypted</strong><p>The email link confirms the request. Only your recovery key can unlock the existing vault key.</p></div>
+            </div>
+            <div className="password-change-actions recovery-form-actions">
+              <button type="button" disabled={isBusy} onClick={() => { window.location.href = window.location.pathname; }}>Cancel</button>
+              <button className="transfer-primary" type="submit" disabled={isBusy}>{isBusy ? "Resetting password…" : "Reset password"}</button>
+            </div>
+          </form>
+        </section>
+      </main>
+    );
+  }
+
+  if (forgotPassword) {
+    return (
+      <main className="transfer-center auth-screen theme-dark" aria-label="Forgot Coffer password">
+        <header className="transfer-heading auth-intro">
+          <div className="auth-intro-copy">
+            <div className="auth-brand"><span className="brand-mark" aria-hidden="true">C</span><span>Coffer</span></div>
+            <p className="auth-tagline">Your codes. Yours alone.</p>
+          </div>
+        </header>
+        <section className="transfer-panel auth-access-panel recovery-access-panel" aria-labelledby={ids.formTitle} aria-busy={isBusy}>
+          <div className="review-head auth-form-heading">
+            <div>
+              <h2 id={ids.formTitle}>{recoverySent ? "Check your email" : "Forgot your password?"}</h2>
+              <p>{recoverySent ? "If recovery is configured for this account, a reset link has been sent." : "We will email a time-limited link. You will also need your saved recovery key."}</p>
+            </div>
+          </div>
+          {visibleError && <div className="transfer-error" role="alert"><span aria-hidden="true">!</span>{visibleError}</div>}
+          {recoverySent ? (
+            <div className="recovery-sent-content">
+              <div className="auth-recovery-warning" role="note"><span className="mini-lock" aria-hidden="true" /><div><strong>The email cannot decrypt your vault</strong><p>Keep your recovery key private. Coffer support will never ask you to send it.</p></div></div>
+              {recoveryPreviewUrl && <a className="transfer-primary recovery-preview-link" href={recoveryPreviewUrl}>Open development recovery link</a>}
+              <button className="password-change-toggle" type="button" onClick={() => { setForgotPassword(false); setRecoverySent(false); setRecoveryPreviewUrl(null); }}>Back to sign in</button>
+            </div>
+          ) : (
+            <form className="transfer-form" onSubmit={(event) => void requestRecovery(event)} noValidate>
+              <label htmlFor={ids.email}>
+                <span>Email</span>
+                <input id={ids.email} type="email" value={effectiveEmail} autoComplete="email" disabled={isBusy || Boolean(oidc.identity)} onChange={(event) => { setEmail(event.target.value); setSubmissionError(null); }} />
+              </label>
+              <div className="password-change-actions recovery-form-actions">
+                <button type="button" disabled={isBusy} onClick={() => { setForgotPassword(false); setSubmissionError(null); }}>Back</button>
+                <button className="transfer-primary" type="submit" disabled={isBusy}>{isBusy ? "Sending…" : "Send recovery email"}</button>
+              </div>
+            </form>
+          )}
         </section>
       </main>
     );
@@ -261,6 +421,11 @@ export default function SignInScreen({
             <div className="transfer-error" id={ids.formError} role="alert">
               <span aria-hidden="true">!</span>
               {visibleError}
+            </div>
+          )}
+          {recoveryComplete && (
+            <div className="auth-success-notice" role="status">
+              Password reset complete. Sign in with your new password, then create a new recovery key.
             </div>
           )}
           <a className="transfer-primary oidc-login-button" href="/api/auth/oidc/login">
@@ -358,6 +523,11 @@ export default function SignInScreen({
               {visibleError}
             </div>
           )}
+          {recoveryComplete && (
+            <div className="auth-success-notice" role="status">
+              Password reset complete. Sign in with your new password, then create a new recovery key.
+            </div>
+          )}
 
           <form className="transfer-form" onSubmit={submit} noValidate>
             {isCreateAccount && (
@@ -404,7 +574,7 @@ export default function SignInScreen({
                   clearFieldError("email");
                 }}
               />
-              {isCreateAccount && <small id={ids.emailHint}>Used to identify your vault; Coffer cannot use it to reset your password.</small>}
+              {isCreateAccount && <small id={ids.emailHint}>Used to identify your vault and receive recovery emails if you enable account recovery.</small>}
               {fieldErrors.email && <small className="form-error" id={ids.emailError}>{fieldErrors.email}</small>}
             </label>
 
@@ -429,6 +599,19 @@ export default function SignInScreen({
               {isCreateAccount && <small id={ids.passwordHint}>Use at least {MINIMUM_PASSWORD_LENGTH} characters. A unique, memorable passphrase works well.</small>}
               {fieldErrors.password && <small className="form-error" id={ids.passwordError}>{fieldErrors.password}</small>}
             </label>
+
+            {!isCreateAccount && passwordRecoveryEnabled && (
+              <button
+                className="forgot-password-link"
+                type="button"
+                disabled={isBusy}
+                onClick={() => {
+                  setForgotPassword(true);
+                  setSubmissionError(null);
+                  setFieldErrors({});
+                }}
+              >Forgot password?</button>
+            )}
 
             {isCreateAccount && (
               <label htmlFor={ids.confirmation}>
