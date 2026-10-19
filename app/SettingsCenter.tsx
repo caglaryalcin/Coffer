@@ -1406,7 +1406,6 @@ export default function SettingsCenter({
         <aside className="settings-section-nav" aria-label="Settings sections">
           <div className="settings-section-nav-heading">
             <strong>Settings</strong>
-            <span>On this page</span>
           </div>
           <nav className="settings-section-nav-list">
             {settingsNavigation.map((item) => (
