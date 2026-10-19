@@ -2332,9 +2332,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .title-row-account-actions { gap: 8px; }
   .title-row .subtitle { max-width: 260px; line-height: 1.5; }
   .add-button { width: 46px; min-width: 46px; gap: 0; padding: 0; justify-content: center; font-size: 0; }
-  .add-button span { background: transparent; color: var(--lime); }
+  .add-button span { background: transparent; color: inherit; }
   .add-button .add-button-icon-bg { fill: transparent; }
-  .add-button .add-button-icon-mark { stroke: var(--lime); }
+  .add-button .add-button-icon-mark { stroke: currentColor; }
   .vault-conflict-panel { grid-template-columns: 22px minmax(0, 1fr); margin: 16px 18px 0; }
   .recovery-setup-banner { grid-template-columns: 28px minmax(0, 1fr); margin: 16px 18px 0; }
   .recovery-setup-banner button { width: 100%; grid-column: 1 / -1; }
