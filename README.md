@@ -14,6 +14,9 @@ server. It also supports QR imports, groups, backups, and 2FAS transfers.
 
 ![](https://raw.githubusercontent.com/caglaryalcin/Coffer/refs/heads/main/screenshots/main.gif)
 
+**Mobile Responsive**
+![](https://raw.githubusercontent.com/caglaryalcin/Coffer/refs/heads/main/screenshots/mobile-responsive.png)
+
 ## Features
 
 - Multi-user, browser-encrypted vaults
