@@ -19,6 +19,7 @@ const result = await build({
       export { orderedVisibleGroupNames } from './lib/group-order';
       export { compareVaultConflictVersions } from './lib/vault-conflict';
       export { createAuthProof, createEncryptedVault, createVaultRecovery, recoverVaultPassword, unlockEncryptedVault } from './lib/vault-crypto';
+      export { authorizeVaultExport } from './lib/vault-export';
       export { VaultStore } from './lib/server/vault-store';
       export { prepareSmtpSettingsUpdate, publicSmtpSettings, readSmtpSettings, writeSmtpSettings } from './lib/server/smtp-settings-store';
     `,
@@ -35,6 +36,7 @@ const {
   UNGROUPED_ACCOUNT_GROUP, removeGroupBranchFromAccounts, orderedVisibleGroupNames,
   createEncryptedVault, createVaultRecovery, recoverVaultPassword, unlockEncryptedVault,
   createAuthProof, VaultStore,
+  authorizeVaultExport,
   prepareSmtpSettingsUpdate, publicSmtpSettings, readSmtpSettings, writeSmtpSettings,
 } = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString("base64")}`);
 
@@ -44,6 +46,19 @@ const recoveryPayload = { account: "encrypted", secret: "never-server-readable" 
 const encryptedForRecovery = await createEncryptedVault(recoveryPassword, recoveryPayload, {
   kdf: { memoryKiB: 19_456, iterations: 2, parallelism: 1 },
 });
+await assert.rejects(authorizeVaultExport("", encryptedForRecovery.header, () => true), /Enter your current account password/u);
+await assert.rejects(authorizeVaultExport("wrong account password", encryptedForRecovery.header, () => true), /current password is incorrect/u);
+await assert.rejects(authorizeVaultExport(recoveryPassword, encryptedForRecovery.header, () => false), /session changed/u);
+let exportSessionCurrent = true;
+const assertExportAuthorized = await authorizeVaultExport(recoveryPassword, encryptedForRecovery.header, () => exportSessionCurrent);
+assert.doesNotThrow(assertExportAuthorized);
+exportSessionCurrent = false;
+assert.throws(assertExportAuthorized, /session changed/u, "Locking or changing the session while generating a backup must block its download");
+exportSessionCurrent = true;
+const pendingExportAuthorization = authorizeVaultExport(recoveryPassword, encryptedForRecovery.header, () => exportSessionCurrent);
+exportSessionCurrent = false;
+await assert.rejects(pendingExportAuthorization, /session changed/u, "A session closed during password verification must not authorize an export");
+console.log("PASS: export requires the current account password and a session that stays unlocked through download");
 const recoverySetup = await createVaultRecovery(recoveryPassword, encryptedForRecovery.header);
 assert.match(recoverySetup.recoveryKey, /^(?:[0-9A-HJKMNP-TV-Z]{4}-){7}[0-9A-HJKMNP-TV-Z]{4}$/u);
 const recoveredPassword = await recoverVaultPassword(

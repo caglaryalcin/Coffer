@@ -28,6 +28,7 @@ import VaultConflictPanel from "./VaultConflictPanel";
 import { formatCode, generateAccountCode, generateTotpTestPreview, isTotpExpiring, isValidBase32, normalizeSecret, parseOtpAuthUri, totpWindow, type OtpType, type TotpAlgorithm, type TotpTestPreview } from "../lib/totp";
 import { beginPasswordRecovery, changeVaultPassword, claimLegacyVault, completePasswordRecovery, configureVaultRecovery, deleteVaultAccount, getOidcState, getVaultBootstrap, identifyVault, loginVault, logoutOidc, logoutVault, requestPasswordRecovery, saveVault, setupVault, updateInstanceSettings, VAULT_API_TIMEOUT_MS, VaultApiError, type OidcClientState, type VaultInstanceSettings } from "../lib/vault-api";
 import { createAuthProof, createEncryptedVault, createVaultRecovery, DEFAULT_VAULT_RESUME_AGE_MS, decryptVaultPayload, encryptVaultPayload, recoverVaultPassword, REMEMBERED_VAULT_RESUME_AGE_MS, rotateVaultPassword, unlockVaultHeader, VaultCryptoError, type EncryptedVaultHeader, type VaultPayloadCipher, type VaultRuntime } from "../lib/vault-crypto";
+import { authorizeVaultExport } from "../lib/vault-export";
 import { createEmptyVault, isUngroupedAccountGroup, MAX_ACCOUNT_URLS, MAX_GROUP_CUSTOMIZATIONS, parseAccountUrls, parsePersistedVault, UNGROUPED_ACCOUNT_GROUP, withVaultUpdate, type PersistedVault, type VaultAccount, type VaultGroupColor, type VaultGroupCustomization, type VaultGroupIcon, type VaultMainScreen, type VaultTheme } from "../lib/vault-model";
 import { classifyVaultOutbox, clearVaultOutbox, createVaultOutboxRecord, readVaultOutbox, writeVaultOutbox, type VaultOutboxRecord } from "../lib/vault-outbox";
 import { clearVaultResumeSession, readRememberedVaultResumeHint, readVaultResumeSession, saveVaultResumeSession, touchVaultResumeSession, type VaultResumePersistence } from "../lib/vault-resume";
@@ -2072,6 +2073,25 @@ export default function VaultApp() {
     lockPromiseRef.current = tracked;
     return tracked;
   }, [beginSessionTransition, clearGroupDrag, clearSelectedAccountDrag, resetNewAccountSecretTest]);
+
+  const verifyExportPassword = useCallback(async (password: string) => {
+    const header = bootstrapHeaderRef.current;
+    const runtime = runtimeRef.current;
+    const generation = sessionGenerationRef.current;
+    const epoch = sessionTransitionRef.current.epoch;
+    if (!header || !runtime || !vaultRef.current || sessionTransitionRef.current.phase !== "ready") {
+      throw new Error("Unlock your vault before exporting.");
+    }
+    return authorizeVaultExport(password, header, () => (
+      sessionGenerationRef.current === generation &&
+      sessionTransitionRef.current.epoch === epoch &&
+      sessionTransitionRef.current.phase === "ready" &&
+      bootstrapHeaderRef.current === header &&
+      runtimeRef.current === runtime &&
+      Boolean(vaultRef.current) &&
+      !passwordChangeRef.current
+    ));
+  }, []);
 
   const deleteOwnAccount = useCallback(async (password: string): Promise<void> => {
     if (passwordChangeRef.current) {
@@ -5534,6 +5554,7 @@ export default function VaultApp() {
             onBack={() => setView("all")}
             onImport={importAccounts}
             onNotice={setToast}
+            onVerifyExportPassword={verifyExportPassword}
           />
         ) : view === "settings" ? (
           <SettingsCenter

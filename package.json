@@ -1,6 +1,6 @@
 {
   "name": "coffer-authenticator",
-  "version": "1.16.2",
+  "version": "1.16.3",
   "private": true,
   "license": "GPL-3.0-only",
   "engines": {

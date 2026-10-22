@@ -645,6 +645,9 @@ h1 { margin: 0; font-size: clamp(34px, 4vw, 53px); line-height: .98; letter-spac
 .account-editor-header h2 { margin: 0; font-size: 26px; letter-spacing: -.045em; }
 .account-editor-close { width: 40px; height: 40px; flex: 0 0 40px; display: grid; place-items: center; padding: 0; border: 1px solid #d8dad2; border-radius: 12px; background: white; color: #666b62; font-size: 23px; line-height: 1; cursor: pointer; }
 .account-editor-form { display: grid; gap: 20px; padding: 22px 27px 26px; }
+.export-password-dialog { width: min(480px, calc(100% - 32px)); padding: 0; color: var(--ink); }
+.export-password-dialog::backdrop { background: rgba(24,26,23,.62); backdrop-filter: blur(8px); }
+.export-password-dialog .account-editor-form > p { margin: 0; color: var(--muted); font-size: var(--type-body); line-height: 1.5; }
 .account-editor-icon-row { display: grid; grid-template-columns: 52px minmax(0, 1fr); align-items: center; gap: 14px; padding: 15px; border: 1px solid #e0e2da; border-radius: 16px; background: #f1f2ec; }
 .account-editor-icon-row .service-logo { width: 52px; height: 52px; border-radius: 15px; background-size: 31px 31px !important; }
 .account-editor-code-panel { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, .8fr) 36px; align-items: center; gap: 10px 16px; padding: 15px 17px; border: 1px solid #dfe2d8; border-radius: 16px; background: #f3f5ed; }

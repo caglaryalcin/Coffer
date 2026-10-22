@@ -14,6 +14,7 @@ import { createTwoFasBackup, parseTwoFasBackup } from "../lib/twofas";
 import { createOtpAuthUri } from "../lib/totp";
 import type { VaultColor } from "../lib/vault-model";
 import ServiceLogo, { isServiceBrandId } from "./ServiceLogo";
+import ExportPasswordDialog from "./ExportPasswordDialog";
 
 type ImportSource = "coffer" | "2fas" | "2fauth" | "otpauth";
 type TransferGlyphKind = ImportSource | "upload" | "warning";
@@ -39,6 +40,7 @@ type TransferCenterProps = {
   onBack: () => void;
   onImport: (decisions: ImportDecision[]) => void;
   onNotice: (message: string) => void;
+  onVerifyExportPassword: (password: string) => Promise<() => void>;
 };
 
 const sourceCopy: Record<ImportSource, { title: string; description: string; badge?: string }> = {
@@ -179,7 +181,7 @@ function exportDate() {
   return new Date().toISOString().slice(0, 10);
 }
 
-export default function TransferCenter({ accounts, locked, onBack, onImport, onNotice }: TransferCenterProps) {
+export default function TransferCenter({ accounts, locked, onBack, onImport, onNotice, onVerifyExportPassword }: TransferCenterProps) {
   const [tab, setTab] = useState<"import" | "export">("import");
   const [source, setSource] = useState<ImportSource>("coffer");
   const [fileName, setFileName] = useState("");
@@ -201,12 +203,16 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
   const [busy, setBusy] = useState(false);
   const [exporting, setExporting] = useState<"coffer" | "2fas" | null>(null);
   const [error, setError] = useState("");
+  const [pendingExport, setPendingExport] = useState<"coffer" | "2fas" | "plaintext" | null>(null);
+  const exportOperationRevision = useRef(0);
   const fileInput = useRef<HTMLInputElement>(null);
   const cofferExportButtonRef = useRef<HTMLButtonElement>(null);
   const unprotectedBackupBackRef = useRef<HTMLButtonElement>(null);
   const restoreCofferExportFocusRef = useRef(false);
   const fileReadRevision = useRef(0);
   const importOperationRevision = useRef(0);
+
+  useEffect(() => () => { exportOperationRevision.current += 1; }, []);
 
   useEffect(() => {
     if (unprotectedBackupConfirm) {
@@ -389,9 +395,10 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
     setUnprotectedBackupConfirm(false);
     setTwoFasExportPassword("");
     setTwoFasExportPasswordConfirm("");
+    setPendingExport(null);
   };
 
-  const createCofferExport = async (unprotectedConfirmed = false) => {
+  const createCofferExport = async (unprotectedConfirmed = false, assertAuthorized?: () => void) => {
     setError("");
     if (locked) { setError("Unlock your vault before creating a backup."); return; }
     const passwordProtected = exportPassword.length > 0 || exportPasswordConfirm.length > 0;
@@ -402,6 +409,7 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
       setUnprotectedBackupConfirm(true);
       return;
     }
+    if (!assertAuthorized) { setPendingExport("coffer"); return; }
     const password = exportPassword;
     setBusy(true);
     setExporting("coffer");
@@ -409,13 +417,12 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
       const backup = passwordProtected
         ? await createEncryptedBackup(portableAccounts, password)
         : createPlainBackup(portableAccounts);
+      assertAuthorized();
       downloadText(backup, `coffer-backup-${exportDate()}.coffer`, "application/vnd.coffer.backup+json");
       onNotice(passwordProtected ? "Password-protected Coffer backup downloaded." : "Unprotected Coffer backup downloaded.");
-    } catch {
-      setError("We could not create the Coffer backup.");
-    } finally {
       setExportPassword("");
       setExportPasswordConfirm("");
+    } finally {
       restoreCofferExportFocusRef.current = true;
       setUnprotectedBackupConfirm(false);
       setExporting(null);
@@ -423,34 +430,35 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
     }
   };
 
-  const createTwoFasExport = async () => {
+  const createTwoFasExport = async (assertAuthorized?: () => void) => {
     setError("");
     if (locked) { setError("Unlock your vault before creating a backup."); return; }
     if (twoFasExportPassword.length < 12) { setError("Use a 2FAS backup passphrase with at least 12 characters."); return; }
     if (!/^[\x20-\x7e]+$/u.test(twoFasExportPassword)) { setError("Use only printable ASCII characters in the 2FAS passphrase for iOS and Android compatibility."); return; }
     if (twoFasExportPassword !== twoFasExportPasswordConfirm) { setError("2FAS backup passphrases do not match."); return; }
+    if (!assertAuthorized) { setPendingExport("2fas"); return; }
     const password = twoFasExportPassword;
     const activeAccounts = portableAccounts.filter((account) => !account.archived);
     setBusy(true);
     setExporting("2fas");
     try {
       const backup = await createTwoFasBackup(activeAccounts, password);
+      assertAuthorized();
       downloadText(backup, `coffer-2fas-${exportDate()}.2fas`, "application/json");
       onNotice("Password-protected 2FAS backup downloaded.");
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "We could not create the 2FAS mobile backup.");
-    } finally {
       setTwoFasExportPassword("");
       setTwoFasExportPasswordConfirm("");
+    } finally {
       setExporting(null);
       setBusy(false);
     }
   };
 
-  const exportPlaintext = () => {
+  const exportPlaintext = (assertAuthorized?: () => void) => {
     setError("");
     if (locked) { setError("Unlock your vault before exporting readable secrets."); return; }
     if (!plainAcknowledged) { setError("Confirm that you understand this file contains unencrypted secrets."); return; }
+    if (!assertAuthorized) { setPendingExport("plaintext"); return; }
     const activeAccounts = portableAccounts.filter((account) => !account.archived);
     if (plainFormat === "otp") {
       const links = activeAccounts.map((account) => createOtpAuthUri({
@@ -463,13 +471,34 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
         digits: account.digits ?? 6,
         period: account.period ?? 30,
       })).join("\n");
+      assertAuthorized();
       downloadText(`${links}\n`, `coffer-otpauth-${exportDate()}.txt`, "text/plain;charset=utf-8");
     } else {
-      downloadText(createPlainBackup(portableAccounts), `coffer-readable-${exportDate()}.json`, "application/json");
+      const backup = createPlainBackup(portableAccounts);
+      assertAuthorized();
+      downloadText(backup, `coffer-readable-${exportDate()}.json`, "application/json");
     }
     setPlainConfirm(false);
     setPlainAcknowledged(false);
     onNotice("Unencrypted export downloaded.");
+  };
+
+  const confirmExport = async (password: string) => {
+    const revision = exportOperationRevision.current;
+    setBusy(true);
+    try {
+      const assertSessionAuthorized = await onVerifyExportPassword(password);
+      const assertAuthorized = () => {
+        assertSessionAuthorized();
+        if (exportOperationRevision.current !== revision) throw new Error("The export was cancelled.");
+      };
+      assertAuthorized();
+      if (pendingExport === "coffer") await createCofferExport(true, assertAuthorized);
+      else if (pendingExport === "2fas") await createTwoFasExport(assertAuthorized);
+      else if (pendingExport === "plaintext") exportPlaintext(assertAuthorized);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -600,11 +629,12 @@ export default function TransferCenter({ accounts, locked, onBack, onImport, onN
                 <label htmlFor="plain-json" aria-label="Plain Coffer JSON"><input id="plain-json" type="radio" name="plain-format" checked={plainFormat === "json"} onChange={() => setPlainFormat("json")} /><span><strong>Plain Coffer JSON</strong><small>Readable complete backup · .json</small></span></label>
               </div>
               <label className="danger-check"><input type="checkbox" checked={plainAcknowledged} onChange={(event) => setPlainAcknowledged(event.target.checked)} /><span>I understand this file contains unencrypted authentication secrets.</span></label>
-              {plainConfirm ? <div className="final-confirm" role="alertdialog" aria-labelledby="plaintext-confirm-title"><div><strong id="plaintext-confirm-title">Export readable secrets?</strong><span>This cannot be undone after the file is downloaded.</span></div><button onClick={() => setPlainConfirm(false)}>Go back</button><button onClick={exportPlaintext}>Export anyway</button></div> : <div className="danger-actions"><button onClick={() => { if (!plainAcknowledged) setError("Confirm that you understand this file contains unencrypted secrets."); else setPlainConfirm(true); }} disabled={!plainAcknowledged}>Export unencrypted file</button></div>}
+              {plainConfirm ? <div className="final-confirm" role="alertdialog" aria-labelledby="plaintext-confirm-title"><div><strong id="plaintext-confirm-title">Export readable secrets?</strong><span>This cannot be undone after the file is downloaded.</span></div><button onClick={() => setPlainConfirm(false)}>Go back</button><button onClick={() => exportPlaintext()}>Export anyway</button></div> : <div className="danger-actions"><button onClick={() => { if (!plainAcknowledged) setError("Confirm that you understand this file contains unencrypted secrets."); else setPlainConfirm(true); }} disabled={!plainAcknowledged}>Export unencrypted file</button></div>}
             </div>}
           </section>
         </div>
       )}
+      {pendingExport && <ExportPasswordDialog onConfirm={confirmExport} onClose={() => setPendingExport(null)} />}
     </section>
   );
 }
