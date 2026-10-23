@@ -42,19 +42,47 @@ server. It also supports QR imports, groups, backups, and 2FAS transfers.
 ![](https://raw.githubusercontent.com/caglaryalcin/Coffer/refs/heads/main/screenshots/light-dark.png)
 
 ## Docker
-- Docker Hub: `caglaryalcin/coffer`
-- GitHub Container Registry: `ghcr.io/caglaryalcin/coffer`
+
+GitHub Actions publishes the same **AMD64 and ARM64** image and tags to both
+registries:
+
+| Registry | Image |
+| --- | --- |
+| GitHub Container Registry (GHCR) | `ghcr.io/caglaryalcin/coffer:latest` |
+| Docker Hub | `caglaryalcin/coffer:latest` |
+
+Choose one of the following commands. Both use the same persistent `coffer-data`
+volume.
+
+From GitHub Container Registry:
 
 ```bash
 docker volume create coffer-data
-docker run -d --name coffer --init --restart unless-stopped -p 3000:3000 -v coffer-data:/app/data caglaryalcin/coffer
+docker run -d --name coffer --init --restart unless-stopped -p 3000:3000 -v coffer-data:/app/data ghcr.io/caglaryalcin/coffer:latest
 ```
 
-To use GitHub Container Registry, replace the image with
-`ghcr.io/caglaryalcin/coffer`.
+From Docker Hub:
+
+```bash
+docker volume create coffer-data
+docker run -d --name coffer --init --restart unless-stopped -p 3000:3000 -v coffer-data:/app/data caglaryalcin/coffer:latest
+```
 
 Open [http://localhost:3000](http://localhost:3000). The `coffer-data` volume
 keeps encrypted vault data across container restarts and replacements.
+
+| Release | Image tags in both registries |
+| --- | --- |
+| For example, `v1.16.3` | `v1.16.3`, `1.16.3`, `1.16`, `1`, `latest` |
+
+Images are published when a GitHub Release is published or when the container
+publishing workflow is run manually for an existing stable release tag. Pushes
+to `main` do not publish images. To pin a version, replace `:latest` with a
+specific tag, such as `:1.16.3`, in either command.
+
+The included `docker-compose.yml` builds locally. To use a prebuilt image,
+replace `services.app.build` with `image: ghcr.io/caglaryalcin/coffer:latest` or
+`image: caglaryalcin/coffer:latest`, then run `docker compose up -d`.
 
 ## Environment variables
 
