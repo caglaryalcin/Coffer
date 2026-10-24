@@ -9,6 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { bg } from "./bg-translations";
 
 export const COFFER_LANGUAGE_STORAGE_KEY = "coffer:language:v1";
 
@@ -16,6 +17,7 @@ export const languages = [
   { code: "en", label: "English", nativeLabel: "English", flag: "🇬🇧" },
   { code: "tr", label: "Turkish", nativeLabel: "Türkçe", flag: "🇹🇷" },
   { code: "de", label: "German", nativeLabel: "Deutsch", flag: "🇩🇪" },
+  { code: "bg", label: "Bulgarian", nativeLabel: "Български", flag: "🇧🇬" },
 ] as const;
 
 export type CofferLanguage = (typeof languages)[number]["code"];
@@ -1299,6 +1301,7 @@ const exactDictionaries: Record<CofferLanguage, TranslationDictionary> = {
   en: {},
   tr,
   de,
+  bg,
 };
 
 const trPatterns: TranslationPattern[] = [
@@ -1413,10 +1416,67 @@ const dePatterns: TranslationPattern[] = [
   { pattern: /^v(.+) available!$/u, replace: (version) => `v${version} verfügbar!` },
 ];
 
+const bgPatterns: TranslationPattern[] = [
+  { pattern: /^Test email sent to (.+)\.$/u, replace: (email) => `Тестовият имейл е изпратен до ${email}.` },
+  { pattern: /^(\d+) selected$/u, replace: (count) => `${count} избран${count === "1" ? "" : "и"}` },
+  { pattern: /^(\d+) visible$/u, replace: (count) => `${count} видим${count === "1" ? "" : "и"}` },
+  { pattern: /^(\d+) archived$/u, replace: (count) => `${count} архивиран${count === "1" ? "" : "и"}` },
+  { pattern: /^(\d+) accounts?$/u, replace: (count) => `${count} акаунт${count === "1" ? "" : "а"}` },
+  { pattern: /^(\d+) new$/u, replace: (count) => `${count} нов${count === "1" ? "" : "и"}` },
+  { pattern: /^(\d+) duplicates$/u, replace: (count) => `${count} дубликата` },
+  { pattern: /^(\d+) need attention$/u, replace: (count) => `${count} изисква${count === "1" ? "" : "т"} внимание` },
+  { pattern: /^After (\d+) minute$/u, replace: (count) => `След ${count} минута` },
+  { pattern: /^After (\d+) minutes$/u, replace: (count) => `След ${count} минути` },
+  { pattern: /^(\d+) digits$/u, replace: (count) => `${count} цифри` },
+  { pattern: /^(\d+) seconds$/u, replace: (count) => `${count} секунди` },
+  { pattern: /^Use (\d+) to (\d+) characters\.$/u, replace: (min, max) => `Използвайте от ${min} до ${max} знака.` },
+  { pattern: /^Use at least (\d+) characters\.$/u, replace: (count) => `Използвайте поне ${count} знака.` },
+  { pattern: /^Use (\d+) characters or fewer\.$/u, replace: (count) => `Използвайте най-много ${count} знака.` },
+  { pattern: /^Use a new password with at least (\d+) characters\.$/u, replace: (count) => `Използвайте нова парола с поне ${count} знака.` },
+  { pattern: /^Use a backup passphrase with at least (\d+) characters\.$/u, replace: (count) => `Използвайте парола за резервното копие с поне ${count} знака.` },
+  { pattern: /^Enter (.+) to confirm$/u, replace: (value) => `Въведете ${value} за потвърждение` },
+  { pattern: /^Import (\d+) accounts?$/u, replace: (count) => `Импортиране на ${count} акаунт${count === "1" ? "" : "а"}?` },
+  { pattern: /^Apply to (\d+)$/u, replace: (count) => `Прилагане към ${count}` },
+  { pattern: /^Add to (\d+)$/u, replace: (count) => `Добавяне към ${count}` },
+  { pattern: /^Website URL (\d+)$/u, replace: (count) => `URL адрес на уебсайт ${count}` },
+  { pattern: /^Remove website URL (\d+)$/u, replace: (count) => `Премахване на URL адрес на уебсайт ${count}` },
+  { pattern: /^Existing URLs are kept for all (\d+) selected accounts?\.$/u, replace: (count) => `Съществуващите URL адреси се запазват за ${count} избран${count === "1" ? " акаунт" : "и акаунта"}.` },
+  { pattern: /^Apply one logo choice to (\d+) selected accounts?\.$/u, replace: (count) => `Прилагане на едно лого към ${count} избран${count === "1" ? " акаунт" : "и акаунта"}.` },
+  { pattern: /^(\d+) matching local logos?\. Choose one below\.$/u, replace: (count) => `${count} съвпадащ${count === "1" ? "о локално лого" : "и локални лога"}. Изберете едно по-долу.` },
+  { pattern: /^(.+) selected from Coffer's local catalog\.$/u, replace: (label) => `${label} е избрано от локалния каталог на Coffer.` },
+  { pattern: /^Import action for (.+)$/u, replace: (label) => `Действие при импортиране за ${label}` },
+  { pattern: /^Coffer version (.+)$/u, replace: (version) => `Версия на Coffer ${version}` },
+  { pattern: /^Search logos for (.+)$/u, replace: (service) => `Търсене на лога за ${service}` },
+  { pattern: /^Open (.+) group options$/u, replace: (name) => `Отваряне на опциите за групата ${name}` },
+  { pattern: /^Open (.+) options$/u, replace: (name) => `Отваряне на опциите за ${name}` },
+  { pattern: /^Copy (.+) code when ready$/u, replace: (name) => `Копиране на кода за ${name}, когато е готов` },
+  { pattern: /^Current code (.+)$/u, replace: (code) => `Текущ код ${code}` },
+  { pattern: /^Next code (.+)$/u, replace: (code) => `Следващ код ${code}` },
+  { pattern: /^Draft code (.+)$/u, replace: (code) => `Чернови код ${code}` },
+  { pattern: /^(.+) account was imported\.$/u, replace: (count) => `${count} акаунт е импортиран.` },
+  { pattern: /^(.+) accounts were imported\.$/u, replace: (count) => `${count} акаунта са импортирани.` },
+  { pattern: /^(.+) entry was skipped\./u, replace: (count) => `${count} запис е пропуснат.` },
+  { pattern: /^(.+) entries were skipped\./u, replace: (count) => `${count} записа са пропуснати.` },
+  { pattern: /^(.+) group created\.$/u, replace: (name) => `Групата ${name} е създадена.` },
+  { pattern: /^(.+) group created\. (\d+) accounts? moved to (.+)\.$/u, replace: (name, count, group) => `Групата ${name} е създадена. ${count} акаунт${count === "1" ? " е преместен" : "а са преместени"} в ${group}.` },
+  { pattern: /^(.+) appearance updated\.$/u, replace: (name) => `Външният вид на ${name} е обновен.` },
+  { pattern: /^(.+) updated to (.+)\.$/u, replace: (previous, next) => `${previous} е променено на ${next}.` },
+  { pattern: /^(.+) group deleted\.$/u, replace: (name) => `Групата ${name} е изтрита.` },
+  { pattern: /^(.+) group deleted\. (\d+) accounts? moved to All Cards\.$/u, replace: (name, count) => `Групата ${name} е изтрита. ${count} акаунт${count === "1" ? " е преместен" : "а са преместени"} във „Всички карти“.` },
+  { pattern: /^(.+) group moved\.$/u, replace: (name) => `Групата ${name} е преместена.` },
+  { pattern: /^(.+) code copied\.$/u, replace: (name) => `Кодът за ${name} е копиран.` },
+  { pattern: /^(.+) restored to All Cards\.$/u, replace: (name) => `${name} е възстановен във „Всички карти“.` },
+  { pattern: /^(\d+) accounts? moved to All Cards\.$/u, replace: (count) => `${count} акаунт${count === "1" ? " е преместен" : "а са преместени"} във „Всички карти“.` },
+  { pattern: /^(.+) moved to Archive\.$/u, replace: (name) => `${name} е преместен в архива.` },
+  { pattern: /^(.+) updated in the encrypted vault\.$/u, replace: (name) => `${name} е обновен в криптираното хранилище.` },
+  { pattern: /^v(.+) available!$/u, replace: (version) => `Налична е v${version}!` },
+];
+
 const patterns: Record<CofferLanguage, TranslationPattern[]> = {
   en: [],
   tr: trPatterns,
   de: dePatterns,
+  bg: bgPatterns,
 };
 
 const translatedAttributes = [

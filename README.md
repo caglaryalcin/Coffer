@@ -37,6 +37,7 @@ server. It also supports QR imports, groups, backups, and 2FAS transfers.
 
 ![](https://raw.githubusercontent.com/caglaryalcin/Coffer/refs/heads/main/screenshots/import.png)
   
+- English, Turkish, German, and Bulgarian interfaces (Settings → Language)
 - Responsive light and dark interfaces
 
 ![](https://raw.githubusercontent.com/caglaryalcin/Coffer/refs/heads/main/screenshots/light-dark.png)
@@ -73,12 +74,12 @@ keeps encrypted vault data across container restarts and replacements.
 
 | Release | Image tags in both registries |
 | --- | --- |
-| For example, `v1.16.3` | `v1.16.3`, `1.16.3`, `1.16`, `1`, `latest` |
+| For example, `v1.17.0` | `v1.17.0`, `1.17.0`, `1.17`, `1`, `latest` |
 
 Images are published when a GitHub Release is published or when the container
 publishing workflow is run manually for an existing stable release tag. Pushes
 to `main` do not publish images. To pin a version, replace `:latest` with a
-specific tag, such as `:1.16.3`, in either command.
+specific tag, such as `:1.17.0`, in either command.
 
 The included `docker-compose.yml` builds locally. To use a prebuilt image,
 replace `services.app.build` with `image: ghcr.io/caglaryalcin/coffer:latest` or

@@ -252,6 +252,13 @@ function LanguageFlagIcon({ language }: { language: CofferLanguage }) {
             <rect y="10.66" width="24" height="5.34" fill="#ffce00" />
           </>
         )}
+        {language === "bg" && (
+          <>
+            <rect width="24" height="5.34" fill="#fff" />
+            <rect y="5.33" width="24" height="5.34" fill="#00966e" />
+            <rect y="10.66" width="24" height="5.34" fill="#d62612" />
+          </>
+        )}
       </g>
       <rect x=".35" y=".35" width="23.3" height="15.3" rx="2.2" fill="none" stroke="currentColor" strokeOpacity=".18" strokeWidth=".7" />
     </svg>
