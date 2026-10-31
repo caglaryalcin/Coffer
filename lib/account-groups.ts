@@ -1,10 +1,5 @@
+import { GROUP_PATH_SEPARATOR, normalizedGroupKey } from "./group-names";
 import { UNGROUPED_ACCOUNT_GROUP } from "./vault-model";
-
-const GROUP_PATH_SEPARATOR = " / ";
-
-function normalizedGroupKey(value: string) {
-  return value.trim().replace(/\s+/gu, " ").normalize("NFKC").toLocaleLowerCase("en");
-}
 
 export function accountGroupIsInBranch(candidate: string, branchRoot: string) {
   const candidateKey = normalizedGroupKey(candidate);

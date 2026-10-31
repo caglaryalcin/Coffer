@@ -1,3 +1,4 @@
+import { normalizedGroupKey as orderedGroupKey } from "./group-names";
 import { parseBase32Secret, validateOtpSettings, type OtpType, type OtpDigits, type TotpAlgorithm } from "./totp";
 
 export const VAULT_PAYLOAD_FORMAT = "coffer-vault" as const;
@@ -24,7 +25,7 @@ export type VaultColor = "ink" | "orange" | "blue" | "violet" | "green";
 export type VaultTheme = "dark" | "light";
 
 export function isUngroupedAccountGroup(value: string) {
-  return value.trim().replace(/\s+/gu, " ").normalize("NFKC").toLocaleLowerCase("en") === "all";
+  return orderedGroupKey(value) === "all";
 }
 export type VaultGroupIcon =
   | "dot"
@@ -583,10 +584,6 @@ function parseAccount(value: unknown, index: number, version: SupportedVaultPayl
 
 function normalizedGroupName(value: string) {
   return value.normalize("NFKC").toLowerCase();
-}
-
-function orderedGroupKey(value: string) {
-  return value.trim().replace(/\s+/gu, " ").normalize("NFKC").toLocaleLowerCase("en");
 }
 
 function parseGroupCustomizations(value: unknown): VaultGroupCustomization[] {

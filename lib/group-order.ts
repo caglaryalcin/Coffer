@@ -1,14 +1,7 @@
+import { normalizedGroupKey } from "./group-names";
 import { isUngroupedAccountGroup, type VaultAccount, type VaultGroupCustomization } from "./vault-model";
 
 export type GroupDropEdge = "before" | "after";
-
-function normalizedGroupKey(value: string) {
-  return value
-    .normalize("NFKC")
-    .trim()
-    .replace(/\s+/gu, " ")
-    .toLocaleLowerCase("en");
-}
 
 export function orderedVisibleGroupNames(
   accounts: readonly Pick<VaultAccount, "group" | "archived">[],

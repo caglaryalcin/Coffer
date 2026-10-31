@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useState, type FormEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { normalizeGroupName } from "../lib/group-names";
 import { isUngroupedAccountGroup, UNGROUPED_ACCOUNT_GROUP } from "../lib/vault-model";
 
 export type BulkGroupActionsProps = {
@@ -41,10 +42,6 @@ export type ArchiveBulkActionsProps = {
   onRestore: () => boolean | void;
   onDelete: () => boolean | void;
 };
-
-export function normalizeGroupName(value: string) {
-  return value.trim().replace(/\s+/g, " ");
-}
 
 export function mouseIsOutsideAccountCodeRow(event: ReactMouseEvent<HTMLElement>) {
   const card = event.currentTarget.closest(".account-card");
